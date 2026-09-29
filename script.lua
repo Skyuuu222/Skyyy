@@ -832,7 +832,7 @@ local function apply_korblox(targetName, assetId, yOffset)
     if not originalJoint then return false, "Joint 'Right Hip' tidak ditemukan" end
 
     local cleanId = tostring(assetId or "139607718"):match("%d+")
-    local offsetVal = tonumber(yOffset) or 0.7
+    local offsetVal = tonumber(yOffset) or 0.6
     local okLoad, objects = pcall(function()
         return game:GetObjects("rbxassetid://" .. cleanId)
     end)
@@ -1589,7 +1589,7 @@ SecAcc:Button({
 local SecBody = TabMod:Section({})
 SecBody:Header({ Name = WMacLib:Gradient("Korblox & Headless", Color3.fromRGB(255, 120, 70), Color3.fromRGB(255, 70, 100)) })
 
-local korblox_offset = 0.7
+local korblox_offset = 0.6
 
 SecBody:Input({
     Name = "Target di Server",
@@ -1601,10 +1601,10 @@ SecBody:Input({
 
 SecBody:Input({
     Name = "Korblox Y Offset",
-    Default = "0.7",
-    Placeholder = "Default: 0.7 (sesuai contoh pas)",
-    Callback = function(text) korblox_offset = tonumber(text) or 0.7 end,
-    onChanged = function(text) korblox_offset = tonumber(text) or 0.7 end,
+    Default = "0.6",
+    Placeholder = "Default: 0.6 (bisa disesuaikan)",
+    Callback = function(text) korblox_offset = tonumber(text) or 0.6 end,
+    onChanged = function(text) korblox_offset = tonumber(text) or 0.6 end,
 })
 
 SecBody:Button({
