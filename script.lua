@@ -1045,7 +1045,7 @@ local TabConfig = tabGroup:Tab({ Name = "Pengaturan", Image = "lucide/settings" 
 
 -- SEKSI 1: PENAMPILAN & TEMA
 local SecTheme = TabConfig:Section({})
-SecTheme:Header({ Name = WMacLib:Gradient("Penampilan (Appearance)", Color3.fromRGB(150, 100, 255), Color3.fromRGB(240, 100, 200)) })
+SecTheme:Header({ Name = "Penampilan (Appearance)" })
 
 SecTheme:Dropdown({
     Name = "Pilihan Tema (Color Themes)",
@@ -1074,11 +1074,228 @@ SecTheme:Toggle({
     end
 })
 
--- SEKSI 2: BACKGROUND
-local SecBg = TabConfig:Section({})
-SecBg:Header({ Name = WMacLib:Gradient("Background & Window", Color3.fromRGB(70, 180, 255), Color3.fromRGB(100, 240, 180)) })
+-- Toggle warna header: gradient warna-warni vs putih/hitam polos
+local headerColorMode = "gradient" -- "gradient" | "white" | "black"
 
--- Watermark & FPS (gunakan Heartbeat agar tidak freeze)
+local function applyHeaderColor(mode)
+    -- Cari semua TextLabel di dalam WMacLib ScreenGui
+    pcall(function()
+        for _, sg in ipairs(CoreGui:GetChildren()) do
+            if sg:IsA("ScreenGui") then
+                for _, obj in ipairs(sg:GetDescendants()) do
+                    if obj:IsA("TextLabel") then
+                        -- Hapus UIGradient jika ada
+                        local grad = obj:FindFirstChildOfClass("UIGradient")
+                        if mode == "white" then
+                            if grad then grad.Enabled = false end
+                            obj.TextColor3 = Color3.fromRGB(255, 255, 255)
+                        elseif mode == "black" then
+                            if grad then grad.Enabled = false end
+                            obj.TextColor3 = Color3.fromRGB(0, 0, 0)
+                        else -- gradient
+                            if grad then grad.Enabled = true end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
+SecTheme:Dropdown({
+    Name = "Warna Teks Header",
+    Options = { "Gradient (Warna-warni)", "Putih Polos", "Hitam Polos" },
+    Default = "Gradient (Warna-warni)",
+    Callback = function(choice)
+        if choice == "Putih Polos" then
+            headerColorMode = "white"
+        elseif choice == "Hitam Polos" then
+            headerColorMode = "black"
+        else
+            headerColorMode = "gradient"
+        end
+        applyHeaderColor(headerColorMode)
+        Window:Notify({ Title = "Teks Header", Description = "Warna teks: " .. choice, Lifetime = 3 })
+    end
+})
+
+-- ==============================================================================
+-- SEKSI 2: BACKGROUND KUSTOM
+-- ==============================================================================
+local SecBg = TabConfig:Section({})
+SecBg:Header({ Name = "Background Kustom" })
+
+-- Variabel state background
+local bgImageLabel = nil
+local bgImagePath = ""
+local bgOpacity = 1
+local bgBlurInst = nil
+
+-- Fungsi helper: cari frame utama window WMacLib
+local function findMainFrame()
+    for _, sg in ipairs(CoreGui:GetChildren()) do
+        if sg:IsA("ScreenGui") then
+            -- Cari frame terbesar / utama
+            for _, child in ipairs(sg:GetChildren()) do
+                if child:IsA("Frame") then
+                    return child, sg
+                end
+            end
+        end
+    end
+    return nil, nil
+end
+
+-- Fungsi: terapkan gambar background ke window
+local function applyBackground(contentId)
+    pcall(function()
+        local mainFrame, parentSG = findMainFrame()
+        if not mainFrame then return end
+
+        -- Hapus background lama jika ada
+        if bgImageLabel and bgImageLabel.Parent then
+            bgImageLabel:Destroy()
+        end
+
+        -- Buat ImageLabel baru di belakang semua konten
+        bgImageLabel = Instance.new("ImageLabel")
+        bgImageLabel.Name = "SkyHubBackground"
+        bgImageLabel.Size = UDim2.fromScale(1, 1)
+        bgImageLabel.Position = UDim2.fromScale(0, 0)
+        bgImageLabel.BackgroundTransparency = 1
+        bgImageLabel.Image = contentId
+        bgImageLabel.ImageTransparency = 1 - bgOpacity
+        bgImageLabel.ScaleType = Enum.ScaleType.Crop
+        bgImageLabel.ZIndex = mainFrame.ZIndex -- Tepat di belakang konten
+        bgImageLabel.Parent = mainFrame
+
+        -- Pastikan ada di layer paling bawah
+        bgImageLabel.ZIndex = 1
+        for _, child in ipairs(mainFrame:GetChildren()) do
+            if child ~= bgImageLabel and child.ZIndex <= 1 then
+                child.ZIndex = 2
+            end
+        end
+    end)
+end
+
+-- Fungsi: muat background dari path file lokal
+local function loadLocalBackground(filePath)
+    if not filePath or filePath == "" then return false, "Path kosong" end
+
+    -- Coba getcustomasset (Synapse X, KRNL, dll)
+    local ok, result = pcall(function()
+        if getcustomasset then
+            return getcustomasset(filePath)
+        elseif syn and syn.getcustomasset then
+            return syn.getcustomasset(filePath)
+        end
+        return nil
+    end)
+
+    if ok and result and result ~= "" then
+        applyBackground(result)
+        return true, "Background dari file: " .. filePath
+    end
+    return false, "getcustomasset tidak didukung executor ini. Gunakan Asset ID."
+end
+
+-- Input: path file lokal (misal: C:\Users\...\gambar.png atau nama file di workspace executor)
+SecBg:Input({
+    Name = "Path File Gambar (Lokal)",
+    Default = "",
+    Placeholder = "Contoh: background.png atau C:\\Users\\...\\img.jpg",
+    Callback = function(text)
+        bgImagePath = text
+        task.spawn(function()
+            local ok, msg = loadLocalBackground(text)
+            Window:Notify({
+                Title = ok and "Background Terpasang!" or "Gagal!",
+                Description = msg,
+                Lifetime = 4
+            })
+        end)
+    end
+})
+
+-- Input: Roblox Asset ID (fallback jika file lokal tidak bisa)
+SecBg:Input({
+    Name = "Roblox Decal / Asset ID (Alternatif)",
+    Default = "",
+    Placeholder = "Contoh: 6031371750",
+    AcceptedCharacters = "Numeric",
+    Callback = function(text)
+        if text == "" then return end
+        local contentId = "rbxassetid://" .. text
+        applyBackground(contentId)
+        Window:Notify({ Title = "Background", Description = "Background Asset ID: " .. text, Lifetime = 3 })
+    end
+})
+
+-- Slider: Opacity background
+SecBg:Slider({
+    Name = "Opacity Background",
+    Default = 100,
+    Minimum = 0,
+    Maximum = 100,
+    DisplayMethod = "Percent",
+    Precision = 0,
+    Callback = function(value)
+        bgOpacity = value / 100
+        pcall(function()
+            if bgImageLabel and bgImageLabel.Parent then
+                bgImageLabel.ImageTransparency = 1 - bgOpacity
+            end
+        end)
+    end
+})
+
+-- Slider: Blur efek background (menggunakan BlurEffect di Lighting)
+SecBg:Slider({
+    Name = "Blur Background",
+    Default = 0,
+    Minimum = 0,
+    Maximum = 56,
+    DisplayMethod = "Round",
+    Precision = 0,
+    Callback = function(value)
+        pcall(function()
+            -- Blur pada ImageLabel background menggunakan UIBlur (bila tersedia) atau Lighting blur
+            if not bgBlurInst then
+                bgBlurInst = Instance.new("BlurEffect")
+                bgBlurInst.Name = "SkyHubBgBlur"
+                bgBlurInst.Parent = game:GetService("Lighting")
+            end
+            bgBlurInst.Size = value
+        end)
+    end
+})
+
+-- Tombol: Hapus background
+SecBg:Button({
+    Name = "Hapus Background",
+    Callback = function()
+        pcall(function()
+            if bgImageLabel and bgImageLabel.Parent then
+                bgImageLabel:Destroy()
+                bgImageLabel = nil
+            end
+            if bgBlurInst and bgBlurInst.Parent then
+                bgBlurInst:Destroy()
+                bgBlurInst = nil
+            end
+        end)
+        Window:Notify({ Title = "Background", Description = "Background dihapus.", Lifetime = 3 })
+    end
+})
+
+-- ==============================================================================
+-- SEKSI 3: WATERMARK & WINDOW
+-- ==============================================================================
+local SecWin = TabConfig:Section({})
+SecWin:Header({ Name = "Jendela & Kontrol" })
+
+-- Watermark & FPS
 local watermark = WMacLib:Watermark({ Name = "Sky Hub", Version = "v1.0.0" })
 watermark:SetVisible(false)
 
@@ -1095,111 +1312,13 @@ RunService.Heartbeat:Connect(function(dt)
     end
 end)
 
-SecBg:Toggle({
+SecWin:Toggle({
     Name = "Logo Watermark & FPS Overlay",
     Default = false,
     Callback = function(value)
         watermark:SetVisible(value)
     end
 })
-
--- Window Opacity (transparan seluruh window)
-SecBg:Slider({
-    Name = "Window Opacity (Transparansi Jendela)",
-    Default = 100,
-    Minimum = 10,
-    Maximum = 100,
-    DisplayMethod = "Percent",
-    Precision = 0,
-    Callback = function(value)
-        local opacity = value / 100
-        pcall(function()
-            -- Cari frame utama window dan atur GroupTransparency
-            local gui = CoreGui:FindFirstChild("WMacLib") or CoreGui:FindFirstChild("Sky Hub")
-            if gui then
-                for _, obj in ipairs(gui:GetDescendants()) do
-                    if obj:IsA("Frame") and obj.Name == "Main" then
-                        obj.BackgroundTransparency = 1 - opacity
-                    end
-                end
-            end
-            -- Cara alternatif: cari ScreenGui dan set property
-            for _, sg in ipairs(CoreGui:GetChildren()) do
-                if sg:IsA("ScreenGui") then
-                    local mainFrame = sg:FindFirstChild("Main", true)
-                    if mainFrame and mainFrame:IsA("Frame") then
-                        mainFrame.BackgroundTransparency = 1 - opacity
-                    end
-                end
-            end
-        end)
-        Window:Notify({ Title = "Opacity", Description = "Transparansi window: " .. value .. "%", Lifetime = 2 })
-    end
-})
-
--- Solid When Focused (window penuh opaque saat di-fokus)
-local solidFocused = false
-local focusConn, unfocusConn
-
-SecBg:Toggle({
-    Name = "Solid When Focused (Solid saat Aktif)",
-    Default = false,
-    Callback = function(enabled)
-        solidFocused = enabled
-        if focusConn then focusConn:Disconnect() end
-        if unfocusConn then unfocusConn:Disconnect() end
-        if enabled then
-            focusConn = game:GetService("UserInputService").WindowFocused:Connect(function()
-                pcall(function()
-                    for _, sg in ipairs(CoreGui:GetChildren()) do
-                        if sg:IsA("ScreenGui") then
-                            local mf = sg:FindFirstChild("Main", true)
-                            if mf and mf:IsA("Frame") then mf.BackgroundTransparency = 0 end
-                        end
-                    end
-                end)
-            end)
-            unfocusConn = game:GetService("UserInputService").WindowFocusReleased:Connect(function()
-                pcall(function()
-                    for _, sg in ipairs(CoreGui:GetChildren()) do
-                        if sg:IsA("ScreenGui") then
-                            local mf = sg:FindFirstChild("Main", true)
-                            if mf and mf:IsA("Frame") then mf.BackgroundTransparency = 0.3 end
-                        end
-                    end
-                end)
-            end)
-        end
-        Window:Notify({ Title = "Background", Description = enabled and "Solid saat window aktif." or "Dimatikan.", Lifetime = 2 })
-    end
-})
-
--- Panel Depth (kedalaman shadow/elevasi panel)
-SecBg:Slider({
-    Name = "Panel Depth (Kedalaman Shadow Panel)",
-    Default = 100,
-    Minimum = 0,
-    Maximum = 100,
-    DisplayMethod = "Percent",
-    Precision = 0,
-    Callback = function(value)
-        pcall(function()
-            for _, sg in ipairs(CoreGui:GetChildren()) do
-                if sg:IsA("ScreenGui") then
-                    for _, obj in ipairs(sg:GetDescendants()) do
-                        if obj:IsA("ImageLabel") and obj.Name == "Shadow" then
-                            obj.ImageTransparency = 1 - (value / 100)
-                        end
-                    end
-                end
-            end
-        end)
-    end
-})
-
--- SEKSI 3: WINDOW SIZE & KEYBIND
-local SecWin = TabConfig:Section({})
-SecWin:Header({ Name = WMacLib:Gradient("Jendela & Kontrol", Color3.fromRGB(255, 160, 60), Color3.fromRGB(255, 80, 120)) })
 
 SecWin:Slider({
     Name = "Ukuran Jendela (Window Size)",
@@ -1230,3 +1349,4 @@ Window:Notify({
 })
 
 print("[OK] Sky Hub berhasil dijalankan!")
+
