@@ -832,7 +832,7 @@ local function apply_korblox(targetName, assetId, yOffset)
     if not originalJoint then return false, "Joint 'Right Hip' tidak ditemukan" end
 
     local cleanId = tostring(assetId or "139607718"):match("%d+")
-    local offsetVal = tonumber(yOffset) or 0
+    local offsetVal = tonumber(yOffset) or 0.7
     local okLoad, objects = pcall(function()
         return game:GetObjects("rbxassetid://" .. cleanId)
     end)
@@ -852,7 +852,6 @@ local function apply_korblox(targetName, assetId, yOffset)
     end
 
     local originalC0 = originalJoint.C0
-    local originalC1 = originalJoint.C1
 
     -- Sembunyikan kaki lama & rename agar tidak bentrok nama
     oldLimb.Name = "Original_Right_Leg"
@@ -860,8 +859,8 @@ local function apply_korblox(targetName, assetId, yOffset)
     oldLimb.CanCollide = false
 
     -- Beri nama "Right Leg" pada newLimb agar Animator R6 Roblox menganimasikannya!
-    -- Dan tempatkan di posisi persis kaki kanan
-    newLimb.CFrame = oldLimb.CFrame
+    -- Geser ke atas dengan offsetVal (0.7) agar bola sendi Korblox pas menempel di bawah Torso seperti di foto referensi
+    newLimb.CFrame = oldLimb.CFrame * CFrame.new(0, offsetVal, 0)
     newLimb.Anchored = false
     newLimb.CanCollide = false
     newLimb.Massless = true
@@ -874,13 +873,13 @@ local function apply_korblox(targetName, assetId, yOffset)
     originalJoint.Name = "Right Hip Original"
     originalJoint.Part1 = nil
 
-    -- Buat Motor6D baru dengan C0 dan C1 asli R6 agar posisi dan rotasinya 100% presisi persis kaki kanan!
+    -- Buat Motor6D baru dengan C0 asli dan C1 dihitung dari posisi newLimb agar pas dan bergerak
     local weld = Instance.new("Motor6D")
     weld.Name = "Right Hip"
     weld.Part0 = torso
     weld.Part1 = newLimb
     weld.C0 = originalC0
-    weld.C1 = originalC1
+    weld.C1 = newLimb.CFrame:ToObjectSpace(torso.CFrame * originalC0)
     weld.Parent = torso
 
     -- Sembunyikan kaki kanan di model swap jika sedang aktif
@@ -1590,6 +1589,8 @@ SecAcc:Button({
 local SecBody = TabMod:Section({})
 SecBody:Header({ Name = WMacLib:Gradient("Korblox & Headless", Color3.fromRGB(255, 120, 70), Color3.fromRGB(255, 70, 100)) })
 
+local korblox_offset = 0.7
+
 SecBody:Input({
     Name = "Target di Server",
     Default = "",
@@ -1598,13 +1599,21 @@ SecBody:Input({
     onChanged = function(text) mod_target = text end,
 })
 
+SecBody:Input({
+    Name = "Korblox Y Offset",
+    Default = "0.7",
+    Placeholder = "Default: 0.7 (sesuai contoh pas)",
+    Callback = function(text) korblox_offset = tonumber(text) or 0.7 end,
+    onChanged = function(text) korblox_offset = tonumber(text) or 0.7 end,
+})
+
 SecBody:Button({
     Name = "Pasang Korblox Leg (Khusus R6)",
     Bold = true,
     Callback = function()
         Window:Notify({ Title = "Korblox", Description = "Memasang Korblox leg...", Lifetime = 3 })
         task.spawn(function()
-            local success, msg = apply_korblox(mod_target, 139607718, 0)
+            local success, msg = apply_korblox(mod_target, 139607718, korblox_offset)
             Window:Notify({
                 Title = success and "Berhasil!" or "Gagal!",
                 Description = msg or "",
