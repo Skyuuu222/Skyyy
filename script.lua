@@ -1545,6 +1545,21 @@ local crosshairThickness = 2
 local crosshairGap = 5
 local crosshairColor = Color3.fromRGB(255, 255, 255)
 local crosshairOpacity = 1.0
+-- Tipe crosshair: "Titik", "Plus", "Keduanya"
+local crosshairType = "Plus"
+
+local CROSSHAIR_COLORS = {
+    ["Putih"]   = Color3.fromRGB(255, 255, 255),
+    ["Merah"]   = Color3.fromRGB(255, 60,  60),
+    ["Hijau"]   = Color3.fromRGB(60,  255, 100),
+    ["Biru"]    = Color3.fromRGB(60,  160, 255),
+    ["Kuning"]  = Color3.fromRGB(255, 230, 50),
+    ["Orange"]  = Color3.fromRGB(255, 140, 30),
+    ["Pink"]    = Color3.fromRGB(255, 100, 200),
+    ["Cyan"]    = Color3.fromRGB(50,  240, 230),
+    ["Ungu"]    = Color3.fromRGB(180, 80,  255),
+    ["Hitam"]   = Color3.fromRGB(0,   0,   0),
+}
 
 local function destroy_crosshair()
     if crosshairGui then
@@ -1580,26 +1595,39 @@ local function build_crosshair()
         return f
     end
 
-    local half = crosshairGap + crosshairSize / 2
-    -- Atas
-    makeBar(crosshairThickness, crosshairSize, 0, -(half + crosshairSize / 2))
-    -- Bawah
-    makeBar(crosshairThickness, crosshairSize, 0, (half + crosshairSize / 2))
-    -- Kiri
-    makeBar(crosshairSize, crosshairThickness, -(half + crosshairSize / 2), 0)
-    -- Kanan
-    makeBar(crosshairSize, crosshairThickness, (half + crosshairSize / 2), 0)
-    -- Titik tengah
-    local dot = Instance.new("Frame")
-    dot.AnchorPoint = Vector2.new(0.5, 0.5)
-    dot.Size = UDim2.fromOffset(crosshairThickness + 1, crosshairThickness + 1)
-    dot.Position = UDim2.new(0.5, crosshairOffsetX, 0.5, crosshairOffsetY)
-    dot.BackgroundColor3 = crosshairColor
-    dot.BackgroundTransparency = 1 - crosshairOpacity
-    dot.BorderSizePixel = 0
-    dot.Name = "Dot"
-    dot.Parent = sg
-    Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+    local function makeDot(sizePx)
+        local dot = Instance.new("Frame")
+        dot.AnchorPoint = Vector2.new(0.5, 0.5)
+        dot.Size = UDim2.fromOffset(sizePx, sizePx)
+        dot.Position = UDim2.new(0.5, crosshairOffsetX, 0.5, crosshairOffsetY)
+        dot.BackgroundColor3 = crosshairColor
+        dot.BackgroundTransparency = 1 - crosshairOpacity
+        dot.BorderSizePixel = 0
+        dot.Name = "Dot"
+        dot.Parent = sg
+        Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+    end
+
+    if crosshairType == "Titik" then
+        -- Hanya tampilkan titik bulat di tengah
+        local dotSize = math.max(4, crosshairThickness * 3)
+        makeDot(dotSize)
+    elseif crosshairType == "Plus" then
+        -- Hanya tampilkan garis Plus (+)
+        local half = crosshairGap + crosshairSize / 2
+        makeBar(crosshairThickness, crosshairSize, 0, -(half + crosshairSize / 2))
+        makeBar(crosshairThickness, crosshairSize, 0,  (half + crosshairSize / 2))
+        makeBar(crosshairSize, crosshairThickness, -(half + crosshairSize / 2), 0)
+        makeBar(crosshairSize, crosshairThickness,  (half + crosshairSize / 2), 0)
+    else -- "Keduanya": Plus + Titik tengah
+        local half = crosshairGap + crosshairSize / 2
+        makeBar(crosshairThickness, crosshairSize, 0, -(half + crosshairSize / 2))
+        makeBar(crosshairThickness, crosshairSize, 0,  (half + crosshairSize / 2))
+        makeBar(crosshairSize, crosshairThickness, -(half + crosshairSize / 2), 0)
+        makeBar(crosshairSize, crosshairThickness,  (half + crosshairSize / 2), 0)
+        local dotSize = math.max(4, crosshairThickness * 2 + 1)
+        makeDot(dotSize)
+    end
 end
 
 local function toggle_crosshair(enable)
@@ -1636,6 +1664,50 @@ SecCross:Toggle({
     end
 })
 
+-- TIPE CROSSHAIR
+SecCross:Dropdown({
+    Name = "Tipe Crosshair",
+    Default = "Plus",
+    Options = { "Titik", "Plus", "Keduanya" },
+    Callback = function(selected)
+        crosshairType = selected
+        update_crosshair()
+        Window:Notify({ Title = "Crosshair", Description = "Tipe diubah ke: " .. selected, Lifetime = 2 })
+    end
+})
+
+-- WARNA CROSSHAIR (Preset)
+SecCross:Dropdown({
+    Name = "Warna Crosshair (Preset)",
+    Default = "Putih",
+    Options = { "Putih", "Merah", "Hijau", "Biru", "Kuning", "Orange", "Pink", "Cyan", "Ungu", "Hitam" },
+    Callback = function(selected)
+        local col = CROSSHAIR_COLORS[selected]
+        if col then
+            crosshairColor = col
+            update_crosshair()
+            Window:Notify({ Title = "Crosshair", Description = "Warna diubah ke: " .. selected, Lifetime = 2 })
+        end
+    end
+})
+
+-- WARNA CROSSHAIR (Custom Hex)
+SecCross:Input({
+    Name = "Warna Custom (Hex)",
+    Default = "",
+    Placeholder = "Contoh: FF5500 atau #00FFAA",
+    Callback = function(text)
+        local col = hex_to_color(text)
+        if col then
+            crosshairColor = col
+            update_crosshair()
+            Window:Notify({ Title = "Crosshair", Description = "Warna custom diterapkan!", Lifetime = 2 })
+        else
+            Window:Notify({ Title = "Crosshair", Description = "Hex tidak valid! Contoh: FF0000", Lifetime = 3 })
+        end
+    end
+})
+
 SecCross:Slider({
     Name = "Ukuran Crosshair",
     Default = 20,
@@ -1650,7 +1722,7 @@ SecCross:Slider({
 })
 
 SecCross:Slider({
-    Name = "Ketebalan Garis",
+    Name = "Ketebalan / Ukuran Titik",
     Default = 2,
     Minimum = 1,
     Maximum = 10,
@@ -1663,7 +1735,7 @@ SecCross:Slider({
 })
 
 SecCross:Slider({
-    Name = "Celah Tengah (Gap)",
+    Name = "Celah Tengah (Gap) - Hanya Plus",
     Default = 5,
     Minimum = 0,
     Maximum = 30,
