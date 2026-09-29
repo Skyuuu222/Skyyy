@@ -537,8 +537,8 @@ local WMacLib = loadstring(game:HttpGetAsync("https://raw.githubusercontent.com/
 
 local Window = WMacLib:Window({
     Title = "Sky Hub",
-    Subtitle = "Avatar & Outfit Studio",
-    Size = UDim2.fromOffset(620, 390),
+    Subtitle = "Universal Studio",
+    Size = UDim2.fromOffset(780, 480),
     DragStyle = 1,
     DisabledWindowControls = {},
     ShowUserInfo = true,
@@ -563,11 +563,12 @@ local acc_id = "10159600649"
 local mod_target = ""
 
 -- ==============================================================================
--- TAB 1: AVATAR SWAP
+-- TAB TUNGGAL: MODIFIKASI (ALL-IN-ONE)
 -- ==============================================================================
-local TabAvatar = tabGroup:Tab({ Name = "Avatar Swap", Image = "lucide/user" })
-local SecAvatar = TabAvatar:Section({ Side = "Left" })
+local TabMod = tabGroup:Tab({ Name = "Modifikasi", Image = "lucide/sparkles" })
 
+-- SISI KIRI: AVATAR & OUTFIT
+local SecAvatar = TabMod:Section({ Side = "Left" })
 SecAvatar:Header({ Name = WMacLib:Gradient("Salin Avatar Pemain", Color3.fromRGB(70, 150, 255), Color3.fromRGB(160, 100, 255)) })
 
 SecAvatar:Input({
@@ -614,12 +615,7 @@ SecAvatar:Button({
     end,
 })
 
--- ==============================================================================
--- TAB 2: OUTFIT CLONER
--- ==============================================================================
-local TabOutfit = tabGroup:Tab({ Name = "Outfit Cloner", Image = "lucide/shirt" })
-local SecOutfit = TabOutfit:Section({ Side = "Left" })
-
+local SecOutfit = TabMod:Section({ Side = "Left" })
 SecOutfit:Header({ Name = WMacLib:Gradient("Kloning Outfit Tersimpan", Color3.fromRGB(240, 100, 200), Color3.fromRGB(150, 80, 255)) })
 
 SecOutfit:Input({
@@ -662,12 +658,8 @@ SecOutfit:Button({
     end,
 })
 
--- ==============================================================================
--- TAB 3: ACCESSORY LOADER
--- ==============================================================================
-local TabAcc = tabGroup:Tab({ Name = "Aksesoris", Image = "lucide/crown" })
-local SecAcc = TabAcc:Section({ Side = "Left" })
-
+-- SISI KANAN: AKSESORIS & TUBUH (KORBLOX / HEADLESS)
+local SecAcc = TabMod:Section({ Side = "Right" })
 SecAcc:Header({ Name = WMacLib:Gradient("Pemuat Aksesoris Catalog", Color3.fromRGB(50, 220, 150), Color3.fromRGB(70, 180, 255)) })
 
 SecAcc:Input({
@@ -702,15 +694,10 @@ SecAcc:Button({
     end,
 })
 
--- ==============================================================================
--- TAB 4: MODIFIKASI (KORBLOX & HEADLESS)
--- ==============================================================================
-local TabMod = tabGroup:Tab({ Name = "Modifikasi", Image = "lucide/skull" })
-local SecMod = TabMod:Section({ Side = "Left" })
+local SecBody = TabMod:Section({ Side = "Right" })
+SecBody:Header({ Name = WMacLib:Gradient("Korblox & Headless", Color3.fromRGB(255, 120, 70), Color3.fromRGB(255, 70, 100)) })
 
-SecMod:Header({ Name = WMacLib:Gradient("Korblox & Headless", Color3.fromRGB(255, 120, 70), Color3.fromRGB(255, 70, 100)) })
-
-SecMod:Input({
+SecBody:Input({
     Name = "Target di Server",
     Default = "",
     Placeholder = "Kosongkan untuk diri sendiri...",
@@ -718,7 +705,7 @@ SecMod:Input({
     onChanged = function(text) mod_target = text end,
 })
 
-SecMod:Button({
+SecBody:Button({
     Name = "Pasang Korblox Leg (Khusus R6)",
     Bold = true,
     Callback = function()
@@ -734,7 +721,7 @@ SecMod:Button({
     end,
 })
 
-SecMod:Button({
+SecBody:Button({
     Name = "Pasang Headless",
     Bold = true,
     Callback = function()
@@ -747,7 +734,7 @@ SecMod:Button({
     end,
 })
 
-SecMod:Button({
+SecBody:Button({
     Name = "Hapus Headless",
     Callback = function()
         local success, msg = remove_headless(mod_target)
@@ -760,7 +747,7 @@ SecMod:Button({
 })
 
 -- ==============================================================================
--- TAB 5: PENGATURAN & TEMA
+-- TAB PENGATURAN & TEMA
 -- ==============================================================================
 tabGroup:Divider()
 local TabConfig = tabGroup:Tab({ Name = "Pengaturan", Image = "lucide/settings" })
@@ -787,8 +774,8 @@ SecConfig:Toggle({
 
 Window:Notify({
     Title = "Sky Hub",
-    Description = "Berhasil dimuat! Tekan RightControl untuk sembunyikan/tampilkan.",
+    Description = "Semua fitur telah disatukan di tab Modifikasi!",
     Lifetime = 5
 })
 
-print("[OK] Sky Hub (WMacLib) berhasil dijalankan!")
+print("[OK] Sky Hub (Modifikasi All-in-One) berhasil dijalankan!")
