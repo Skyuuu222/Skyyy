@@ -86,6 +86,27 @@ local function cleanup_swap(player)
     reset_swap_state(st)
     if st.respawnConn then pcall(function() st.respawnConn:Disconnect() end) end
     SwapState.targets[player] = nil
+
+    local char = player.Character
+    if char then
+        -- Jika headless masih aktif saat swap dibersihkan, sembunyikan kepala karakter asli kembali
+        if shared.HeadlessActive and shared.HeadlessActive[player] then
+            local h = char:FindFirstChild("Head")
+            if h then
+                h.Transparency = 1
+                for _, d in ipairs(h:GetChildren()) do
+                    if d:IsA("Decal") or d:IsA("Texture") then d.Transparency = 1 end
+                end
+            end
+        end
+        -- Jika korblox masih aktif saat swap dibersihkan, sembunyikan kaki kanan asli kembali
+        if shared.KorbloxActive and shared.KorbloxActive[player] then
+            local rleg = char:FindFirstChild("Right Leg")
+            if rleg then rleg.Transparency = 1 end
+            local korb = char:FindFirstChild("Right Leg Korblox")
+            if korb then korb.Transparency = 0 end
+        end
+    end
 end
 
 local function get_user_description(username)
@@ -133,7 +154,7 @@ local function dress_mirror(player, char, desc, st, modelPrefix)
 
     local mapped = {}
     for _, part in ipairs(char:GetChildren()) do
-        if part:IsA("BasePart") then
+        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" and part.Name ~= "Right Leg Korblox" then
             local cp = model:FindFirstChild(part.Name)
             if cp and cp:IsA("BasePart") then
                 cp.Anchored = true
@@ -155,6 +176,28 @@ local function dress_mirror(player, char, desc, st, modelPrefix)
 
     model.Parent = workspace
 
+    -- Jika target sedang pakai Headless, sembunyikan kepala swap model
+    if shared.HeadlessActive and shared.HeadlessActive[player] then
+        local swapHead = model:FindFirstChild("Head")
+        if swapHead then
+            swapHead.Transparency = 1
+            for _, d in ipairs(swapHead:GetChildren()) do
+                if d:IsA("Decal") or d:IsA("Texture") then d.Transparency = 1 end
+            end
+        end
+    end
+
+    -- Jika target sedang pakai Korblox, sembunyikan Right Leg swap model
+    if shared.KorbloxActive and shared.KorbloxActive[player] then
+        local swapRLeg = model:FindFirstChild("Right Leg")
+        if swapRLeg then
+            swapRLeg.Transparency = 1
+            for _, d in ipairs(swapRLeg:GetChildren()) do
+                if d:IsA("Decal") or d:IsA("Texture") then d.Transparency = 1 end
+            end
+        end
+    end
+
     table.insert(st.conns, RunService.Stepped:Connect(function()
         for _, part in ipairs(copyParts) do
             part.CanCollide = false
@@ -174,14 +217,56 @@ local function dress_mirror(player, char, desc, st, modelPrefix)
     end))
 
     local function hide(d)
-        if (d:IsA("BasePart") and d.Name ~= "HumanoidRootPart")
+        if (d:IsA("BasePart") and d.Name ~= "HumanoidRootPart" and d.Name ~= "Right Leg Korblox")
             or d:IsA("Decal") or d:IsA("Texture") then
+            if d.Parent and d.Parent.Name == "Right Leg Korblox" then return end
+            if d.Parent and (d.Parent:IsA("Accessory") and d.Parent:GetAttribute("IsCustomAccessory")) then return end
             if st.original[d] == nil then st.original[d] = d.Transparency end
             d.Transparency = 1
         end
     end
     for _, d in ipairs(char:GetDescendants()) do hide(d) end
     table.insert(st.conns, char.DescendantAdded:Connect(hide))
+
+    -- Pasang Custom Accessories yang aktif jika target memiliki custom accessories
+    if shared.CustomAccessories and shared.CustomAccessories[player] then
+        for _, cId in ipairs(shared.CustomAccessories[player]) do
+            task.spawn(function()
+                pcall(function()
+                    local okLoad, objects = pcall(function() return game:GetObjects("rbxassetid://" .. cId) end)
+                    if okLoad and objects and #objects > 0 then
+                        local modelAcc = objects[1]
+                        local acc = modelAcc:IsA("Accessory") and modelAcc or modelAcc:FindFirstChildOfClass("Accessory")
+                        if acc and model.Parent then
+                            local swapHead = model:FindFirstChild("Head")
+                            if swapHead then
+                                acc.Name = "CustomAcc_" .. cId
+                                acc:SetAttribute("CustomAssetId", cId)
+                                acc:SetAttribute("IsCustomAccessory", true)
+                                local sHandle = acc:FindFirstChild("Handle")
+                                if sHandle then
+                                    sHandle.CanCollide = false
+                                    sHandle.CanTouch = false
+                                    sHandle.CanQuery = false
+                                    sHandle.Massless = true
+                                    acc.Parent = model
+                                    local sAttachment = sHandle:FindFirstChildOfClass("Attachment")
+                                    local sHeadAttachment = swapHead:FindFirstChild(sAttachment and sAttachment.Name or "") or swapHead:FindFirstChild("HatAttachment")
+                                    local sWeld = Instance.new("Weld")
+                                    sWeld.Name = "AccessoryWeld"
+                                    sWeld.Part0 = swapHead
+                                    sWeld.Part1 = sHandle
+                                    sWeld.C0 = sHeadAttachment and sHeadAttachment.CFrame or CFrame.new(0, 0.5, 0)
+                                    sWeld.C1 = sAttachment and sAttachment.CFrame or CFrame.new()
+                                    sWeld.Parent = sHandle
+                                end
+                            end
+                        end
+                    end
+                end)
+            end)
+        end
+    end
 
     st.model = model
     return true, "Avatar berhasil dipasang pada " .. player.Name
@@ -373,6 +458,11 @@ end
 -- ==============================================================================
 -- MODUL 3: ACCESSORY LOADER
 -- ==============================================================================
+-- ==============================================================================
+-- MODUL 3: ACCESSORY LOADER & REMOVER
+-- ==============================================================================
+shared.CustomAccessories = shared.CustomAccessories or {}
+
 local function add_accessory(targetName, assetId)
     local target = find_player(targetName)
     if not target then return false, "Pemain tidak ditemukan" end
@@ -398,11 +488,16 @@ local function add_accessory(targetName, assetId)
     local accessory = model:IsA("Accessory") and model or model:FindFirstChildOfClass("Accessory")
     if not accessory then return false, "Bukan objek Accessory" end
 
+    accessory:SetAttribute("CustomAssetId", cleanId)
+    accessory:SetAttribute("IsCustomAccessory", true)
+
     local handle = accessory:FindFirstChild("Handle")
     local accAttachment = handle and handle:FindFirstChildOfClass("Attachment")
     if not handle or not accAttachment then return false, "Struktur Handle/Attachment rusak" end
 
+    -- Pasang ke karakter asli
     local headAttachment = head:FindFirstChild(accAttachment.Name) or head:FindFirstChild("HatAttachment")
+    accessory.Name = "CustomAcc_" .. cleanId
     accessory.Parent = char
 
     local weld = Instance.new("Weld")
@@ -413,14 +508,237 @@ local function add_accessory(targetName, assetId)
     weld.C1 = accAttachment.CFrame
     weld.Parent = handle
 
-    return true, "Aksesoris '" .. accessory.Name .. "' dipasang ke " .. target.Name
+    -- Jika target sedang memakai avatar swap (copy avatar), pasang juga clone aksesoris ke swap model
+    local swapSt = SwapState.targets[target]
+    if swapSt and swapSt.model then
+        local swapHead = swapSt.model:FindFirstChild("Head")
+        if swapHead then
+            local swapAcc = accessory:Clone()
+            swapAcc.Name = "CustomAcc_" .. cleanId
+            swapAcc:SetAttribute("CustomAssetId", cleanId)
+            swapAcc:SetAttribute("IsCustomAccessory", true)
+            local sHandle = swapAcc:FindFirstChild("Handle")
+            if sHandle then
+                sHandle.CanCollide = false
+                sHandle.CanTouch = false
+                sHandle.CanQuery = false
+                sHandle.Massless = true
+                swapAcc.Parent = swapSt.model
+                local sAttachment = sHandle:FindFirstChildOfClass("Attachment")
+                local sHeadAttachment = swapHead:FindFirstChild(sAttachment and sAttachment.Name or "") or swapHead:FindFirstChild("HatAttachment")
+                local sWeld = Instance.new("Weld")
+                sWeld.Name = "AccessoryWeld"
+                sWeld.Part0 = swapHead
+                sWeld.Part1 = sHandle
+                sWeld.C0 = sHeadAttachment and sHeadAttachment.CFrame or CFrame.new(0, 0.5, 0)
+                sWeld.C1 = sAttachment and sAttachment.CFrame or CFrame.new()
+                sWeld.Parent = sHandle
+            end
+        end
+    end
+
+    -- Simpan riwayat aksesoris untuk target ini
+    shared.CustomAccessories[target] = shared.CustomAccessories[target] or {}
+    local alreadyListed = false
+    for _, id in ipairs(shared.CustomAccessories[target]) do
+        if id == cleanId then alreadyListed = true; break end
+    end
+    if not alreadyListed then
+        table.insert(shared.CustomAccessories[target], cleanId)
+    end
+
+    return true, "Aksesoris ID " .. cleanId .. " dipasang ke " .. target.Name
+end
+
+local function remove_accessory(targetName, assetId)
+    local target = find_player(targetName)
+    if not target then return false, "Pemain tidak ditemukan" end
+
+    local cleanId = assetId and tostring(assetId):match("%d+")
+    local searchPattern = assetId and tostring(assetId):lower():gsub("%s+", "") or ""
+
+    local removedCount = 0
+
+    local function checkAndRemove(acc)
+        if not acc or not acc:IsA("Accessory") then return false end
+        local matched = false
+
+        -- 1. Cek Attribute CustomAssetId
+        local customId = acc:GetAttribute("CustomAssetId")
+        if cleanId and customId and tostring(customId) == cleanId then
+            matched = true
+        end
+
+        -- 2. Cek Nama Accessory (mengandung ID atau kata kunci)
+        if not matched and cleanId and acc.Name:find(cleanId) then
+            matched = true
+        end
+        if not matched and searchPattern ~= "" and acc.Name:lower():find(searchPattern) then
+            matched = true
+        end
+
+        -- 3. Cek MeshId / TextureId di Handle
+        if not matched and cleanId then
+            local handle = acc:FindFirstChild("Handle")
+            if handle then
+                for _, desc in ipairs(handle:GetDescendants()) do
+                    if desc:IsA("SpecialMesh") then
+                        if tostring(desc.MeshId):find(cleanId) or tostring(desc.TextureId):find(cleanId) then
+                            matched = true
+                            break
+                        end
+                    elseif desc:IsA("MeshPart") then
+                        if tostring(desc.MeshId):find(cleanId) or tostring(desc.TextureID):find(cleanId) then
+                            matched = true
+                            break
+                        end
+                    end
+                end
+            end
+        end
+
+        if matched then
+            acc:Destroy()
+            removedCount = removedCount + 1
+            return true
+        end
+        return false
+    end
+
+    -- Hapus dari karakter asli (bisa ava diri sendiri atau ava target di server)
+    local char = target.Character
+    if char then
+        for _, obj in ipairs(char:GetChildren()) do
+            checkAndRemove(obj)
+        end
+    end
+
+    -- Hapus dari model swap (jika sedang pakai copy avatar)
+    local swapSt = SwapState.targets[target]
+    if swapSt and swapSt.model then
+        for _, obj in ipairs(swapSt.model:GetChildren()) do
+            checkAndRemove(obj)
+        end
+    end
+
+    -- Bersihkan dari daftar shared.CustomAccessories
+    if shared.CustomAccessories and shared.CustomAccessories[target] and cleanId then
+        for i = #shared.CustomAccessories[target], 1, -1 do
+            if shared.CustomAccessories[target][i] == cleanId then
+                table.remove(shared.CustomAccessories[target], i)
+            end
+        end
+    end
+
+    if removedCount > 0 then
+        return true, "Berhasil menghapus " .. removedCount .. " aksesoris dari " .. target.Name
+    else
+        return false, "Aksesoris tidak ditemukan pada " .. target.Name
+    end
+end
+
+local function remove_all_accessories(targetName)
+    local target = find_player(targetName)
+    if not target then return false, "Pemain tidak ditemukan" end
+
+    local removedCount = 0
+
+    local function removeAccs(container)
+        if not container then return end
+        for _, obj in ipairs(container:GetChildren()) do
+            if obj:IsA("Accessory") then
+                if obj:GetAttribute("IsCustomAccessory") or obj.Name:find("CustomAcc_") then
+                    obj:Destroy()
+                    removedCount = removedCount + 1
+                end
+            end
+        end
+    end
+
+    if target.Character then removeAccs(target.Character) end
+    local swapSt = SwapState.targets[target]
+    if swapSt and swapSt.model then removeAccs(swapSt.model) end
+
+    if shared.CustomAccessories then
+        shared.CustomAccessories[target] = nil
+    end
+
+    if removedCount > 0 then
+        return true, "Berhasil menghapus " .. removedCount .. " aksesoris custom dari " .. target.Name
+    else
+        return false, "Tidak ada aksesoris custom yang terpasang pada " .. target.Name
+    end
 end
 
 -- ==============================================================================
 -- MODUL 4: KORBLOX & HEADLESS MODIFICATIONS
 -- ==============================================================================
--- Simpan koneksi Korblox agar bisa dilepas jika perlu
 shared.KorbloxConns = shared.KorbloxConns or {}
+shared.KorbloxActive = shared.KorbloxActive or {}
+shared.HeadlessActive = shared.HeadlessActive or {}
+shared.HeadlessConns = shared.HeadlessConns or {}
+shared.HeadlessHBConns = shared.HeadlessHBConns or {}
+
+local function remove_korblox(targetName)
+    local target = find_player(targetName)
+    if not target then return false, "Pemain tidak ditemukan" end
+
+    shared.KorbloxActive[target] = nil
+
+    if shared.KorbloxConns[target] then
+        for _, c in ipairs(shared.KorbloxConns[target]) do
+            pcall(function() c:Disconnect() end)
+        end
+        shared.KorbloxConns[target] = nil
+    end
+
+    local char = target.Character
+    if char then
+        -- 1. Hapus part Korblox jika ada
+        local korbPart = char:FindFirstChild("Right Leg Korblox")
+        if korbPart then korbPart:Destroy() end
+
+        local torso = char:FindFirstChild("Torso")
+        local oldLimb = char:FindFirstChild("Right Leg")
+
+        if torso then
+            -- Hapus Motor6D yang kita buat untuk Korblox
+            for _, j in ipairs(torso:GetChildren()) do
+                if j:IsA("Motor6D") and (j.Name == "Right Hip" and (j.Part1 == nil or j.Part1 == korbPart or (oldLimb and j.Part1 ~= oldLimb))) then
+                    j:Destroy()
+                end
+            end
+            -- Kembalikan joint asli
+            local origJoint = torso:FindFirstChild("Right Hip Original") or torso:FindFirstChild("Right Hip")
+            if origJoint and oldLimb then
+                origJoint.Name = "Right Hip"
+                origJoint.Part1 = oldLimb
+            end
+        end
+
+        -- 2. Atur kembali transparansi kaki
+        local isSwapped = SwapState.targets[target] and SwapState.targets[target].model
+        if isSwapped then
+            -- Karakter asli tetap invisible karena sedang pakai avatar swap
+            if oldLimb then oldLimb.Transparency = 1 end
+            -- Munculkan kembali kaki kanan di model swap
+            local swapRLeg = SwapState.targets[target].model:FindFirstChild("Right Leg")
+            if swapRLeg then
+                swapRLeg.Transparency = 0
+                for _, d in ipairs(swapRLeg:GetChildren()) do
+                    if d:IsA("Decal") or d:IsA("Texture") then d.Transparency = 0 end
+                end
+            end
+        else
+            -- Tidak sedang swap: kembalikan kaki asli ke terlihat normal
+            if oldLimb then
+                oldLimb.Transparency = 0
+            end
+        end
+    end
+
+    return true, "Korblox dinonaktifkan untuk " .. target.Name
+end
 
 local function apply_korblox(targetName, assetId, yOffset)
     local target = find_player(targetName)
@@ -436,6 +754,11 @@ local function apply_korblox(targetName, assetId, yOffset)
     local torso = char:FindFirstChild("Torso")
     local oldLimb = char:FindFirstChild("Right Leg")
     if not torso or not oldLimb then return false, "Torso / Right Leg tidak ditemukan" end
+
+    -- Jika Korblox sudah terpasang, hapus dulu agar bersih
+    if shared.KorbloxActive[target] or char:FindFirstChild("Right Leg Korblox") then
+        remove_korblox(targetName)
+    end
 
     local originalJoint = torso:FindFirstChild("Right Hip")
     if not originalJoint then return false, "Joint 'Right Hip' tidak ditemukan" end
@@ -454,12 +777,10 @@ local function apply_korblox(targetName, assetId, yOffset)
     end
     if not newLimb then return false, "Part kaki tidak ditemukan" end
 
-    -- Simpan C0 dan C1 asli SEBELUM joint dihancurkan
-    local originalC0 = originalJoint.C0
-    local originalC1 = originalJoint.C1  -- penting untuk animasi R6 yang benar
     local offsetVal = tonumber(yOffset) or 0.7
+    local originalC0 = originalJoint.C0
 
-    -- Posisi awal Korblox: sejajar kaki lama dengan sedikit offset
+    -- Posisi kaki Korblox sejajar dengan kaki lama + offset
     newLimb.CFrame = oldLimb.CFrame * CFrame.new(0, offsetVal, 0)
     newLimb.Name = "Right Leg Korblox"
     newLimb.CanCollide = false
@@ -467,57 +788,75 @@ local function apply_korblox(targetName, assetId, yOffset)
     newLimb.Transparency = 0
     newLimb.Parent = char
 
-    -- Sembunyikan kaki asli
+    -- Sembunyikan kaki lama
     oldLimb.Transparency = 1
     oldLimb.CanCollide = false
 
-    -- DESTROY joint lama sepenuhnya agar tidak konflik dengan joint baru
-    originalJoint:Destroy()
+    -- Putuskan Part1 joint asli dan rename agar bisa di-undo
+    originalJoint.Name = "Right Hip Original"
+    originalJoint.Part1 = nil
 
-    -- Buat Motor6D baru dengan C0/C1 ASLI → animasi R6 berjalan normal
-    local newJoint = Instance.new("Motor6D")
-    newJoint.Name = "Right Hip"
-    newJoint.Part0 = torso
-    newJoint.Part1 = newLimb
-    newJoint.C0 = originalC0
-    newJoint.C1 = originalC1   -- gunakan C1 asli agar gerakan animasi persis R6
-    newJoint.Parent = torso
+    -- Buat Motor6D baru persis dengan rumus yang dianimasikan R6
+    local weld = Instance.new("Motor6D")
+    weld.Name = "Right Hip"
+    weld.Part0 = torso
+    weld.Part1 = newLimb
+    weld.C0 = originalC0
+    weld.C1 = newLimb.CFrame:ToObjectSpace(torso.CFrame * originalC0)
+    weld.Parent = torso
 
-    -- Disconnect Korblox lama jika ada
-    if shared.KorbloxConns[target] then
-        shared.KorbloxConns[target]:Disconnect()
-        shared.KorbloxConns[target] = nil
+    -- Sembunyikan kaki kanan di model swap jika sedang aktif
+    local swapSt = SwapState.targets[target]
+    if swapSt and swapSt.model then
+        local swapRLeg = swapSt.model:FindFirstChild("Right Leg")
+        if swapRLeg then
+            swapRLeg.Transparency = 1
+            for _, d in ipairs(swapRLeg:GetChildren()) do
+                if d:IsA("Decal") or d:IsA("Texture") then d.Transparency = 1 end
+            end
+        end
     end
 
-    -- Selalu jaga Korblox tetap visible (bahkan saat swap aktif yang menyembunyikan part baru)
-    -- Dan jaga Right Leg di swap model tetap hidden
-    shared.KorbloxConns[target] = RunService.Heartbeat:Connect(function()
-        if not newLimb or not newLimb.Parent then
-            if shared.KorbloxConns[target] then
-                shared.KorbloxConns[target]:Disconnect()
-                shared.KorbloxConns[target] = nil
-            end
-            return
+    -- Simpan state Korblox
+    shared.KorbloxActive[target] = {
+        assetId = cleanId,
+        yOffset = offsetVal,
+    }
+
+    if shared.KorbloxConns[target] then
+        for _, c in ipairs(shared.KorbloxConns[target]) do
+            pcall(function() c:Disconnect() end)
         end
-        -- Pastikan Korblox selalu terlihat
+    end
+    shared.KorbloxConns[target] = {}
+
+    -- Heartbeat loop: menjaga newLimb selalu terlihat & swap model Right Leg selalu tersembunyi
+    local hbConn = RunService.Heartbeat:Connect(function()
+        if not newLimb or not newLimb.Parent then return end
         if newLimb.Transparency ~= 0 then
             newLimb.Transparency = 0
         end
-        -- Pastikan Right Leg di swap model selalu tersembunyi
-        local swapSt = SwapState.targets[target]
-        if swapSt and swapSt.model then
-            local swapRLeg = swapSt.model:FindFirstChild("Right Leg")
-            if swapRLeg and swapRLeg.Transparency ~= 1 then
-                swapRLeg.Transparency = 1
+        local currentSwap = SwapState.targets[target]
+        if currentSwap and currentSwap.model then
+            local sRLeg = currentSwap.model:FindFirstChild("Right Leg")
+            if sRLeg and sRLeg.Transparency ~= 1 then
+                sRLeg.Transparency = 1
             end
         end
     end)
+    table.insert(shared.KorbloxConns[target], hbConn)
+
+    -- Pasang ulang otomatis jika target respawn
+    local respawnConn = target.CharacterAdded:Connect(function()
+        task.wait(1)
+        if shared.KorbloxActive[target] then
+            apply_korblox(target.Name, cleanId, offsetVal)
+        end
+    end)
+    table.insert(shared.KorbloxConns[target], respawnConn)
 
     return true, "Korblox Right Leg dipasang pada " .. target.Name
 end
-
-shared.HeadlessConns = shared.HeadlessConns or {}
-shared.HeadlessHBConns = shared.HeadlessHBConns or {}  -- simpan Heartbeat terpisah
 
 local function make_headless_char(char)
     local head = char:FindFirstChild("Head")
@@ -529,7 +868,7 @@ local function make_headless_char(char)
     end
 end
 
--- Sembunyikan HANYA kepala di swap model (bukan aksesori)
+-- Sembunyikan HANYA kepala di swap model (aksesori kepala tetap utuh)
 local function make_headless_swap(target)
     local swapSt = SwapState.targets[target]
     if not swapSt or not swapSt.model then return end
@@ -540,12 +879,13 @@ local function make_headless_swap(target)
             if d:IsA("Decal") or d:IsA("Texture") then d.Transparency = 1 end
         end
     end
-    -- Catatan: aksesori TIDAK disembunyikan — hanya Head yang dihilangkan
 end
 
 local function apply_headless(targetName)
     local target = find_player(targetName)
     if not target then return false, "Target tidak ditemukan" end
+
+    shared.HeadlessActive[target] = true
 
     -- Disconnect semua koneksi headless lama
     if shared.HeadlessConns[target] then
@@ -561,7 +901,6 @@ local function apply_headless(targetName)
         make_headless_char(char)
         make_headless_swap(target)
 
-        -- Disconnect Heartbeat lama jika ada (dari setup sebelumnya)
         if shared.HeadlessHBConns[target] then
             shared.HeadlessHBConns[target]:Disconnect()
         end
@@ -573,10 +912,10 @@ local function apply_headless(targetName)
                 shared.HeadlessHBConns[target] = nil
                 return
             end
-            -- Jaga kepala original tetap invisible
+            -- Jaga kepala karakter tetap invisible
             local h = char:FindFirstChild("Head")
             if h and h.Transparency ~= 1 then make_headless_char(char) end
-            -- Jaga kepala swap model tetap invisible
+            -- Jaga kepala model swap tetap invisible
             make_headless_swap(target)
         end)
         shared.HeadlessHBConns[target] = hbConn
@@ -585,7 +924,9 @@ local function apply_headless(targetName)
     if target.Character then setup(target.Character) end
     shared.HeadlessConns[target] = target.CharacterAdded:Connect(function(newChar)
         task.wait(0.5)
-        setup(newChar)
+        if shared.HeadlessActive[target] then
+            setup(newChar)
+        end
     end)
 
     return true, "Headless diterapkan pada " .. target.Name
@@ -595,33 +936,47 @@ local function remove_headless(targetName)
     local target = find_player(targetName)
     if not target then return false, "Target tidak ditemukan" end
 
+    shared.HeadlessActive[target] = nil
+
     -- Disconnect CharacterAdded listener
     if shared.HeadlessConns[target] then
         shared.HeadlessConns[target]:Disconnect()
         shared.HeadlessConns[target] = nil
     end
-    -- Disconnect Heartbeat → ini yang membuat headless aktif terus
+    -- Disconnect Heartbeat listener
     if shared.HeadlessHBConns[target] then
         shared.HeadlessHBConns[target]:Disconnect()
         shared.HeadlessHBConns[target] = nil
     end
 
-    -- Kembalikan kepala original
-    if target.Character and target.Character:FindFirstChild("Head") then
-        local head = target.Character.Head
-        head.Transparency = 0
-        for _, d in ipairs(head:GetChildren()) do
-            if d:IsA("Decal") or d:IsA("Texture") then d.Transparency = 0 end
-        end
-    end
-
-    -- Kembalikan kepala di swap model
+    local char = target.Character
     local swapSt = SwapState.targets[target]
-    if swapSt and swapSt.model then
+    local isSwapped = swapSt and swapSt.model
+
+    if isSwapped then
+        -- KETIKA SEDANG PAKAI AVATAR SWAP:
+        -- Kepala karakter asli HARUS TETAP invisible (1) agar tidak menabrak / z-fight dengan avatar swap!
+        if char and char:FindFirstChild("Head") then
+            char.Head.Transparency = 1
+            for _, d in ipairs(char.Head:GetChildren()) do
+                if d:IsA("Decal") or d:IsA("Texture") then d.Transparency = 1 end
+            end
+        end
+
+        -- HANYA kembalikan kepala di swap model avatar yang sedang dicopy:
         local swapHead = swapSt.model:FindFirstChild("Head")
         if swapHead then
             swapHead.Transparency = 0
             for _, d in ipairs(swapHead:GetChildren()) do
+                if d:IsA("Decal") or d:IsA("Texture") then d.Transparency = 0 end
+            end
+        end
+    else
+        -- KETIKA TIDAK SEDANG SWAP (pakai avatar sendiri):
+        if char and char:FindFirstChild("Head") then
+            local head = char.Head
+            head.Transparency = 0
+            for _, d in ipairs(head:GetChildren()) do
                 if d:IsA("Decal") or d:IsA("Texture") then d.Transparency = 0 end
             end
         end
@@ -1129,6 +1484,30 @@ SecAcc:Button({
     end,
 })
 
+SecAcc:Button({
+    Name = "Hapus Aksesoris (ID / Nama)",
+    Callback = function()
+        local success, msg = remove_accessory(acc_target, acc_id)
+        Window:Notify({
+            Title = "Aksesoris",
+            Description = msg or "",
+            Lifetime = 4
+        })
+    end,
+})
+
+SecAcc:Button({
+    Name = "Hapus Semua Aksesoris Custom",
+    Callback = function()
+        local success, msg = remove_all_accessories(acc_target)
+        Window:Notify({
+            Title = "Aksesoris",
+            Description = msg or "",
+            Lifetime = 4
+        })
+    end,
+})
+
 -- SEKSI 4: KORBLOX & HEADLESS
 local SecBody = TabMod:Section({})
 SecBody:Header({ Name = WMacLib:Gradient("Korblox & Headless", Color3.fromRGB(255, 120, 70), Color3.fromRGB(255, 70, 100)) })
@@ -1154,6 +1533,18 @@ SecBody:Button({
                 Lifetime = 4
             })
         end)
+    end,
+})
+
+SecBody:Button({
+    Name = "Hapus Korblox Leg",
+    Callback = function()
+        local success, msg = remove_korblox(mod_target)
+        Window:Notify({
+            Title = "Korblox",
+            Description = msg or "",
+            Lifetime = 4
+        })
     end,
 })
 
