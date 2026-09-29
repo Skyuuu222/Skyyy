@@ -533,7 +533,13 @@ end
 -- ==============================================================================
 -- WMACLIB UI INITIALIZATION
 -- ==============================================================================
-local WMacLib = loadstring(game:HttpGetAsync("https://raw.githubusercontent.com/Wicikk/WMacLib/main/WMacLib.lua"))()
+local ok_wm, WMacLib = pcall(function()
+    return loadstring(game:HttpGet("https://raw.githubusercontent.com/Wicikk/WMacLib/main/WMacLib.lua"))()
+end)
+if not ok_wm or not WMacLib then
+    warn("[Sky Hub] Gagal memuat WMacLib: " .. tostring(WMacLib))
+    return
+end
 
 local Window = WMacLib:Window({
     Title = "Sky Hub",
@@ -1031,97 +1037,196 @@ SecBody:Button({
     end,
 })
 
+-- ==============================================================================
+-- TAB 3: PENGATURAN & TEMA
+-- ==============================================================================
+tabGroup:Divider()
+local TabConfig = tabGroup:Tab({ Name = "Pengaturan", Image = "lucide/settings" })
 
+-- SEKSI 1: PENAMPILAN & TEMA
+local SecTheme = TabConfig:Section({})
+SecTheme:Header({ Name = WMacLib:Gradient("Penampilan (Appearance)", Color3.fromRGB(150, 100, 255), Color3.fromRGB(240, 100, 200)) })
 
-    -- ==============================================================================
-    -- TAB PENGATURAN & TEMA (SESUAI GAMBAR APPEARANCE & BACKGROUND)
-    -- ==============================================================================
-    tabGroup:Divider()
-    local TabConfig = tabGroup:Tab({ Name = "Pengaturan", Image = "lucide/settings" })
+SecTheme:Dropdown({
+    Name = "Pilihan Tema (Color Themes)",
+    Options = WMacLib:GetThemes(),
+    Default = "Dark",
+    Callback = function(themeName)
+        WMacLib:SetTheme(themeName)
+        Window:Notify({ Title = "Tema", Description = "Tema diubah ke " .. tostring(themeName), Lifetime = 3 })
+    end
+})
 
-    -- SEKSI 1: PENAMPILAN & TEMA (THEME & APPEARANCE)
-    local SecTheme = TabConfig:Section({})
-    SecTheme:Header({ Name = WMacLib:Gradient("Penampilan (Appearance)", Color3.fromRGB(150, 100, 255), Color3.fromRGB(240, 100, 200)) })
+SecTheme:Toggle({
+    Name = "Acrylic Blur",
+    Default = Window:GetAcrylicBlurState(),
+    Callback = function(bool)
+        Window:SetAcrylicBlurState(bool)
+        Window:Notify({ Title = "Pengaturan", Description = (bool and "Mengaktifkan" or "Mematikan") .. " Blur", Lifetime = 3 })
+    end
+})
 
-    SecTheme:Dropdown({
-        Name = "Pilihan Tema (Color Themes)",
-        Options = WMacLib:GetThemes(),
-        Default = "Dark",
-        Callback = function(themeName)
-            WMacLib:SetTheme(themeName)
-            Window:Notify({ Title = "Tema", Description = "Tema diubah ke " .. tostring(themeName), Lifetime = 3 })
+SecTheme:Toggle({
+    Name = "Tampilkan Info User",
+    Default = Window:GetUserInfoState(),
+    Callback = function(bool)
+        Window:SetUserInfoState(bool)
+    end
+})
+
+-- SEKSI 2: BACKGROUND
+local SecBg = TabConfig:Section({})
+SecBg:Header({ Name = WMacLib:Gradient("Background & Window", Color3.fromRGB(70, 180, 255), Color3.fromRGB(100, 240, 180)) })
+
+-- Watermark & FPS (gunakan Heartbeat agar tidak freeze)
+local watermark = WMacLib:Watermark({ Name = "Sky Hub", Version = "v1.0.0" })
+watermark:SetVisible(false)
+
+local fpsCount, fpsElapsed = 0, 0
+RunService.Heartbeat:Connect(function(dt)
+    fpsCount += 1
+    fpsElapsed += dt
+    if fpsElapsed >= 0.5 then
+        pcall(function()
+            watermark:Set("FPS", math.round(fpsCount / fpsElapsed) .. " FPS")
+        end)
+        fpsCount = 0
+        fpsElapsed = 0
+    end
+end)
+
+SecBg:Toggle({
+    Name = "Logo Watermark & FPS Overlay",
+    Default = false,
+    Callback = function(value)
+        watermark:SetVisible(value)
+    end
+})
+
+-- Window Opacity (transparan seluruh window)
+SecBg:Slider({
+    Name = "Window Opacity (Transparansi Jendela)",
+    Default = 100,
+    Minimum = 10,
+    Maximum = 100,
+    DisplayMethod = "Percent",
+    Precision = 0,
+    Callback = function(value)
+        local opacity = value / 100
+        pcall(function()
+            -- Cari frame utama window dan atur GroupTransparency
+            local gui = CoreGui:FindFirstChild("WMacLib") or CoreGui:FindFirstChild("Sky Hub")
+            if gui then
+                for _, obj in ipairs(gui:GetDescendants()) do
+                    if obj:IsA("Frame") and obj.Name == "Main" then
+                        obj.BackgroundTransparency = 1 - opacity
+                    end
+                end
+            end
+            -- Cara alternatif: cari ScreenGui dan set property
+            for _, sg in ipairs(CoreGui:GetChildren()) do
+                if sg:IsA("ScreenGui") then
+                    local mainFrame = sg:FindFirstChild("Main", true)
+                    if mainFrame and mainFrame:IsA("Frame") then
+                        mainFrame.BackgroundTransparency = 1 - opacity
+                    end
+                end
+            end
+        end)
+        Window:Notify({ Title = "Opacity", Description = "Transparansi window: " .. value .. "%", Lifetime = 2 })
+    end
+})
+
+-- Solid When Focused (window penuh opaque saat di-fokus)
+local solidFocused = false
+local focusConn, unfocusConn
+
+SecBg:Toggle({
+    Name = "Solid When Focused (Solid saat Aktif)",
+    Default = false,
+    Callback = function(enabled)
+        solidFocused = enabled
+        if focusConn then focusConn:Disconnect() end
+        if unfocusConn then unfocusConn:Disconnect() end
+        if enabled then
+            focusConn = game:GetService("UserInputService").WindowFocused:Connect(function()
+                pcall(function()
+                    for _, sg in ipairs(CoreGui:GetChildren()) do
+                        if sg:IsA("ScreenGui") then
+                            local mf = sg:FindFirstChild("Main", true)
+                            if mf and mf:IsA("Frame") then mf.BackgroundTransparency = 0 end
+                        end
+                    end
+                end)
+            end)
+            unfocusConn = game:GetService("UserInputService").WindowFocusReleased:Connect(function()
+                pcall(function()
+                    for _, sg in ipairs(CoreGui:GetChildren()) do
+                        if sg:IsA("ScreenGui") then
+                            local mf = sg:FindFirstChild("Main", true)
+                            if mf and mf:IsA("Frame") then mf.BackgroundTransparency = 0.3 end
+                        end
+                    end
+                end)
+            end)
         end
-    })
+        Window:Notify({ Title = "Background", Description = enabled and "Solid saat window aktif." or "Dimatikan.", Lifetime = 2 })
+    end
+})
 
-    SecTheme:Toggle({
-        Name = "Acrylic Blur",
-        Default = Window:GetAcrylicBlurState(),
-        Callback = function(bool)
-            Window:SetAcrylicBlurState(bool)
-            Window:Notify({ Title = "Pengaturan", Description = (bool and "Mengaktifkan" or "Mematikan") .. " Blur", Lifetime = 3 })
-        end
-    })
+-- Panel Depth (kedalaman shadow/elevasi panel)
+SecBg:Slider({
+    Name = "Panel Depth (Kedalaman Shadow Panel)",
+    Default = 100,
+    Minimum = 0,
+    Maximum = 100,
+    DisplayMethod = "Percent",
+    Precision = 0,
+    Callback = function(value)
+        pcall(function()
+            for _, sg in ipairs(CoreGui:GetChildren()) do
+                if sg:IsA("ScreenGui") then
+                    for _, obj in ipairs(sg:GetDescendants()) do
+                        if obj:IsA("ImageLabel") and obj.Name == "Shadow" then
+                            obj.ImageTransparency = 1 - (value / 100)
+                        end
+                    end
+                end
+            end
+        end)
+    end
+})
 
-    SecTheme:Toggle({
-        Name = "Tampilkan Info User",
-        Default = Window:GetUserInfoState(),
-        Callback = function(bool)
-            Window:SetUserInfoState(bool)
-        end
-    })
+-- SEKSI 3: WINDOW SIZE & KEYBIND
+local SecWin = TabConfig:Section({})
+SecWin:Header({ Name = WMacLib:Gradient("Jendela & Kontrol", Color3.fromRGB(255, 160, 60), Color3.fromRGB(255, 80, 120)) })
 
-    -- SEKSI 2: BACKGROUND & WATERMARK
-    local SecBg = TabConfig:Section({})
-    SecBg:Header({ Name = WMacLib:Gradient("Background & Window", Color3.fromRGB(70, 180, 255), Color3.fromRGB(100, 240, 180)) })
+SecWin:Slider({
+    Name = "Ukuran Jendela (Window Size)",
+    Default = 50,
+    Minimum = 0,
+    Maximum = 100,
+    DisplayMethod = "Percent",
+    Precision = 0,
+    Callback = function(value)
+        local t = value / 100
+        Window:SetSize(UDim2.fromOffset(450 + (900 - 450) * t, 350 + (650 - 350) * t))
+    end
+})
 
-    local watermark = WMacLib:Watermark({ Name = "Sky Hub", Version = "v1.0.0" })
-    watermark:SetVisible(false)
+SecWin:Keybind({
+    Name = "Shortcut Buka / Tutup Menu",
+    Default = Enum.KeyCode.RightControl,
+    onBinded = function(bind)
+        Window:SetKeybind(bind)
+        Window:Notify({ Title = "Keybind", Description = "Tombol toggle: " .. tostring(bind.Name), Lifetime = 3 })
+    end
+})
 
-    local fpsCount, elapsed = 0, 0
-    RunService.RenderStepped:Connect(function(dt)
-        fpsCount += 1
-        elapsed += dt
-        if elapsed >= 0.5 then
-            watermark:Set("FPS", math.round(fpsCount / elapsed) .. " FPS")
-            fpsCount = 0
-            elapsed = 0
-        end
-    end)
+Window:Notify({
+    Title = "Sky Hub",
+    Description = "Player, Modifikasi & Pengaturan siap digunakan!",
+    Lifetime = 5
+})
 
-    SecBg:Toggle({
-        Name = "Logo Watermark & FPS Overlay",
-        Default = false,
-        Callback = function(value)
-            watermark:SetVisible(value)
-        end
-    })
-
-    SecBg:Slider({
-        Name = "Ukuran Jendela (Window Size)",
-        Default = 50,
-        Minimum = 0,
-        Maximum = 100,
-        DisplayMethod = "Percent",
-        Precision = 0,
-        Callback = function(value)
-            local t = value / 100
-            Window:SetSize(UDim2.fromOffset(450 + (900 - 450) * t, 350 + (650 - 350) * t))
-        end
-    })
-
-    SecBg:Keybind({
-        Name = "Shortcut Buka / Tutup Menu",
-        Default = Enum.KeyCode.RightControl,
-        onBinded = function(bind)
-            Window:SetKeybind(bind)
-            Window:Notify({ Title = "Keybind", Description = "Tombol toggle diubah ke " .. tostring(bind.Name), Lifetime = 3 })
-        end
-    })
-
-    Window:Notify({
-        Title = "Sky Hub",
-        Description = "Modifikasi, Player, dan Pengaturan lengkap siap digunakan!",
-        Lifetime = 5
-    })
-
-    print("[OK] Sky Hub (Modifikasi, Player & Pengaturan Lengkap) berhasil dijalankan!")
+print("[OK] Sky Hub berhasil dijalankan!")
