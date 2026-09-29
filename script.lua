@@ -80,6 +80,22 @@ local function reset_swap_state(st)
     st.original = {}
 end
 
+local function sanitize_accessory(acc)
+    if not acc then return end
+    for _, s in ipairs(acc:GetDescendants()) do
+        if s:IsA("BaseScript") then pcall(function() s:Destroy() end) end
+    end
+    for _, d in ipairs(acc:GetDescendants()) do
+        if d:IsA("BasePart") then
+            d.Anchored = false
+            d.CanCollide = false
+            d.CanTouch = false
+            d.CanQuery = false
+            d.Massless = true
+        end
+    end
+end
+
 local function cleanup_swap(player)
     local st = SwapState.targets[player]
     if not st then return end
@@ -101,10 +117,11 @@ local function cleanup_swap(player)
         end
         -- Jika korblox masih aktif saat swap dibersihkan, sembunyikan kaki kanan asli kembali
         if shared.KorbloxActive and shared.KorbloxActive[player] then
-            local rleg = char:FindFirstChild("Right Leg")
-            if rleg then rleg.Transparency = 1 end
-            local korb = char:FindFirstChild("Right Leg Korblox")
-            if korb then korb.Transparency = 0 end
+            local rleg = char:FindFirstChild("Original_Right_Leg") or char:FindFirstChild("Right Leg")
+            if rleg and not rleg:GetAttribute("IsKorblox") then rleg.Transparency = 1 end
+            for _, c in ipairs(char:GetChildren()) do
+                if c:GetAttribute("IsKorblox") or c.Name == "Right Leg Korblox" then c.Transparency = 0 end
+            end
         end
     end
 end
@@ -154,7 +171,7 @@ local function dress_mirror(player, char, desc, st, modelPrefix)
 
     local mapped = {}
     for _, part in ipairs(char:GetChildren()) do
-        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" and part.Name ~= "Right Leg Korblox" then
+        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" and not part:GetAttribute("IsKorblox") and part.Name ~= "Right Leg Korblox" and part.Name ~= "Original_Right_Leg" then
             local cp = model:FindFirstChild(part.Name)
             if cp and cp:IsA("BasePart") then
                 cp.Anchored = true
@@ -217,9 +234,10 @@ local function dress_mirror(player, char, desc, st, modelPrefix)
     end))
 
     local function hide(d)
-        if (d:IsA("BasePart") and d.Name ~= "HumanoidRootPart" and d.Name ~= "Right Leg Korblox")
+        if (d:IsA("BasePart") and d.Name ~= "HumanoidRootPart")
             or d:IsA("Decal") or d:IsA("Texture") then
-            if d.Parent and d.Parent.Name == "Right Leg Korblox" then return end
+            if d:GetAttribute("IsKorblox") or (d.Parent and d.Parent:GetAttribute("IsKorblox")) then return end
+            if d.Name == "Right Leg Korblox" or (d.Parent and d.Parent.Name == "Right Leg Korblox") then return end
             if d.Parent and (d.Parent:IsA("Accessory") and d.Parent:GetAttribute("IsCustomAccessory")) then return end
             if st.original[d] == nil then st.original[d] = d.Transparency end
             d.Transparency = 1
@@ -238,6 +256,7 @@ local function dress_mirror(player, char, desc, st, modelPrefix)
                         local modelAcc = objects[1]
                         local acc = modelAcc:IsA("Accessory") and modelAcc or modelAcc:FindFirstChildOfClass("Accessory")
                         if acc and model.Parent then
+                            sanitize_accessory(acc)
                             local swapHead = model:FindFirstChild("Head")
                             if swapHead then
                                 acc.Name = "CustomAcc_" .. cId
@@ -245,10 +264,6 @@ local function dress_mirror(player, char, desc, st, modelPrefix)
                                 acc:SetAttribute("IsCustomAccessory", true)
                                 local sHandle = acc:FindFirstChild("Handle")
                                 if sHandle then
-                                    sHandle.CanCollide = false
-                                    sHandle.CanTouch = false
-                                    sHandle.CanQuery = false
-                                    sHandle.Massless = true
                                     acc.Parent = model
                                     local sAttachment = sHandle:FindFirstChildOfClass("Attachment")
                                     local sHeadAttachment = swapHead:FindFirstChild(sAttachment and sAttachment.Name or "") or swapHead:FindFirstChild("HatAttachment")
@@ -259,6 +274,11 @@ local function dress_mirror(player, char, desc, st, modelPrefix)
                                     sWeld.C0 = sHeadAttachment and sHeadAttachment.CFrame or CFrame.new(0, 0.5, 0)
                                     sWeld.C1 = sAttachment and sAttachment.CFrame or CFrame.new()
                                     sWeld.Parent = sHandle
+
+                                    sanitize_accessory(acc)
+                                    for _, bp in ipairs(acc:GetDescendants()) do
+                                        if bp:IsA("BasePart") then table.insert(copyParts, bp) end
+                                    end
                                 end
                             end
                         end
@@ -488,6 +508,9 @@ local function add_accessory(targetName, assetId)
     local accessory = model:IsA("Accessory") and model or model:FindFirstChildOfClass("Accessory")
     if not accessory then return false, "Bukan objek Accessory" end
 
+    -- Bersihkan skrip & sifat fisik agar tidak nyangkut saat jalan
+    sanitize_accessory(accessory)
+
     accessory:SetAttribute("CustomAssetId", cleanId)
     accessory:SetAttribute("IsCustomAccessory", true)
 
@@ -508,21 +531,30 @@ local function add_accessory(targetName, assetId)
     weld.C1 = accAttachment.CFrame
     weld.Parent = handle
 
-    -- Jika target sedang memakai avatar swap (copy avatar), pasang juga clone aksesoris ke swap model
+    sanitize_accessory(accessory)
+
+    -- Jika target sedang memakai avatar swap (copy avatar), pasang clone ke swap model
     local swapSt = SwapState.targets[target]
     if swapSt and swapSt.model then
+        -- Sembunyikan handle di karakter asli agar tidak bentrok fisik / rendering dobel
+        handle.Transparency = 1
+        for _, ch in ipairs(handle:GetChildren()) do
+            if ch:IsA("Decal") or ch:IsA("Texture") then ch.Transparency = 1 end
+        end
+
         local swapHead = swapSt.model:FindFirstChild("Head")
         if swapHead then
             local swapAcc = accessory:Clone()
+            sanitize_accessory(swapAcc)
             swapAcc.Name = "CustomAcc_" .. cleanId
             swapAcc:SetAttribute("CustomAssetId", cleanId)
             swapAcc:SetAttribute("IsCustomAccessory", true)
             local sHandle = swapAcc:FindFirstChild("Handle")
             if sHandle then
-                sHandle.CanCollide = false
-                sHandle.CanTouch = false
-                sHandle.CanQuery = false
-                sHandle.Massless = true
+                sHandle.Transparency = 0
+                for _, ch in ipairs(sHandle:GetChildren()) do
+                    if ch:IsA("Decal") or ch:IsA("Texture") then ch.Transparency = 0 end
+                end
                 swapAcc.Parent = swapSt.model
                 local sAttachment = sHandle:FindFirstChildOfClass("Attachment")
                 local sHeadAttachment = swapHead:FindFirstChild(sAttachment and sAttachment.Name or "") or swapHead:FindFirstChild("HatAttachment")
@@ -533,6 +565,8 @@ local function add_accessory(targetName, assetId)
                 sWeld.C0 = sHeadAttachment and sHeadAttachment.CFrame or CFrame.new(0, 0.5, 0)
                 sWeld.C1 = sAttachment and sAttachment.CFrame or CFrame.new()
                 sWeld.Parent = sHandle
+
+                sanitize_accessory(swapAcc)
             end
         end
     end
@@ -694,17 +728,20 @@ local function remove_korblox(targetName)
 
     local char = target.Character
     if char then
-        -- 1. Hapus part Korblox jika ada
-        local korbPart = char:FindFirstChild("Right Leg Korblox")
-        if korbPart then korbPart:Destroy() end
-
         local torso = char:FindFirstChild("Torso")
-        local oldLimb = char:FindFirstChild("Right Leg")
+        local oldLimb = char:FindFirstChild("Original_Right_Leg") or char:FindFirstChild("Right Leg")
+
+        -- 1. Hapus part Korblox (part yang ber-attribute IsKorblox atau bernama Right Leg Korblox)
+        for _, child in ipairs(char:GetChildren()) do
+            if child:GetAttribute("IsKorblox") or child.Name == "Right Leg Korblox" or (child ~= oldLimb and child.Name == "Right Leg" and child:IsA("BasePart")) then
+                child:Destroy()
+            end
+        end
 
         if torso then
             -- Hapus Motor6D yang kita buat untuk Korblox
             for _, j in ipairs(torso:GetChildren()) do
-                if j:IsA("Motor6D") and (j.Name == "Right Hip" and (j.Part1 == nil or j.Part1 == korbPart or (oldLimb and j.Part1 ~= oldLimb))) then
+                if j:IsA("Motor6D") and (j.Name == "Right Hip" and (j.Part1 == nil or j.Part1:GetAttribute("IsKorblox") or (oldLimb and j.Part1 ~= oldLimb))) then
                     j:Destroy()
                 end
             end
@@ -716,7 +753,12 @@ local function remove_korblox(targetName)
             end
         end
 
-        -- 2. Atur kembali transparansi kaki
+        -- 2. Kembalikan nama kaki lama menjadi "Right Leg"
+        if oldLimb then
+            oldLimb.Name = "Right Leg"
+        end
+
+        -- 3. Atur kembali transparansi kaki
         local isSwapped = SwapState.targets[target] and SwapState.targets[target].model
         if isSwapped then
             -- Karakter asli tetap invisible karena sedang pakai avatar swap
@@ -756,8 +798,12 @@ local function apply_korblox(targetName, assetId, yOffset)
     if not torso or not oldLimb then return false, "Torso / Right Leg tidak ditemukan" end
 
     -- Jika Korblox sudah terpasang, hapus dulu agar bersih
-    if shared.KorbloxActive[target] or char:FindFirstChild("Right Leg Korblox") then
+    if shared.KorbloxActive[target] or char:FindFirstChild("Original_Right_Leg") or torso:FindFirstChild("Right Hip Original") then
         remove_korblox(targetName)
+        task.wait(0.05)
+        oldLimb = char:FindFirstChild("Right Leg")
+        torso = char:FindFirstChild("Torso")
+        if not torso or not oldLimb then return false, "Gagal mereset kaki sebelum pasang" end
     end
 
     local originalJoint = torso:FindFirstChild("Right Hip")
@@ -777,20 +823,30 @@ local function apply_korblox(targetName, assetId, yOffset)
     end
     if not newLimb then return false, "Part kaki tidak ditemukan" end
 
-    local offsetVal = tonumber(yOffset) or 0.7
+    -- Bersihkan script di newLimb
+    for _, s in ipairs(newLimb:GetDescendants()) do
+        if s:IsA("BaseScript") then s:Destroy() end
+    end
+
+    local offsetVal = tonumber(yOffset) or 0.5
     local originalC0 = originalJoint.C0
 
-    -- Posisi kaki Korblox sejajar dengan kaki lama + offset
+    -- Posisi kaki Korblox sejajar dengan kaki lama + offset naik
     newLimb.CFrame = oldLimb.CFrame * CFrame.new(0, offsetVal, 0)
-    newLimb.Name = "Right Leg Korblox"
+    newLimb.Anchored = false
     newLimb.CanCollide = false
     newLimb.Massless = true
     newLimb.Transparency = 0
-    newLimb.Parent = char
+    newLimb:SetAttribute("IsKorblox", true)
 
-    -- Sembunyikan kaki lama
+    -- Sembunyikan kaki lama & rename agar tidak bentrok nama
+    oldLimb.Name = "Original_Right_Leg"
     oldLimb.Transparency = 1
     oldLimb.CanCollide = false
+
+    -- Beri nama "Right Leg" pada newLimb agar Animator R6 Roblox menganimasikannya!
+    newLimb.Name = "Right Leg"
+    newLimb.Parent = char
 
     -- Putuskan Part1 joint asli dan rename agar bisa di-undo
     originalJoint.Name = "Right Hip Original"
@@ -1526,7 +1582,7 @@ SecBody:Button({
     Callback = function()
         Window:Notify({ Title = "Korblox", Description = "Memasang Korblox leg...", Lifetime = 3 })
         task.spawn(function()
-            local success, msg = apply_korblox(mod_target, 139607718, 0.7)
+            local success, msg = apply_korblox(mod_target, 139607718, 0.5)
             Window:Notify({
                 Title = success and "Berhasil!" or "Gagal!",
                 Description = msg or "",
