@@ -538,7 +538,7 @@ local WMacLib = loadstring(game:HttpGetAsync("https://raw.githubusercontent.com/
 local Window = WMacLib:Window({
     Title = "Sky Hub",
     Subtitle = "Universal Studio",
-    Size = UDim2.fromOffset(780, 480),
+    Size = UDim2.fromOffset(560, 430),
     DragStyle = 1,
     DisabledWindowControls = {},
     ShowUserInfo = true,
@@ -563,12 +563,12 @@ local acc_id = "10159600649"
 local mod_target = ""
 
 -- ==============================================================================
--- TAB TUNGGAL: MODIFIKASI (ALL-IN-ONE)
+-- TAB TUNGGAL: MODIFIKASI (VERTIKAL SCROLL KE BAWAH)
 -- ==============================================================================
 local TabMod = tabGroup:Tab({ Name = "Modifikasi", Image = "lucide/sparkles" })
 
--- SISI KIRI: AVATAR & OUTFIT
-local SecAvatar = TabMod:Section({ Side = "Left" })
+-- SEKSI 1: SALIN AVATAR PEMAIN
+local SecAvatar = TabMod:Section({})
 SecAvatar:Header({ Name = WMacLib:Gradient("Salin Avatar Pemain", Color3.fromRGB(70, 150, 255), Color3.fromRGB(160, 100, 255)) })
 
 SecAvatar:Input({
@@ -615,7 +615,8 @@ SecAvatar:Button({
     end,
 })
 
-local SecOutfit = TabMod:Section({ Side = "Left" })
+-- SEKSI 2: KLONING OUTFIT TERSIMPAN
+local SecOutfit = TabMod:Section({})
 SecOutfit:Header({ Name = WMacLib:Gradient("Kloning Outfit Tersimpan", Color3.fromRGB(240, 100, 200), Color3.fromRGB(150, 80, 255)) })
 
 SecOutfit:Input({
@@ -658,8 +659,8 @@ SecOutfit:Button({
     end,
 })
 
--- SISI KANAN: AKSESORIS & TUBUH (KORBLOX / HEADLESS)
-local SecAcc = TabMod:Section({ Side = "Right" })
+-- SEKSI 3: PEMUAT AKSESORIS CATALOG
+local SecAcc = TabMod:Section({})
 SecAcc:Header({ Name = WMacLib:Gradient("Pemuat Aksesoris Catalog", Color3.fromRGB(50, 220, 150), Color3.fromRGB(70, 180, 255)) })
 
 SecAcc:Input({
@@ -694,7 +695,8 @@ SecAcc:Button({
     end,
 })
 
-local SecBody = TabMod:Section({ Side = "Right" })
+-- SEKSI 4: KORBLOX & HEADLESS
+local SecBody = TabMod:Section({})
 SecBody:Header({ Name = WMacLib:Gradient("Korblox & Headless", Color3.fromRGB(255, 120, 70), Color3.fromRGB(255, 70, 100)) })
 
 SecBody:Input({
