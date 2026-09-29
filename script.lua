@@ -1534,9 +1534,203 @@ SecUtil:Toggle({
 })
 
 -- ==============================================================================
--- TAB 2: MODIFIKASI (VERTIKAL SCROLL KE BAWAH)
+-- MODUL CROSSHAIR
+-- ==============================================================================
+local crosshairGui = nil
+local crosshairEnabled = false
+local crosshairOffsetX = 0
+local crosshairOffsetY = 0
+local crosshairSize = 20
+local crosshairThickness = 2
+local crosshairGap = 5
+local crosshairColor = Color3.fromRGB(255, 255, 255)
+local crosshairOpacity = 1.0
+
+local function destroy_crosshair()
+    if crosshairGui then
+        pcall(function() crosshairGui:Destroy() end)
+        crosshairGui = nil
+    end
+end
+
+local function build_crosshair()
+    destroy_crosshair()
+
+    local parent = (gethui and gethui()) or (cloneref and cloneref(CoreGui)) or CoreGui
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "SkyCrosshair"
+    sg.ResetOnSpawn = false
+    sg.DisplayOrder = 999999
+    sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    pcall(function() sg.IgnoreGuiInset = true end)
+    sg.Parent = parent
+    crosshairGui = sg
+
+    local function makeBar(w, h, ox, oy)
+        local f = Instance.new("Frame")
+        f.AnchorPoint = Vector2.new(0.5, 0.5)
+        f.Size = UDim2.fromOffset(w, h)
+        f.Position = UDim2.new(0.5, crosshairOffsetX + ox, 0.5, crosshairOffsetY + oy)
+        f.BackgroundColor3 = crosshairColor
+        f.BackgroundTransparency = 1 - crosshairOpacity
+        f.BorderSizePixel = 0
+        f.Name = "Bar"
+        f.Parent = sg
+        Instance.new("UICorner", f).CornerRadius = UDim.new(0, 1)
+        return f
+    end
+
+    local half = crosshairGap + crosshairSize / 2
+    -- Atas
+    makeBar(crosshairThickness, crosshairSize, 0, -(half + crosshairSize / 2))
+    -- Bawah
+    makeBar(crosshairThickness, crosshairSize, 0, (half + crosshairSize / 2))
+    -- Kiri
+    makeBar(crosshairSize, crosshairThickness, -(half + crosshairSize / 2), 0)
+    -- Kanan
+    makeBar(crosshairSize, crosshairThickness, (half + crosshairSize / 2), 0)
+    -- Titik tengah
+    local dot = Instance.new("Frame")
+    dot.AnchorPoint = Vector2.new(0.5, 0.5)
+    dot.Size = UDim2.fromOffset(crosshairThickness + 1, crosshairThickness + 1)
+    dot.Position = UDim2.new(0.5, crosshairOffsetX, 0.5, crosshairOffsetY)
+    dot.BackgroundColor3 = crosshairColor
+    dot.BackgroundTransparency = 1 - crosshairOpacity
+    dot.BorderSizePixel = 0
+    dot.Name = "Dot"
+    dot.Parent = sg
+    Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+end
+
+local function toggle_crosshair(enable)
+    crosshairEnabled = enable
+    if enable then
+        build_crosshair()
+    else
+        destroy_crosshair()
+    end
+end
+
+local function update_crosshair()
+    if crosshairEnabled then build_crosshair() end
+end
+
+-- ==============================================================================
+-- TAB 2: COMBAT (CROSSHAIR)
+-- ==============================================================================
+local TabCombat = tabGroup:Tab({ Name = "Combat", Image = "lucide/crosshair" })
+
+local SecCross = TabCombat:Section({})
+SecCross:Header({ Name = WMacLib:Gradient("Crosshair", Color3.fromRGB(255, 80, 80), Color3.fromRGB(255, 180, 50)) })
+
+SecCross:Toggle({
+    Name = "Aktifkan Crosshair",
+    Default = false,
+    Callback = function(enabled)
+        toggle_crosshair(enabled)
+        Window:Notify({
+            Title = "Crosshair",
+            Description = enabled and "Crosshair diaktifkan!" or "Crosshair dimatikan.",
+            Lifetime = 3
+        })
+    end
+})
+
+SecCross:Slider({
+    Name = "Ukuran Crosshair",
+    Default = 20,
+    Minimum = 5,
+    Maximum = 80,
+    DisplayMethod = "Round",
+    Precision = 0,
+    Callback = function(val)
+        crosshairSize = val
+        update_crosshair()
+    end
+})
+
+SecCross:Slider({
+    Name = "Ketebalan Garis",
+    Default = 2,
+    Minimum = 1,
+    Maximum = 10,
+    DisplayMethod = "Round",
+    Precision = 0,
+    Callback = function(val)
+        crosshairThickness = val
+        update_crosshair()
+    end
+})
+
+SecCross:Slider({
+    Name = "Celah Tengah (Gap)",
+    Default = 5,
+    Minimum = 0,
+    Maximum = 30,
+    DisplayMethod = "Round",
+    Precision = 0,
+    Callback = function(val)
+        crosshairGap = val
+        update_crosshair()
+    end
+})
+
+SecCross:Slider({
+    Name = "Opacity / Transparansi",
+    Default = 10,
+    Minimum = 1,
+    Maximum = 10,
+    DisplayMethod = "Round",
+    Precision = 0,
+    Callback = function(val)
+        crosshairOpacity = val / 10
+        update_crosshair()
+    end
+})
+
+-- Posisi X (kiri/kanan dari tengah layar)
+SecCross:Slider({
+    Name = "Posisi X (Kiri - Kanan)",
+    Default = 0,
+    Minimum = -500,
+    Maximum = 500,
+    DisplayMethod = "Round",
+    Precision = 0,
+    Callback = function(val)
+        crosshairOffsetX = val
+        update_crosshair()
+    end
+})
+
+-- Posisi Y (atas/bawah dari tengah layar)
+SecCross:Slider({
+    Name = "Posisi Y (Atas - Bawah)",
+    Default = 0,
+    Minimum = -300,
+    Maximum = 300,
+    DisplayMethod = "Round",
+    Precision = 0,
+    Callback = function(val)
+        crosshairOffsetY = val
+        update_crosshair()
+    end
+})
+
+SecCross:Button({
+    Name = "Reset Posisi ke Tengah",
+    Callback = function()
+        crosshairOffsetX = 0
+        crosshairOffsetY = 0
+        update_crosshair()
+        Window:Notify({ Title = "Crosshair", Description = "Posisi crosshair dikembalikan ke tengah layar.", Lifetime = 3 })
+    end
+})
+
+-- ==============================================================================
+-- TAB 3: MODIFIKASI (VERTIKAL SCROLL KE BAWAH)
 -- ==============================================================================
 local TabMod = tabGroup:Tab({ Name = "Modifikasi", Image = "lucide/sparkles" })
+
 
 -- SEKSI 1: SALIN AVATAR PEMAIN
 local SecAvatar = TabMod:Section({})
