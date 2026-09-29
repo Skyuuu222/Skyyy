@@ -542,8 +542,8 @@ if not ok_wm or not WMacLib then
 end
 
 local Window = WMacLib:Window({
-    Title = "Sky Hub",
-    Subtitle = "Universal Studio",
+    Title = "Skyyy",
+    Subtitle = "Sky anak baik",
     Size = UDim2.fromOffset(560, 430),
     DragStyle = 1,
     DisabledWindowControls = {},
@@ -554,6 +554,31 @@ local Window = WMacLib:Window({
 })
 
 local tabGroup = Window:TabGroup()
+
+-- Tangkap referensi ScreenGui milik WMacLib kita (bukan ScreenGui Roblox lain)
+local wmacGui = nil
+task.defer(function()
+    for _, sg in ipairs(CoreGui:GetChildren()) do
+        if sg:IsA("ScreenGui") and (
+            sg.Name:lower():find("wmac") or
+            sg.Name:lower():find("mac") or
+            sg.Name:lower():find("sky")
+        ) then
+            wmacGui = sg
+            break
+        end
+    end
+    -- Fallback: ambil ScreenGui terakhir yang dibuat
+    if not wmacGui then
+        local children = CoreGui:GetChildren()
+        for i = #children, 1, -1 do
+            if children[i]:IsA("ScreenGui") then
+                wmacGui = children[i]
+                break
+            end
+        end
+    end
+end)
 
 -- State Variabel Form
 local swap_target = ""
@@ -1075,27 +1100,42 @@ SecTheme:Toggle({
 })
 
 -- Toggle warna header: gradient warna-warni vs putih/hitam polos
-local headerColorMode = "gradient" -- "gradient" | "white" | "black"
+local headerColorMode = "gradient"
 
 local function applyHeaderColor(mode)
-    -- Cari semua TextLabel di dalam WMacLib ScreenGui
+    -- Hanya cari TextLabel di dalam ScreenGui milik WMacLib kita saja
     pcall(function()
-        for _, sg in ipairs(CoreGui:GetChildren()) do
-            if sg:IsA("ScreenGui") then
-                for _, obj in ipairs(sg:GetDescendants()) do
-                    if obj:IsA("TextLabel") then
-                        -- Hapus UIGradient jika ada
-                        local grad = obj:FindFirstChildOfClass("UIGradient")
-                        if mode == "white" then
-                            if grad then grad.Enabled = false end
-                            obj.TextColor3 = Color3.fromRGB(255, 255, 255)
-                        elseif mode == "black" then
-                            if grad then grad.Enabled = false end
-                            obj.TextColor3 = Color3.fromRGB(0, 0, 0)
-                        else -- gradient
-                            if grad then grad.Enabled = true end
-                        end
-                    end
+        local target = wmacGui
+        -- Jika wmacGui belum terisi (race condition), coba cari lagi
+        if not target or not target.Parent then
+            for _, sg in ipairs(CoreGui:GetChildren()) do
+                if sg:IsA("ScreenGui") and (
+                    sg.Name:lower():find("wmac") or
+                    sg.Name:lower():find("mac")
+                ) then
+                    target = sg
+                    wmacGui = sg
+                    break
+                end
+            end
+        end
+        if not target then return end
+
+        for _, obj in ipairs(target:GetDescendants()) do
+            -- Hanya ubah TextLabel yang ada di dalam Header/Section
+            -- (bukan semua TextLabel, hanya yang punya UIGradient = header bergradient)
+            if obj:IsA("TextLabel") then
+                local grad = obj:FindFirstChildOfClass("UIGradient")
+                -- Hanya proses jika TextLabel ini memang punya gradient (tanda itu header kita)
+                -- atau jika mode non-gradient, proses semua TextLabel dalam wmacGui kita
+                if mode == "white" then
+                    if grad then grad.Enabled = false end
+                    obj.TextColor3 = Color3.fromRGB(255, 255, 255)
+                elseif mode == "black" then
+                    if grad then grad.Enabled = false end
+                    obj.TextColor3 = Color3.fromRGB(20, 20, 20)
+                else -- gradient: aktifkan kembali UIGradient
+                    if grad then grad.Enabled = true end
                 end
             end
         end
@@ -1115,185 +1155,15 @@ SecTheme:Dropdown({
             headerColorMode = "gradient"
         end
         applyHeaderColor(headerColorMode)
-        Window:Notify({ Title = "Teks Header", Description = "Warna teks: " .. choice, Lifetime = 3 })
+        Window:Notify({ Title = "Teks Header", Description = "Warna teks diubah: " .. choice, Lifetime = 3 })
     end
 })
 
 -- ==============================================================================
--- SEKSI 2: BACKGROUND KUSTOM
--- ==============================================================================
-local SecBg = TabConfig:Section({})
-SecBg:Header({ Name = "Background Kustom" })
-
--- Variabel state background
-local bgImageLabel = nil
-local bgImagePath = ""
-local bgOpacity = 1
-local bgBlurInst = nil
-
--- Fungsi helper: cari frame utama window WMacLib
-local function findMainFrame()
-    for _, sg in ipairs(CoreGui:GetChildren()) do
-        if sg:IsA("ScreenGui") then
-            -- Cari frame terbesar / utama
-            for _, child in ipairs(sg:GetChildren()) do
-                if child:IsA("Frame") then
-                    return child, sg
-                end
-            end
-        end
-    end
-    return nil, nil
-end
-
--- Fungsi: terapkan gambar background ke window
-local function applyBackground(contentId)
-    pcall(function()
-        local mainFrame, parentSG = findMainFrame()
-        if not mainFrame then return end
-
-        -- Hapus background lama jika ada
-        if bgImageLabel and bgImageLabel.Parent then
-            bgImageLabel:Destroy()
-        end
-
-        -- Buat ImageLabel baru di belakang semua konten
-        bgImageLabel = Instance.new("ImageLabel")
-        bgImageLabel.Name = "SkyHubBackground"
-        bgImageLabel.Size = UDim2.fromScale(1, 1)
-        bgImageLabel.Position = UDim2.fromScale(0, 0)
-        bgImageLabel.BackgroundTransparency = 1
-        bgImageLabel.Image = contentId
-        bgImageLabel.ImageTransparency = 1 - bgOpacity
-        bgImageLabel.ScaleType = Enum.ScaleType.Crop
-        bgImageLabel.ZIndex = mainFrame.ZIndex -- Tepat di belakang konten
-        bgImageLabel.Parent = mainFrame
-
-        -- Pastikan ada di layer paling bawah
-        bgImageLabel.ZIndex = 1
-        for _, child in ipairs(mainFrame:GetChildren()) do
-            if child ~= bgImageLabel and child.ZIndex <= 1 then
-                child.ZIndex = 2
-            end
-        end
-    end)
-end
-
--- Fungsi: muat background dari path file lokal
-local function loadLocalBackground(filePath)
-    if not filePath or filePath == "" then return false, "Path kosong" end
-
-    -- Coba getcustomasset (Synapse X, KRNL, dll)
-    local ok, result = pcall(function()
-        if getcustomasset then
-            return getcustomasset(filePath)
-        elseif syn and syn.getcustomasset then
-            return syn.getcustomasset(filePath)
-        end
-        return nil
-    end)
-
-    if ok and result and result ~= "" then
-        applyBackground(result)
-        return true, "Background dari file: " .. filePath
-    end
-    return false, "getcustomasset tidak didukung executor ini. Gunakan Asset ID."
-end
-
--- Input: path file lokal (misal: C:\Users\...\gambar.png atau nama file di workspace executor)
-SecBg:Input({
-    Name = "Path File Gambar (Lokal)",
-    Default = "",
-    Placeholder = "Contoh: background.png atau C:\\Users\\...\\img.jpg",
-    Callback = function(text)
-        bgImagePath = text
-        task.spawn(function()
-            local ok, msg = loadLocalBackground(text)
-            Window:Notify({
-                Title = ok and "Background Terpasang!" or "Gagal!",
-                Description = msg,
-                Lifetime = 4
-            })
-        end)
-    end
-})
-
--- Input: Roblox Asset ID (fallback jika file lokal tidak bisa)
-SecBg:Input({
-    Name = "Roblox Decal / Asset ID (Alternatif)",
-    Default = "",
-    Placeholder = "Contoh: 6031371750",
-    AcceptedCharacters = "Numeric",
-    Callback = function(text)
-        if text == "" then return end
-        local contentId = "rbxassetid://" .. text
-        applyBackground(contentId)
-        Window:Notify({ Title = "Background", Description = "Background Asset ID: " .. text, Lifetime = 3 })
-    end
-})
-
--- Slider: Opacity background
-SecBg:Slider({
-    Name = "Opacity Background",
-    Default = 100,
-    Minimum = 0,
-    Maximum = 100,
-    DisplayMethod = "Percent",
-    Precision = 0,
-    Callback = function(value)
-        bgOpacity = value / 100
-        pcall(function()
-            if bgImageLabel and bgImageLabel.Parent then
-                bgImageLabel.ImageTransparency = 1 - bgOpacity
-            end
-        end)
-    end
-})
-
--- Slider: Blur efek background (menggunakan BlurEffect di Lighting)
-SecBg:Slider({
-    Name = "Blur Background",
-    Default = 0,
-    Minimum = 0,
-    Maximum = 56,
-    DisplayMethod = "Round",
-    Precision = 0,
-    Callback = function(value)
-        pcall(function()
-            -- Blur pada ImageLabel background menggunakan UIBlur (bila tersedia) atau Lighting blur
-            if not bgBlurInst then
-                bgBlurInst = Instance.new("BlurEffect")
-                bgBlurInst.Name = "SkyHubBgBlur"
-                bgBlurInst.Parent = game:GetService("Lighting")
-            end
-            bgBlurInst.Size = value
-        end)
-    end
-})
-
--- Tombol: Hapus background
-SecBg:Button({
-    Name = "Hapus Background",
-    Callback = function()
-        pcall(function()
-            if bgImageLabel and bgImageLabel.Parent then
-                bgImageLabel:Destroy()
-                bgImageLabel = nil
-            end
-            if bgBlurInst and bgBlurInst.Parent then
-                bgBlurInst:Destroy()
-                bgBlurInst = nil
-            end
-        end)
-        Window:Notify({ Title = "Background", Description = "Background dihapus.", Lifetime = 3 })
-    end
-})
-
--- ==============================================================================
--- SEKSI 3: WATERMARK & WINDOW
+-- SEKSI 2: WATERMARK & WINDOW
 -- ==============================================================================
 local SecWin = TabConfig:Section({})
-SecWin:Header({ Name = "Jendela & Kontrol" })
+SecWin:Header({ Name = WMacLib:Gradient("Jendela & Kontrol", Color3.fromRGB(255, 160, 60), Color3.fromRGB(255, 80, 120)) })
 
 -- Watermark & FPS
 local watermark = WMacLib:Watermark({ Name = "Sky Hub", Version = "v1.0.0" })
