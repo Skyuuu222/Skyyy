@@ -749,35 +749,317 @@ SecBody:Button({
 })
 
 -- ==============================================================================
--- TAB PENGATURAN & TEMA
+-- MODUL 5: PLAYER CONTROLS (SPEED & INFINITE YIELD FLY ENGINE)
 -- ==============================================================================
-tabGroup:Divider()
-local TabConfig = tabGroup:Tab({ Name = "Pengaturan", Image = "lucide/settings" })
-local SecConfig = TabConfig:Section({ Side = "Left" })
+local currentSpeed = 16
+local loopSpeed = false
+local speedConn = nil
 
-SecConfig:Header({ Name = "Pengaturan UI" })
+local function set_player_speed(val)
+    local num = tonumber(val)
+    if not num then return end
+    currentSpeed = num
+    local char = LocalPlayer.Character
+    if char then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then hum.WalkSpeed = currentSpeed end
+    end
+end
 
-SecConfig:Toggle({
-    Name = "Acrylic Blur",
-    Default = Window:GetAcrylicBlurState(),
-    Callback = function(bool)
-        Window:SetAcrylicBlurState(bool)
-        Window:Notify({ Title = "Pengaturan", Description = (bool and "Mengaktifkan" or "Mematikan") .. " Blur", Lifetime = 3 })
+local function toggle_loop_speed(enabled)
+    loopSpeed = enabled
+    if speedConn then speedConn:Disconnect(); speedConn = nil end
+    if loopSpeed then
+        speedConn = RunService.Heartbeat:Connect(function()
+            local char = LocalPlayer.Character
+            if char then
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                if hum and hum.WalkSpeed ~= currentSpeed then
+                    hum.WalkSpeed = currentSpeed
+                end
+            end
+        end)
+    end
+end
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+    task.wait(0.5)
+    local hum = char:WaitForChild("Humanoid", 5)
+    if hum and loopSpeed then
+        hum.WalkSpeed = currentSpeed
+    end
+end)
+
+-- FLY ENGINE (INFINITE YIELD MECHANISM)
+local FLYING = false
+local flySpeed = 1
+local flyConn = nil
+local flyBG = nil
+local flyBV = nil
+local flyKeyDown = nil
+local flyKeyUp = nil
+
+local function stop_fly()
+    FLYING = false
+    if flyConn then pcall(function() flyConn:Disconnect() end); flyConn = nil end
+    if flyKeyDown then pcall(function() flyKeyDown:Disconnect() end); flyKeyDown = nil end
+    if flyKeyUp then pcall(function() flyKeyUp:Disconnect() end); flyKeyUp = nil end
+    if flyBG then pcall(function() flyBG:Destroy() end); flyBG = nil end
+    if flyBV then pcall(function() flyBV:Destroy() end); flyBV = nil end
+
+    local char = LocalPlayer.Character
+    if char then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then hum.PlatformStand = false end
+    end
+end
+
+local function start_fly()
+    if FLYING then return end
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not hum or not root then return end
+
+    stop_fly()
+    FLYING = true
+    hum.PlatformStand = true
+
+    flyBG = Instance.new("BodyGyro")
+    flyBV = Instance.new("BodyVelocity")
+
+    flyBG.P = 9e4
+    flyBG.maxTorque = Vector3.new(9e9, 9e9, 9e9)
+    flyBG.cframe = root.CFrame
+    flyBG.Parent = root
+
+    flyBV.velocity = Vector3.new(0, 0, 0)
+    flyBV.maxForce = Vector3.new(9e9, 9e9, 9e9)
+    flyBV.Parent = root
+
+    local CONTROL = {F = 0, B = 0, L = 0, R = 0, Q = 0, E = 0}
+
+    flyKeyDown = UserInputService.InputBegan:Connect(function(input, gpe)
+        if gpe then return end
+        if input.KeyCode == Enum.KeyCode.W then CONTROL.F = 1
+        elseif input.KeyCode == Enum.KeyCode.S then CONTROL.B = -1
+        elseif input.KeyCode == Enum.KeyCode.A then CONTROL.L = -1
+        elseif input.KeyCode == Enum.KeyCode.D then CONTROL.R = 1
+        elseif input.KeyCode == Enum.KeyCode.Space or input.KeyCode == Enum.KeyCode.E then CONTROL.Q = 1
+        elseif input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.Q then CONTROL.E = -1
+        end
+    end)
+
+    flyKeyUp = UserInputService.InputEnded:Connect(function(input)
+        if input.KeyCode == Enum.KeyCode.W then CONTROL.F = 0
+        elseif input.KeyCode == Enum.KeyCode.S then CONTROL.B = 0
+        elseif input.KeyCode == Enum.KeyCode.A then CONTROL.L = 0
+        elseif input.KeyCode == Enum.KeyCode.D then CONTROL.R = 0
+        elseif input.KeyCode == Enum.KeyCode.Space or input.KeyCode == Enum.KeyCode.E then CONTROL.Q = 0
+        elseif input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.Q then CONTROL.E = 0
+        end
+    end)
+
+    flyConn = RunService.RenderStepped:Connect(function()
+        if not FLYING or not char.Parent or not root.Parent or not hum.Parent then
+            stop_fly()
+            return
+        end
+
+        hum.PlatformStand = true
+        local cam = workspace.CurrentCamera
+        flyBG.cframe = cam.CFrame
+
+        local speedMultiplier = flySpeed * 50
+        local vel = Vector3.new(0, 0, 0)
+
+        -- Dukungan Mobile Joystick (MoveDirection)
+        local moveDir = hum.MoveDirection
+        if moveDir.Magnitude > 0 then
+            vel = vel + (moveDir * speedMultiplier)
+        end
+
+        -- Dukungan Keyboard WASD
+        if CONTROL.F + CONTROL.B ~= 0 or CONTROL.L + CONTROL.R ~= 0 then
+            local forward = cam.CFrame.LookVector
+            local right = cam.CFrame.RightVector
+            vel = vel + (forward * (CONTROL.F + CONTROL.B) + right * (CONTROL.L + CONTROL.R)) * speedMultiplier
+        end
+
+        -- Dukungan Naik/Turun (Space/E dan Shift/Q)
+        if CONTROL.Q + CONTROL.E ~= 0 then
+            vel = vel + (Vector3.new(0, 1, 0) * (CONTROL.Q + CONTROL.E) * speedMultiplier)
+        end
+
+        flyBV.velocity = vel
+    end)
+
+    hum.Died:Connect(function()
+        stop_fly()
+    end)
+end
+
+-- ==============================================================================
+-- TAB 2: PLAYER (SPEED & FLY)
+-- ==============================================================================
+local TabPlayer = tabGroup:Tab({ Name = "Player", Image = "lucide/user" })
+
+-- SEKSI 1: SPEED PLAYER
+local SecSpeed = TabPlayer:Section({})
+SecSpeed:Header({ Name = WMacLib:Gradient("Kecepatan Pemain (WalkSpeed)", Color3.fromRGB(80, 200, 255), Color3.fromRGB(120, 100, 255)) })
+
+SecSpeed:Slider({
+    Name = "WalkSpeed Slider",
+    Default = 16,
+    Minimum = 16,
+    Maximum = 300,
+    DisplayMethod = "Round",
+    Precision = 0,
+    Callback = function(val)
+        set_player_speed(val)
     end
 })
 
-SecConfig:Toggle({
-    Name = "Tampilkan Info User",
-    Default = Window:GetUserInfoState(),
-    Callback = function(bool)
-        Window:SetUserInfoState(bool)
+SecSpeed:Input({
+    Name = "Custom WalkSpeed",
+    Default = "16",
+    Placeholder = "Ketik angka (misal: 50)...",
+    AcceptedCharacters = "Numeric",
+    Callback = function(text)
+        set_player_speed(text)
+        Window:Notify({ Title = "Player Speed", Description = "WalkSpeed diubah ke " .. tostring(text), Lifetime = 3 })
     end
 })
 
-Window:Notify({
-    Title = "Sky Hub",
-    Description = "Semua fitur telah disatukan di tab Modifikasi!",
-    Lifetime = 5
+SecSpeed:Toggle({
+    Name = "Kunci WalkSpeed (Anti-Reset)",
+    Default = false,
+    Callback = function(enabled)
+        toggle_loop_speed(enabled)
+        Window:Notify({
+            Title = "WalkSpeed",
+            Description = enabled and "WalkSpeed dikunci secara konstan!" or "Kunci WalkSpeed dimatikan.",
+            Lifetime = 3
+        })
+    end
 })
 
-print("[OK] Sky Hub (Modifikasi All-in-One) berhasil dijalankan!")
+SecSpeed:Button({
+    Name = "Reset WalkSpeed (Default 16)",
+    Callback = function()
+        set_player_speed(16)
+        Window:Notify({ Title = "WalkSpeed", Description = "WalkSpeed kembali ke normal (16).", Lifetime = 3 })
+    end
+})
+
+-- SEKSI 2: FLY ENGINE
+local SecFly = TabPlayer:Section({})
+SecFly:Header({ Name = WMacLib:Gradient("Terbang (Infinite Yield Fly)", Color3.fromRGB(255, 170, 50), Color3.fromRGB(255, 80, 120)) })
+
+SecFly:Toggle({
+    Name = "Aktifkan Fly",
+    Default = false,
+    Callback = function(enabled)
+        if enabled then
+            start_fly()
+            Window:Notify({ Title = "Fly", Description = "Mode terbang diaktifkan!", Lifetime = 3 })
+        else
+            stop_fly()
+            Window:Notify({ Title = "Fly", Description = "Mode terbang dimatikan.", Lifetime = 3 })
+        end
+    end
+})
+
+SecFly:Slider({
+    Name = "Kecepatan Fly (Speed)",
+    Default = 1,
+    Minimum = 1,
+    Maximum = 10,
+    DisplayMethod = "Round",
+    Precision = 0,
+    Callback = function(val)
+        flySpeed = val
+    end
+})
+
+    SecFly:Input({
+        Name = "Custom Fly Speed",
+        Default = "1",
+        Placeholder = "Ketik kecepatan fly...",
+        AcceptedCharacters = "Numeric",
+        Callback = function(text)
+            local num = tonumber(text)
+            if num and num > 0 then
+                flySpeed = num
+                Window:Notify({ Title = "Fly Speed", Description = "Kecepatan terbang diubah ke " .. tostring(num), Lifetime = 3 })
+            end
+        end
+    })
+
+    -- SEKSI 3: UTILITY (ANTI-AFK)
+    local VirtualUser = cloneref and cloneref(game:GetService("VirtualUser")) or game:GetService("VirtualUser")
+    local antiAfkConn = nil
+
+    local function toggle_anti_afk(enabled)
+        if antiAfkConn then
+            antiAfkConn:Disconnect()
+            antiAfkConn = nil
+        end
+        if enabled then
+            antiAfkConn = LocalPlayer.Idled:Connect(function()
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.new())
+            end)
+        end
+    end
+
+    local SecUtil = TabPlayer:Section({})
+    SecUtil:Header({ Name = WMacLib:Gradient("Player Utility", Color3.fromRGB(100, 240, 160), Color3.fromRGB(60, 180, 255)) })
+
+    SecUtil:Toggle({
+        Name = "Anti-AFK (Cegah Disconnect 20 Menit)",
+        Default = false,
+        Callback = function(enabled)
+            toggle_anti_afk(enabled)
+            Window:Notify({
+                Title = "Anti-AFK",
+                Description = enabled and "Anti-AFK aktif! Anda tidak akan di-kick karena AFK." or "Anti-AFK dinonaktifkan.",
+                Lifetime = 3
+            })
+        end
+    })
+
+    -- ==============================================================================
+    -- TAB PENGATURAN & TEMA
+    -- ==============================================================================
+    tabGroup:Divider()
+    local TabConfig = tabGroup:Tab({ Name = "Pengaturan", Image = "lucide/settings" })
+    local SecConfig = TabConfig:Section({ Side = "Left" })
+
+    SecConfig:Header({ Name = "Pengaturan UI" })
+
+    SecConfig:Toggle({
+        Name = "Acrylic Blur",
+        Default = Window:GetAcrylicBlurState(),
+        Callback = function(bool)
+            Window:SetAcrylicBlurState(bool)
+            Window:Notify({ Title = "Pengaturan", Description = (bool and "Mengaktifkan" or "Mematikan") .. " Blur", Lifetime = 3 })
+        end
+    })
+
+    SecConfig:Toggle({
+        Name = "Tampilkan Info User",
+        Default = Window:GetUserInfoState(),
+        Callback = function(bool)
+            Window:SetUserInfoState(bool)
+        end
+    })
+
+    Window:Notify({
+        Title = "Sky Hub",
+        Description = "Modifikasi, Player (Speed, Fly & Anti-AFK) siap digunakan!",
+        Lifetime = 5
+    })
+
+    print("[OK] Sky Hub (Modifikasi & Player & Anti-AFK) berhasil dijalankan!")
