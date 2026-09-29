@@ -223,6 +223,8 @@ local function dress_mirror(player, char, desc, st, modelPrefix)
         end
     end))
 
+    st.accFollowers = {}
+
     table.insert(st.conns, RunService.RenderStepped:Connect(function()
         if not hrp.Parent then return end
         local root = hrp.CFrame
@@ -230,6 +232,14 @@ local function dress_mirror(player, char, desc, st, modelPrefix)
         local lift = CFrame.new(0, heightDiff, 0)
         for _, p in ipairs(mapped) do
             p[2].CFrame = root * lift * (inv * p[1].CFrame)
+        end
+        local swapHead = model:FindFirstChild("Head")
+        if swapHead then
+            for _, item in ipairs(st.accFollowers or {}) do
+                if item.part and item.part.Parent then
+                    item.part.CFrame = swapHead.CFrame * item.offset
+                end
+            end
         end
     end))
 
@@ -246,8 +256,9 @@ local function dress_mirror(player, char, desc, st, modelPrefix)
     for _, d in ipairs(char:GetDescendants()) do hide(d) end
     table.insert(st.conns, char.DescendantAdded:Connect(hide))
 
-    -- Pasang Custom Accessories yang aktif jika target memiliki custom accessories
+    -- Pasang Custom Accessories yang aktif sebagai visual puppet (Anchored + CFrame Follower = 100% Anti-Nyangkut)
     if shared.CustomAccessories and shared.CustomAccessories[player] then
+        local swapHead = model:FindFirstChild("Head")
         for _, cId in ipairs(shared.CustomAccessories[player]) do
             task.spawn(function()
                 pcall(function()
@@ -255,32 +266,28 @@ local function dress_mirror(player, char, desc, st, modelPrefix)
                     if okLoad and objects and #objects > 0 then
                         local modelAcc = objects[1]
                         local acc = modelAcc:IsA("Accessory") and modelAcc or modelAcc:FindFirstChildOfClass("Accessory")
-                        if acc and model.Parent then
-                            sanitize_accessory(acc)
-                            local swapHead = model:FindFirstChild("Head")
-                            if swapHead then
-                                acc.Name = "CustomAcc_" .. cId
-                                acc:SetAttribute("CustomAssetId", cId)
-                                acc:SetAttribute("IsCustomAccessory", true)
-                                local sHandle = acc:FindFirstChild("Handle")
-                                if sHandle then
-                                    acc.Parent = model
-                                    local sAttachment = sHandle:FindFirstChildOfClass("Attachment")
-                                    local sHeadAttachment = swapHead:FindFirstChild(sAttachment and sAttachment.Name or "") or swapHead:FindFirstChild("HatAttachment")
-                                    local sWeld = Instance.new("Weld")
-                                    sWeld.Name = "AccessoryWeld"
-                                    sWeld.Part0 = swapHead
-                                    sWeld.Part1 = sHandle
-                                    sWeld.C0 = sHeadAttachment and sHeadAttachment.CFrame or CFrame.new(0, 0.5, 0)
-                                    sWeld.C1 = sAttachment and sAttachment.CFrame or CFrame.new()
-                                    sWeld.Parent = sHandle
-
-                                    sanitize_accessory(acc)
-                                    for _, bp in ipairs(acc:GetDescendants()) do
-                                        if bp:IsA("BasePart") then table.insert(copyParts, bp) end
-                                    end
-                                end
+                        local handle = acc and acc:FindFirstChild("Handle")
+                        if handle and model.Parent and swapHead then
+                            local dummy = handle:Clone()
+                            for _, desc in ipairs(dummy:GetDescendants()) do
+                                if desc:IsA("BaseScript") or desc:IsA("JointInstance") then desc:Destroy() end
                             end
+                            dummy.Name = "CustomAccPart_" .. cId
+                            dummy:SetAttribute("CustomAssetId", cId)
+                            dummy:SetAttribute("IsCustomAccessory", true)
+                            dummy.Anchored = true
+                            dummy.CanCollide = false
+                            dummy.CanTouch = false
+                            dummy.CanQuery = false
+                            dummy.Massless = true
+                            dummy.Transparency = 0
+                            dummy.Parent = model
+
+                            local sAttachment = dummy:FindFirstChildOfClass("Attachment")
+                            local sHeadAttachment = swapHead:FindFirstChild(sAttachment and sAttachment.Name or "") or swapHead:FindFirstChild("HatAttachment")
+                            local offset = (sHeadAttachment and sHeadAttachment.CFrame or CFrame.new(0, 0.5, 0)) * (sAttachment and sAttachment.CFrame:Inverse() or CFrame.new())
+                            dummy.CFrame = swapHead.CFrame * offset
+                            table.insert(st.accFollowers, { part = dummy, offset = offset, id = cId })
                         end
                     end
                 end)
@@ -520,55 +527,49 @@ local function add_accessory(targetName, assetId)
 
     -- Pasang ke karakter asli
     local headAttachment = head:FindFirstChild(accAttachment.Name) or head:FindFirstChild("HatAttachment")
-    accessory.Name = "CustomAcc_" .. cleanId
-    accessory.Parent = char
-
-    local weld = Instance.new("Weld")
-    weld.Name = "AccessoryWeld"
-    weld.Part0 = head
-    weld.Part1 = handle
-    weld.C0 = headAttachment and headAttachment.CFrame or CFrame.new(0, 0.5, 0)
-    weld.C1 = accAttachment.CFrame
-    weld.Parent = handle
-
-    sanitize_accessory(accessory)
-
-    -- Jika target sedang memakai avatar swap (copy avatar), pasang clone ke swap model
+    -- Cek apakah target sedang memakai copy avatar (avatar swap)
     local swapSt = SwapState.targets[target]
     if swapSt and swapSt.model then
-        -- Sembunyikan handle di karakter asli agar tidak bentrok fisik / rendering dobel
-        handle.Transparency = 1
-        for _, ch in ipairs(handle:GetChildren()) do
-            if ch:IsA("Decal") or ch:IsA("Texture") then ch.Transparency = 1 end
-        end
-
+        -- SWAP MODEL: Gunakan CFrame follower dummy (Anchored, 0 Weld, 100% Anti-Nyangkut)
         local swapHead = swapSt.model:FindFirstChild("Head")
         if swapHead then
-            local swapAcc = accessory:Clone()
-            sanitize_accessory(swapAcc)
-            swapAcc.Name = "CustomAcc_" .. cleanId
-            swapAcc:SetAttribute("CustomAssetId", cleanId)
-            swapAcc:SetAttribute("IsCustomAccessory", true)
-            local sHandle = swapAcc:FindFirstChild("Handle")
-            if sHandle then
-                sHandle.Transparency = 0
-                for _, ch in ipairs(sHandle:GetChildren()) do
-                    if ch:IsA("Decal") or ch:IsA("Texture") then ch.Transparency = 0 end
-                end
-                swapAcc.Parent = swapSt.model
-                local sAttachment = sHandle:FindFirstChildOfClass("Attachment")
-                local sHeadAttachment = swapHead:FindFirstChild(sAttachment and sAttachment.Name or "") or swapHead:FindFirstChild("HatAttachment")
-                local sWeld = Instance.new("Weld")
-                sWeld.Name = "AccessoryWeld"
-                sWeld.Part0 = swapHead
-                sWeld.Part1 = sHandle
-                sWeld.C0 = sHeadAttachment and sHeadAttachment.CFrame or CFrame.new(0, 0.5, 0)
-                sWeld.C1 = sAttachment and sAttachment.CFrame or CFrame.new()
-                sWeld.Parent = sHandle
-
-                sanitize_accessory(swapAcc)
+            swapSt.accFollowers = swapSt.accFollowers or {}
+            local dummy = handle:Clone()
+            for _, desc in ipairs(dummy:GetDescendants()) do
+                if desc:IsA("BaseScript") or desc:IsA("JointInstance") then desc:Destroy() end
             end
+            dummy.Name = "CustomAccPart_" .. cleanId
+            dummy:SetAttribute("CustomAssetId", cleanId)
+            dummy:SetAttribute("IsCustomAccessory", true)
+            dummy.Anchored = true
+            dummy.CanCollide = false
+            dummy.CanTouch = false
+            dummy.CanQuery = false
+            dummy.Massless = true
+            dummy.Transparency = 0
+            dummy.Parent = swapSt.model
+
+            local sAttachment = dummy:FindFirstChildOfClass("Attachment")
+            local sHeadAttachment = swapHead:FindFirstChild(sAttachment and sAttachment.Name or "") or swapHead:FindFirstChild("HatAttachment")
+            local offset = (sHeadAttachment and sHeadAttachment.CFrame or CFrame.new(0, 0.5, 0)) * (sAttachment and sAttachment.CFrame:Inverse() or CFrame.new())
+            dummy.CFrame = swapHead.CFrame * offset
+            table.insert(swapSt.accFollowers, { part = dummy, offset = offset, id = cleanId })
         end
+    else
+        -- AVATAR BIASA (tidak sedang swap): Pasang ke karakter fisik biasa
+        local headAttachment = head:FindFirstChild(accAttachment.Name) or head:FindFirstChild("HatAttachment")
+        accessory.Name = "CustomAcc_" .. cleanId
+        accessory.Parent = char
+
+        local weld = Instance.new("Weld")
+        weld.Name = "AccessoryWeld"
+        weld.Part0 = head
+        weld.Part1 = handle
+        weld.C0 = headAttachment and headAttachment.CFrame or CFrame.new(0, 0.5, 0)
+        weld.C1 = accAttachment.CFrame
+        weld.Parent = handle
+
+        sanitize_accessory(accessory)
     end
 
     -- Simpan riwayat aksesoris untuk target ini
@@ -651,7 +652,19 @@ local function remove_accessory(targetName, assetId)
     local swapSt = SwapState.targets[target]
     if swapSt and swapSt.model then
         for _, obj in ipairs(swapSt.model:GetChildren()) do
-            checkAndRemove(obj)
+            if obj.Name == "CustomAccPart_" .. (cleanId or "") or obj:GetAttribute("CustomAssetId") == cleanId then
+                obj:Destroy()
+                removedCount = removedCount + 1
+            else
+                checkAndRemove(obj)
+            end
+        end
+        if swapSt.accFollowers then
+            for i = #swapSt.accFollowers, 1, -1 do
+                if not cleanId or swapSt.accFollowers[i].id == cleanId or not swapSt.accFollowers[i].part.Parent then
+                    table.remove(swapSt.accFollowers, i)
+                end
+            end
         end
     end
 
@@ -691,7 +704,16 @@ local function remove_all_accessories(targetName)
 
     if target.Character then removeAccs(target.Character) end
     local swapSt = SwapState.targets[target]
-    if swapSt and swapSt.model then removeAccs(swapSt.model) end
+    if swapSt and swapSt.model then
+        removeAccs(swapSt.model)
+        for _, obj in ipairs(swapSt.model:GetChildren()) do
+            if obj.Name:find("CustomAccPart_") or obj:GetAttribute("IsCustomAccessory") then
+                obj:Destroy()
+                removedCount = removedCount + 1
+            end
+        end
+        swapSt.accFollowers = {}
+    end
 
     if shared.CustomAccessories then
         shared.CustomAccessories[target] = nil
@@ -810,6 +832,7 @@ local function apply_korblox(targetName, assetId, yOffset)
     if not originalJoint then return false, "Joint 'Right Hip' tidak ditemukan" end
 
     local cleanId = tostring(assetId or "139607718"):match("%d+")
+    local offsetVal = tonumber(yOffset) or 0
     local okLoad, objects = pcall(function()
         return game:GetObjects("rbxassetid://" .. cleanId)
     end)
@@ -828,16 +851,8 @@ local function apply_korblox(targetName, assetId, yOffset)
         if s:IsA("BaseScript") then s:Destroy() end
     end
 
-    local offsetVal = tonumber(yOffset) or 0.5
     local originalC0 = originalJoint.C0
-
-    -- Posisi kaki Korblox sejajar dengan kaki lama + offset naik
-    newLimb.CFrame = oldLimb.CFrame * CFrame.new(0, offsetVal, 0)
-    newLimb.Anchored = false
-    newLimb.CanCollide = false
-    newLimb.Massless = true
-    newLimb.Transparency = 0
-    newLimb:SetAttribute("IsKorblox", true)
+    local originalC1 = originalJoint.C1
 
     -- Sembunyikan kaki lama & rename agar tidak bentrok nama
     oldLimb.Name = "Original_Right_Leg"
@@ -845,6 +860,13 @@ local function apply_korblox(targetName, assetId, yOffset)
     oldLimb.CanCollide = false
 
     -- Beri nama "Right Leg" pada newLimb agar Animator R6 Roblox menganimasikannya!
+    -- Dan tempatkan di posisi persis kaki kanan
+    newLimb.CFrame = oldLimb.CFrame
+    newLimb.Anchored = false
+    newLimb.CanCollide = false
+    newLimb.Massless = true
+    newLimb.Transparency = 0
+    newLimb:SetAttribute("IsKorblox", true)
     newLimb.Name = "Right Leg"
     newLimb.Parent = char
 
@@ -852,13 +874,13 @@ local function apply_korblox(targetName, assetId, yOffset)
     originalJoint.Name = "Right Hip Original"
     originalJoint.Part1 = nil
 
-    -- Buat Motor6D baru persis dengan rumus yang dianimasikan R6
+    -- Buat Motor6D baru dengan C0 dan C1 asli R6 agar posisi dan rotasinya 100% presisi persis kaki kanan!
     local weld = Instance.new("Motor6D")
     weld.Name = "Right Hip"
     weld.Part0 = torso
     weld.Part1 = newLimb
     weld.C0 = originalC0
-    weld.C1 = newLimb.CFrame:ToObjectSpace(torso.CFrame * originalC0)
+    weld.C1 = originalC1
     weld.Parent = torso
 
     -- Sembunyikan kaki kanan di model swap jika sedang aktif
@@ -1582,7 +1604,7 @@ SecBody:Button({
     Callback = function()
         Window:Notify({ Title = "Korblox", Description = "Memasang Korblox leg...", Lifetime = 3 })
         task.spawn(function()
-            local success, msg = apply_korblox(mod_target, 139607718, 0.5)
+            local success, msg = apply_korblox(mod_target, 139607718, 0)
             Window:Notify({
                 Title = success and "Berhasil!" or "Gagal!",
                 Description = msg or "",
