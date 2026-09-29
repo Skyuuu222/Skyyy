@@ -1676,34 +1676,17 @@ SecCross:Dropdown({
     end
 })
 
--- WARNA CROSSHAIR (Preset)
+-- WARNA CROSSHAIR
 SecCross:Dropdown({
-    Name = "Warna Crosshair (Preset)",
+    Name = "Warna Crosshair",
     Default = "Putih",
-    Options = { "Putih", "Merah", "Hijau", "Biru", "Kuning", "Orange", "Pink", "Cyan", "Ungu", "Hitam" },
+    Options = { "Putih", "Merah", "Kuning", "Hitam", "Biru", "Hijau", "Orange", "Pink", "Cyan", "Ungu" },
     Callback = function(selected)
         local col = CROSSHAIR_COLORS[selected]
         if col then
             crosshairColor = col
             update_crosshair()
             Window:Notify({ Title = "Crosshair", Description = "Warna diubah ke: " .. selected, Lifetime = 2 })
-        end
-    end
-})
-
--- WARNA CROSSHAIR (Custom Hex)
-SecCross:Input({
-    Name = "Warna Custom (Hex)",
-    Default = "",
-    Placeholder = "Contoh: FF5500 atau #00FFAA",
-    Callback = function(text)
-        local col = hex_to_color(text)
-        if col then
-            crosshairColor = col
-            update_crosshair()
-            Window:Notify({ Title = "Crosshair", Description = "Warna custom diterapkan!", Lifetime = 2 })
-        else
-            Window:Notify({ Title = "Crosshair", Description = "Hex tidak valid! Contoh: FF0000", Lifetime = 3 })
         end
     end
 })
