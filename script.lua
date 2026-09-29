@@ -472,6 +472,21 @@ local function apply_korblox(targetName, assetId, yOffset)
     weld.C1 = newLimb.CFrame:ToObjectSpace(torso.CFrame * originalC0)
     weld.Parent = torso
 
+    -- Jika ada swap aktif: hide Right Leg di swap model dan jaga Korblox tetap visible
+    local swapSt = SwapState.targets[target]
+    if swapSt and swapSt.model then
+        -- Sembunyikan Right Leg di model kloning (supaya tidak double)
+        local swapRLeg = swapSt.model:FindFirstChild("Right Leg")
+        if swapRLeg then swapRLeg.Transparency = 1 end
+        -- Jaga Korblox tetap terlihat (swap DescendantAdded bisa menyembunyikannya)
+        RunService.Heartbeat:Connect(function()
+            if not newLimb or not newLimb.Parent then return end
+            if newLimb.Transparency ~= 0 then
+                newLimb.Transparency = 0
+            end
+        end)
+    end
+
     return true, "Korblox Right Leg dipasang pada " .. target.Name
 end
 
@@ -482,6 +497,26 @@ local function make_headless_char(char)
         head.Transparency = 1
         for _, d in ipairs(head:GetChildren()) do
             if d:IsA("Decal") or d:IsA("Texture") then d.Transparency = 1 end
+        end
+    end
+end
+
+-- Sembunyikan kepala di swap model jika aktif
+local function make_headless_swap(target)
+    local swapSt = SwapState.targets[target]
+    if not swapSt or not swapSt.model then return end
+    local swapHead = swapSt.model:FindFirstChild("Head")
+    if swapHead then
+        swapHead.Transparency = 1
+        for _, d in ipairs(swapHead:GetChildren()) do
+            if d:IsA("Decal") or d:IsA("Texture") then d.Transparency = 1 end
+        end
+    end
+    -- Sembunyikan juga accessories berbentuk kepala di swap model
+    for _, acc in ipairs(swapSt.model:GetChildren()) do
+        if acc:IsA("Accessory") then
+            local handle = acc:FindFirstChild("Handle")
+            if handle then handle.Transparency = 1 end
         end
     end
 end
@@ -497,11 +532,14 @@ local function apply_headless(targetName)
 
     local function setup(char)
         make_headless_char(char)
+        make_headless_swap(target) -- juga sembunyikan di swap model
         local conn
         conn = RunService.Heartbeat:Connect(function()
             if not char.Parent then conn:Disconnect(); return end
             local h = char:FindFirstChild("Head")
             if h and h.Transparency ~= 1 then make_headless_char(char) end
+            -- Jaga swap model head tetap hidden
+            make_headless_swap(target)
         end)
     end
 
@@ -527,12 +565,36 @@ local function remove_headless(targetName)
             if d:IsA("Decal") or d:IsA("Texture") then d.Transparency = 0 end
         end
     end
+    -- Kembalikan head di swap model juga
+    local swapSt = SwapState.targets[target]
+    if swapSt and swapSt.model then
+        local swapHead = swapSt.model:FindFirstChild("Head")
+        if swapHead then
+            swapHead.Transparency = 0
+            for _, d in ipairs(swapHead:GetChildren()) do
+                if d:IsA("Decal") or d:IsA("Texture") then d.Transparency = 0 end
+            end
+        end
+    end
     return true, "Headless dinonaktifkan untuk " .. target.Name
 end
 
 -- ==============================================================================
 -- WMACLIB UI INITIALIZATION
 -- ==============================================================================
+-- Snapshot ScreenGui yang ada sebelum WMacLib dibuat
+local _preExistingGuis = {}
+for _, sg in ipairs(CoreGui:GetChildren()) do
+    if sg:IsA("ScreenGui") then _preExistingGuis[sg] = true end
+end
+pcall(function()
+    if gethui then
+        for _, sg in ipairs(gethui():GetChildren()) do
+            if sg:IsA("ScreenGui") then _preExistingGuis[sg] = true end
+        end
+    end
+end)
+
 local ok_wm, WMacLib = pcall(function()
     return loadstring(game:HttpGet("https://raw.githubusercontent.com/Wicikk/WMacLib/main/WMacLib.lua"))()
 end)
@@ -555,30 +617,33 @@ local Window = WMacLib:Window({
 
 local tabGroup = Window:TabGroup()
 
--- Tangkap referensi ScreenGui milik WMacLib kita (bukan ScreenGui Roblox lain)
+-- Cari ScreenGui yang dibuat oleh WMacLib (yang tidak ada di snapshot sebelumnya)
 local wmacGui = nil
-task.defer(function()
+task.wait() -- tunggu satu frame agar WMacLib selesai setup GUI-nya
+local function findWmacGui()
+    -- Cari di CoreGui
     for _, sg in ipairs(CoreGui:GetChildren()) do
-        if sg:IsA("ScreenGui") and (
-            sg.Name:lower():find("wmac") or
-            sg.Name:lower():find("mac") or
-            sg.Name:lower():find("sky")
-        ) then
+        if sg:IsA("ScreenGui") and not _preExistingGuis[sg] then
             wmacGui = sg
-            break
+            return
         end
     end
-    -- Fallback: ambil ScreenGui terakhir yang dibuat
-    if not wmacGui then
-        local children = CoreGui:GetChildren()
-        for i = #children, 1, -1 do
-            if children[i]:IsA("ScreenGui") then
-                wmacGui = children[i]
-                break
+    -- Cari di gethui() jika executor mendukung
+    pcall(function()
+        if gethui then
+            for _, sg in ipairs(gethui():GetChildren()) do
+                if sg:IsA("ScreenGui") and not _preExistingGuis[sg] then
+                    wmacGui = sg
+                end
             end
         end
-    end
-end)
+    end)
+end
+findWmacGui()
+-- Fallback: coba lagi setelah 1 detik jika masih belum ketemu
+if not wmacGui then
+    task.delay(1, findWmacGui)
+end
 
 -- State Variabel Form
 local swap_target = ""
