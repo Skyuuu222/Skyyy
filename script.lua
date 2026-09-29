@@ -419,6 +419,9 @@ end
 -- ==============================================================================
 -- MODUL 4: KORBLOX & HEADLESS MODIFICATIONS
 -- ==============================================================================
+-- Simpan koneksi Korblox agar bisa dilepas jika perlu
+shared.KorbloxConns = shared.KorbloxConns or {}
+
 local function apply_korblox(targetName, assetId, yOffset)
     local target = find_player(targetName)
     if not target then return false, "Pemain tidak ditemukan" end
@@ -451,46 +454,71 @@ local function apply_korblox(targetName, assetId, yOffset)
     end
     if not newLimb then return false, "Part kaki tidak ditemukan" end
 
+    -- Simpan C0 dan C1 asli SEBELUM joint dihancurkan
     local originalC0 = originalJoint.C0
+    local originalC1 = originalJoint.C1  -- penting untuk animasi R6 yang benar
     local offsetVal = tonumber(yOffset) or 0.7
 
+    -- Posisi awal Korblox: sejajar kaki lama dengan sedikit offset
     newLimb.CFrame = oldLimb.CFrame * CFrame.new(0, offsetVal, 0)
     newLimb.Name = "Right Leg Korblox"
     newLimb.CanCollide = false
     newLimb.Massless = true
+    newLimb.Transparency = 0
     newLimb.Parent = char
 
+    -- Sembunyikan kaki asli
     oldLimb.Transparency = 1
     oldLimb.CanCollide = false
-    originalJoint.Part1 = nil
 
-    local weld = Instance.new("Motor6D")
-    weld.Name = "Right Hip"
-    weld.Part0 = torso
-    weld.Part1 = newLimb
-    weld.C0 = originalC0
-    weld.C1 = newLimb.CFrame:ToObjectSpace(torso.CFrame * originalC0)
-    weld.Parent = torso
+    -- DESTROY joint lama sepenuhnya agar tidak konflik dengan joint baru
+    originalJoint:Destroy()
 
-    -- Jika ada swap aktif: hide Right Leg di swap model dan jaga Korblox tetap visible
-    local swapSt = SwapState.targets[target]
-    if swapSt and swapSt.model then
-        -- Sembunyikan Right Leg di model kloning (supaya tidak double)
-        local swapRLeg = swapSt.model:FindFirstChild("Right Leg")
-        if swapRLeg then swapRLeg.Transparency = 1 end
-        -- Jaga Korblox tetap terlihat (swap DescendantAdded bisa menyembunyikannya)
-        RunService.Heartbeat:Connect(function()
-            if not newLimb or not newLimb.Parent then return end
-            if newLimb.Transparency ~= 0 then
-                newLimb.Transparency = 0
-            end
-        end)
+    -- Buat Motor6D baru dengan C0/C1 ASLI → animasi R6 berjalan normal
+    local newJoint = Instance.new("Motor6D")
+    newJoint.Name = "Right Hip"
+    newJoint.Part0 = torso
+    newJoint.Part1 = newLimb
+    newJoint.C0 = originalC0
+    newJoint.C1 = originalC1   -- gunakan C1 asli agar gerakan animasi persis R6
+    newJoint.Parent = torso
+
+    -- Disconnect Korblox lama jika ada
+    if shared.KorbloxConns[target] then
+        shared.KorbloxConns[target]:Disconnect()
+        shared.KorbloxConns[target] = nil
     end
+
+    -- Selalu jaga Korblox tetap visible (bahkan saat swap aktif yang menyembunyikan part baru)
+    -- Dan jaga Right Leg di swap model tetap hidden
+    shared.KorbloxConns[target] = RunService.Heartbeat:Connect(function()
+        if not newLimb or not newLimb.Parent then
+            if shared.KorbloxConns[target] then
+                shared.KorbloxConns[target]:Disconnect()
+                shared.KorbloxConns[target] = nil
+            end
+            return
+        end
+        -- Pastikan Korblox selalu terlihat
+        if newLimb.Transparency ~= 0 then
+            newLimb.Transparency = 0
+        end
+        -- Pastikan Right Leg di swap model selalu tersembunyi
+        local swapSt = SwapState.targets[target]
+        if swapSt and swapSt.model then
+            local swapRLeg = swapSt.model:FindFirstChild("Right Leg")
+            if swapRLeg and swapRLeg.Transparency ~= 1 then
+                swapRLeg.Transparency = 1
+            end
+        end
+    end)
 
     return true, "Korblox Right Leg dipasang pada " .. target.Name
 end
 
 shared.HeadlessConns = shared.HeadlessConns or {}
+shared.HeadlessHBConns = shared.HeadlessHBConns or {}  -- simpan Heartbeat terpisah
+
 local function make_headless_char(char)
     local head = char:FindFirstChild("Head")
     if head then
@@ -501,7 +529,7 @@ local function make_headless_char(char)
     end
 end
 
--- Sembunyikan kepala di swap model jika aktif
+-- Sembunyikan HANYA kepala di swap model (bukan aksesori)
 local function make_headless_swap(target)
     local swapSt = SwapState.targets[target]
     if not swapSt or not swapSt.model then return end
@@ -512,39 +540,53 @@ local function make_headless_swap(target)
             if d:IsA("Decal") or d:IsA("Texture") then d.Transparency = 1 end
         end
     end
-    -- Sembunyikan juga accessories berbentuk kepala di swap model
-    for _, acc in ipairs(swapSt.model:GetChildren()) do
-        if acc:IsA("Accessory") then
-            local handle = acc:FindFirstChild("Handle")
-            if handle then handle.Transparency = 1 end
-        end
-    end
+    -- Catatan: aksesori TIDAK disembunyikan — hanya Head yang dihilangkan
 end
 
 local function apply_headless(targetName)
     local target = find_player(targetName)
     if not target then return false, "Target tidak ditemukan" end
 
+    -- Disconnect semua koneksi headless lama
     if shared.HeadlessConns[target] then
         shared.HeadlessConns[target]:Disconnect()
         shared.HeadlessConns[target] = nil
     end
+    if shared.HeadlessHBConns[target] then
+        shared.HeadlessHBConns[target]:Disconnect()
+        shared.HeadlessHBConns[target] = nil
+    end
 
     local function setup(char)
         make_headless_char(char)
-        make_headless_swap(target) -- juga sembunyikan di swap model
-        local conn
-        conn = RunService.Heartbeat:Connect(function()
-            if not char.Parent then conn:Disconnect(); return end
+        make_headless_swap(target)
+
+        -- Disconnect Heartbeat lama jika ada (dari setup sebelumnya)
+        if shared.HeadlessHBConns[target] then
+            shared.HeadlessHBConns[target]:Disconnect()
+        end
+
+        local hbConn
+        hbConn = RunService.Heartbeat:Connect(function()
+            if not char or not char.Parent then
+                hbConn:Disconnect()
+                shared.HeadlessHBConns[target] = nil
+                return
+            end
+            -- Jaga kepala original tetap invisible
             local h = char:FindFirstChild("Head")
             if h and h.Transparency ~= 1 then make_headless_char(char) end
-            -- Jaga swap model head tetap hidden
+            -- Jaga kepala swap model tetap invisible
             make_headless_swap(target)
         end)
+        shared.HeadlessHBConns[target] = hbConn
     end
 
     if target.Character then setup(target.Character) end
-    shared.HeadlessConns[target] = target.CharacterAdded:Connect(setup)
+    shared.HeadlessConns[target] = target.CharacterAdded:Connect(function(newChar)
+        task.wait(0.5)
+        setup(newChar)
+    end)
 
     return true, "Headless diterapkan pada " .. target.Name
 end
@@ -553,11 +595,18 @@ local function remove_headless(targetName)
     local target = find_player(targetName)
     if not target then return false, "Target tidak ditemukan" end
 
+    -- Disconnect CharacterAdded listener
     if shared.HeadlessConns[target] then
         shared.HeadlessConns[target]:Disconnect()
         shared.HeadlessConns[target] = nil
     end
+    -- Disconnect Heartbeat → ini yang membuat headless aktif terus
+    if shared.HeadlessHBConns[target] then
+        shared.HeadlessHBConns[target]:Disconnect()
+        shared.HeadlessHBConns[target] = nil
+    end
 
+    -- Kembalikan kepala original
     if target.Character and target.Character:FindFirstChild("Head") then
         local head = target.Character.Head
         head.Transparency = 0
@@ -565,7 +614,8 @@ local function remove_headless(targetName)
             if d:IsA("Decal") or d:IsA("Texture") then d.Transparency = 0 end
         end
     end
-    -- Kembalikan head di swap model juga
+
+    -- Kembalikan kepala di swap model
     local swapSt = SwapState.targets[target]
     if swapSt and swapSt.model then
         local swapHead = swapSt.model:FindFirstChild("Head")
@@ -576,8 +626,13 @@ local function remove_headless(targetName)
             end
         end
     end
+
     return true, "Headless dinonaktifkan untuk " .. target.Name
 end
+
+
+
+
 
 -- ==============================================================================
 -- WMACLIB UI INITIALIZATION
