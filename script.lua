@@ -490,7 +490,23 @@ end
 -- ==============================================================================
 shared.CustomAccessories = shared.CustomAccessories or {}
 
-local function add_accessory(targetName, assetId)
+local function apply_acc_scale(part, scale)
+    if not part or not scale or scale == 1 then return end
+    local mesh = part:FindFirstChildOfClass("SpecialMesh")
+    if mesh then
+        if not mesh:GetAttribute("OrigScale") then
+            mesh:SetAttribute("OrigScale", mesh.Scale)
+        end
+        mesh.Scale = mesh:GetAttribute("OrigScale") * scale
+    elseif part:IsA("MeshPart") or part:IsA("BasePart") then
+        if not part:GetAttribute("OrigSize") then
+            part:SetAttribute("OrigSize", part.Size)
+        end
+        part.Size = part:GetAttribute("OrigSize") * scale
+    end
+end
+
+local function add_accessory(targetName, assetId, offX, offY, offZ, scaleVal)
     local target = find_player(targetName)
     if not target then return false, "Pemain tidak ditemukan" end
 
@@ -503,6 +519,14 @@ local function add_accessory(targetName, assetId)
 
     local cleanId = tostring(assetId):match("%d+")
     if not cleanId then return false, "Asset ID tidak valid" end
+
+    offX = tonumber(offX) or 0
+    offY = tonumber(offY) or 0
+    offZ = tonumber(offZ) or 0
+    scaleVal = tonumber(scaleVal) or 1
+    if scaleVal <= 0 then scaleVal = 1 end
+
+    local userOffset = CFrame.new(offX, offY, -offZ)
 
     local okLoad, objects = pcall(function()
         return game:GetObjects("rbxassetid://" .. cleanId)
@@ -524,6 +548,9 @@ local function add_accessory(targetName, assetId)
     local handle = accessory:FindFirstChild("Handle")
     local accAttachment = handle and handle:FindFirstChildOfClass("Attachment")
     if not handle or not accAttachment then return false, "Struktur Handle/Attachment rusak" end
+
+    -- Terapkan scale ukuran
+    apply_acc_scale(handle, scaleVal)
 
     -- Pasang ke karakter asli
     local headAttachment = head:FindFirstChild(accAttachment.Name) or head:FindFirstChild("HatAttachment")
@@ -549,11 +576,22 @@ local function add_accessory(targetName, assetId)
             dummy.Transparency = 0
             dummy.Parent = swapSt.model
 
+            apply_acc_scale(dummy, scaleVal)
+
             local sAttachment = dummy:FindFirstChildOfClass("Attachment")
             local sHeadAttachment = swapHead:FindFirstChild(sAttachment and sAttachment.Name or "") or swapHead:FindFirstChild("HatAttachment")
-            local offset = (sHeadAttachment and sHeadAttachment.CFrame or CFrame.new(0, 0.5, 0)) * (sAttachment and sAttachment.CFrame:Inverse() or CFrame.new())
+            local baseOffset = (sHeadAttachment and sHeadAttachment.CFrame or CFrame.new(0, 0.5, 0)) * (sAttachment and sAttachment.CFrame:Inverse() or CFrame.new())
+            local offset = baseOffset * userOffset
             dummy.CFrame = swapHead.CFrame * offset
-            table.insert(swapSt.accFollowers, { part = dummy, offset = offset, id = cleanId })
+            table.insert(swapSt.accFollowers, {
+                part = dummy,
+                offset = offset,
+                id = cleanId,
+                offX = offX,
+                offY = offY,
+                offZ = offZ,
+                scale = scaleVal
+            })
         end
     else
         -- AVATAR BIASA (tidak sedang swap): Pasang ke karakter fisik biasa
@@ -565,7 +603,8 @@ local function add_accessory(targetName, assetId)
         weld.Name = "AccessoryWeld"
         weld.Part0 = head
         weld.Part1 = handle
-        weld.C0 = headAttachment and headAttachment.CFrame or CFrame.new(0, 0.5, 0)
+        local baseC0 = headAttachment and headAttachment.CFrame or CFrame.new(0, 0.5, 0)
+        weld.C0 = baseC0 * userOffset
         weld.C1 = accAttachment.CFrame
         weld.Parent = handle
 
@@ -583,6 +622,70 @@ local function add_accessory(targetName, assetId)
     end
 
     return true, "Aksesoris ID " .. cleanId .. " dipasang ke " .. target.Name
+end
+
+local function update_accessory_transform(targetName, assetId, offX, offY, offZ, scaleVal)
+    local target = find_player(targetName)
+    if not target then return false, "Pemain tidak ditemukan" end
+
+    offX = tonumber(offX) or 0
+    offY = tonumber(offY) or 0
+    offZ = tonumber(offZ) or 0
+    scaleVal = tonumber(scaleVal) or 1
+    if scaleVal <= 0 then scaleVal = 1 end
+
+    local userOffset = CFrame.new(offX, offY, -offZ)
+    local cleanId = assetId and tostring(assetId):match("%d+")
+    local updatedCount = 0
+
+    -- 1. Karakter fisik asli
+    local char = target.Character
+    if char then
+        local head = char:FindFirstChild("Head")
+        for _, obj in ipairs(char:GetChildren()) do
+            if obj:IsA("Accessory") and (not cleanId or obj.Name:find(cleanId) or obj:GetAttribute("CustomAssetId") == cleanId) then
+                local handle = obj:FindFirstChild("Handle")
+                if handle then
+                    apply_acc_scale(handle, scaleVal)
+                    local weld = handle:FindFirstChild("AccessoryWeld")
+                    local accAttachment = handle:FindFirstChildOfClass("Attachment")
+                    if weld and head then
+                        local headAttachment = accAttachment and head:FindFirstChild(accAttachment.Name) or head:FindFirstChild("HatAttachment")
+                        local baseC0 = headAttachment and headAttachment.CFrame or CFrame.new(0, 0.5, 0)
+                        weld.C0 = baseC0 * userOffset
+                        updatedCount = updatedCount + 1
+                    end
+                end
+            end
+        end
+    end
+
+    -- 2. Model Swap (Copy Avatar)
+    local swapSt = SwapState.targets[target]
+    if swapSt and swapSt.model then
+        local swapHead = swapSt.model:FindFirstChild("Head")
+        if swapHead and swapSt.accFollowers then
+            for _, item in ipairs(swapSt.accFollowers) do
+                if not cleanId or item.id == cleanId then
+                    if item.part and item.part.Parent then
+                        apply_acc_scale(item.part, scaleVal)
+                        local sAttachment = item.part:FindFirstChildOfClass("Attachment")
+                        local sHeadAttachment = swapHead:FindFirstChild(sAttachment and sAttachment.Name or "") or swapHead:FindFirstChild("HatAttachment")
+                        local baseOffset = (sHeadAttachment and sHeadAttachment.CFrame or CFrame.new(0, 0.5, 0)) * (sAttachment and sAttachment.CFrame:Inverse() or CFrame.new())
+                        item.offset = baseOffset * userOffset
+                        item.part.CFrame = swapHead.CFrame * item.offset
+                        updatedCount = updatedCount + 1
+                    end
+                end
+            end
+        end
+    end
+
+    if updatedCount > 0 then
+        return true, "Posisi & ukuran " .. updatedCount .. " aksesoris berhasil diperbarui!"
+    else
+        return false, "Aksesoris belum terpasang. Klik 'Pasang Aksesoris' terlebih dahulu."
+    end
 end
 
 local function remove_accessory(targetName, assetId)
@@ -832,7 +935,7 @@ local function apply_korblox(targetName, assetId, yOffset)
     if not originalJoint then return false, "Joint 'Right Hip' tidak ditemukan" end
 
     local cleanId = tostring(assetId or "139607718"):match("%d+")
-    local offsetVal = tonumber(yOffset) or 0.6
+    local offsetVal = tonumber(yOffset) or 0.7
     local okLoad, objects = pcall(function()
         return game:GetObjects("rbxassetid://" .. cleanId)
     end)
@@ -852,6 +955,7 @@ local function apply_korblox(targetName, assetId, yOffset)
     end
 
     local originalC0 = originalJoint.C0
+    local originalC1 = originalJoint.C1
 
     -- Sembunyikan kaki lama & rename agar tidak bentrok nama
     oldLimb.Name = "Original_Right_Leg"
@@ -859,8 +963,9 @@ local function apply_korblox(targetName, assetId, yOffset)
     oldLimb.CanCollide = false
 
     -- Beri nama "Right Leg" pada newLimb agar Animator R6 Roblox menganimasikannya!
-    -- Geser ke atas dengan offsetVal (0.7) agar bola sendi Korblox pas menempel di bawah Torso seperti di foto referensi
-    newLimb.CFrame = oldLimb.CFrame * CFrame.new(0, offsetVal, 0)
+    -- Hitung posisi kaki tegak lurus (rest pose) dari Torso agar kaki Korblox tidak miring/maju ke depan saat berjalan
+    local restLimbCF = torso.CFrame * originalC0 * originalC1:Inverse()
+    newLimb.CFrame = restLimbCF * CFrame.new(0, offsetVal, 0)
     newLimb.Anchored = false
     newLimb.CanCollide = false
     newLimb.Massless = true
@@ -873,7 +978,7 @@ local function apply_korblox(targetName, assetId, yOffset)
     originalJoint.Name = "Right Hip Original"
     originalJoint.Part1 = nil
 
-    -- Buat Motor6D baru dengan C0 asli dan C1 dihitung dari posisi newLimb agar pas dan bergerak
+    -- Buat Motor6D baru dengan C0 asli dan C1 dihitung dari posisi newLimb rest pose
     local weld = Instance.new("Motor6D")
     weld.Name = "Right Hip"
     weld.Part0 = torso
@@ -1529,6 +1634,11 @@ SecOutfit:Button({
 local SecAcc = TabMod:Section({})
 SecAcc:Header({ Name = WMacLib:Gradient("Pemuat Aksesoris Catalog", Color3.fromRGB(50, 220, 150), Color3.fromRGB(70, 180, 255)) })
 
+local acc_offset_y = 0
+local acc_offset_z = 0
+local acc_offset_x = 0
+local acc_scale = 1.0
+
 SecAcc:Input({
     Name = "Target di Server",
     Default = "",
@@ -1545,19 +1655,79 @@ SecAcc:Input({
     onChanged = function(text) acc_id = text end,
 })
 
+SecAcc:Slider({
+    Name = "Atas / Bawah (Y Offset)",
+    Default = 0,
+    Minimum = -30,
+    Maximum = 30,
+    DisplayMethod = "Round",
+    Precision = 1,
+    Callback = function(val)
+        acc_offset_y = val / 10
+    end
+})
+
+SecAcc:Slider({
+    Name = "Depan / Belakang (Z Offset)",
+    Default = 0,
+    Minimum = -30,
+    Maximum = 30,
+    DisplayMethod = "Round",
+    Precision = 1,
+    Callback = function(val)
+        acc_offset_z = val / 10
+    end
+})
+
+SecAcc:Slider({
+    Name = "Kiri / Kanan (X Offset)",
+    Default = 0,
+    Minimum = -30,
+    Maximum = 30,
+    DisplayMethod = "Round",
+    Precision = 1,
+    Callback = function(val)
+        acc_offset_x = val / 10
+    end
+})
+
+SecAcc:Slider({
+    Name = "Ukuran / Scale (Besar - Kecil)",
+    Default = 10,
+    Minimum = 2,
+    Maximum = 30,
+    DisplayMethod = "Round",
+    Precision = 1,
+    Callback = function(val)
+        acc_scale = val / 10
+    end
+})
+
 SecAcc:Button({
     Name = "Pasang Aksesoris",
     Bold = true,
     Callback = function()
         Window:Notify({ Title = "Aksesoris", Description = "Memuat aksesoris...", Lifetime = 3 })
         task.spawn(function()
-            local success, msg = add_accessory(acc_target, acc_id)
+            local success, msg = add_accessory(acc_target, acc_id, acc_offset_x, acc_offset_y, acc_offset_z, acc_scale)
             Window:Notify({
                 Title = success and "Berhasil!" or "Gagal!",
                 Description = msg or "",
                 Lifetime = 4
             })
         end)
+    end,
+})
+
+SecAcc:Button({
+    Name = "Terapkan Posisi & Ukuran (Live Update)",
+    Callback = function()
+        local success, msg = update_accessory_transform(acc_target, acc_id, acc_offset_x, acc_offset_y, acc_offset_z, acc_scale)
+        Window:Notify({
+            Title = "Posisi Aksesoris",
+            Description = msg or "",
+            Lifetime = 3
+        })
     end,
 })
 
@@ -1589,7 +1759,7 @@ SecAcc:Button({
 local SecBody = TabMod:Section({})
 SecBody:Header({ Name = WMacLib:Gradient("Korblox & Headless", Color3.fromRGB(255, 120, 70), Color3.fromRGB(255, 70, 100)) })
 
-local korblox_offset = 0.6
+local korblox_offset = 0.7
 
 SecBody:Input({
     Name = "Target di Server",
@@ -1601,10 +1771,10 @@ SecBody:Input({
 
 SecBody:Input({
     Name = "Korblox Y Offset",
-    Default = "0.6",
-    Placeholder = "Default: 0.6 (bisa disesuaikan)",
-    Callback = function(text) korblox_offset = tonumber(text) or 0.6 end,
-    onChanged = function(text) korblox_offset = tonumber(text) or 0.6 end,
+    Default = "0.7",
+    Placeholder = "Default: 0.7 (sesuai contoh pas)",
+    Callback = function(text) korblox_offset = tonumber(text) or 0.7 end,
+    onChanged = function(text) korblox_offset = tonumber(text) or 0.7 end,
 })
 
 SecBody:Button({
@@ -1700,40 +1870,81 @@ SecTheme:Toggle({
 -- Toggle warna header: gradient warna-warni vs putih/hitam polos
 local headerColorMode = "gradient"
 
-local function applyHeaderColor(mode)
-    -- Hanya cari TextLabel di dalam ScreenGui milik WMacLib kita saja
+local function findWmacGuis()
+    local found = {}
+    local containers = {}
+    pcall(function() if gethui then table.insert(containers, gethui()) end end)
+    pcall(function() table.insert(containers, CoreGui) end)
     pcall(function()
-        local target = wmacGui
-        -- Jika wmacGui belum terisi (race condition), coba cari lagi
-        if not target or not target.Parent then
-            for _, sg in ipairs(CoreGui:GetChildren()) do
-                if sg:IsA("ScreenGui") and (
-                    sg.Name:lower():find("wmac") or
-                    sg.Name:lower():find("mac")
-                ) then
-                    target = sg
-                    wmacGui = sg
-                    break
+        if LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui") then
+            table.insert(containers, LocalPlayer.PlayerGui)
+        end
+    end)
+
+    for _, container in ipairs(containers) do
+        for _, sg in ipairs(container:GetChildren()) do
+            if sg:IsA("ScreenGui") then
+                if sg:FindFirstChild("Notifications") or sg.Name:lower():find("wmac") or sg.Name:lower():find("mac") then
+                    table.insert(found, sg)
+                else
+                    for _, desc in ipairs(sg:GetDescendants()) do
+                        if desc:IsA("TextLabel") and (desc.Text:find("Skyyy") or desc.Text:find("Modifikasi") or desc.Text:find("Korblox")) then
+                            table.insert(found, sg)
+                            break
+                        end
+                    end
                 end
             end
         end
-        if not target then return end
+    end
+    return found
+end
 
-        for _, obj in ipairs(target:GetDescendants()) do
-            -- Hanya ubah TextLabel yang ada di dalam Header/Section
-            -- (bukan semua TextLabel, hanya yang punya UIGradient = header bergradient)
-            if obj:IsA("TextLabel") then
-                local grad = obj:FindFirstChildOfClass("UIGradient")
-                -- Hanya proses jika TextLabel ini memang punya gradient (tanda itu header kita)
-                -- atau jika mode non-gradient, proses semua TextLabel dalam wmacGui kita
-                if mode == "white" then
-                    if grad then grad.Enabled = false end
-                    obj.TextColor3 = Color3.fromRGB(255, 255, 255)
-                elseif mode == "black" then
-                    if grad then grad.Enabled = false end
-                    obj.TextColor3 = Color3.fromRGB(20, 20, 20)
-                else -- gradient: aktifkan kembali UIGradient
-                    if grad then grad.Enabled = true end
+local function applyHeaderColor(mode)
+    pcall(function()
+        local guis = findWmacGuis()
+        for _, target in ipairs(guis) do
+            -- Listener otomatis bila ada header / TextLabel baru yang dimuat
+            if not target:GetAttribute("HeaderColorHooked") then
+                target:SetAttribute("HeaderColorHooked", true)
+                target.DescendantAdded:Connect(function(d)
+                    if d:IsA("TextLabel") and headerColorMode ~= "gradient" then
+                        task.wait(0.05)
+                        local txt = d.Text
+                        if txt:find("<font color=") or d:GetAttribute("OrigHeaderRichText") then
+                            if not d:GetAttribute("OrigHeaderRichText") then
+                                d:SetAttribute("OrigHeaderRichText", txt)
+                            end
+                            local clean = d:GetAttribute("OrigHeaderRichText"):gsub("<[^>]->", "")
+                            if headerColorMode == "white" then
+                                d.Text = string.format('<font color="rgb(255,255,255)">%s</font>', clean)
+                            elseif headerColorMode == "black" then
+                                d.Text = string.format('<font color="rgb(20,20,20)">%s</font>', clean)
+                            end
+                        end
+                    end
+                end)
+            end
+
+            for _, obj in ipairs(target:GetDescendants()) do
+                if obj:IsA("TextLabel") then
+                    -- WMacLib:Gradient menghasilkan rich text dengan tag <font color="rgb(...)"> per huruf
+                    local txt = obj.Text
+                    if txt:find("<font color=") or obj:GetAttribute("OrigHeaderRichText") then
+                        if not obj:GetAttribute("OrigHeaderRichText") then
+                            obj:SetAttribute("OrigHeaderRichText", txt)
+                        end
+                        local orig = obj:GetAttribute("OrigHeaderRichText")
+                        local clean = orig:gsub("<[^>]->", "")
+
+                        if mode == "white" then
+                            obj.Text = string.format('<font color="rgb(255,255,255)">%s</font>', clean)
+                        elseif mode == "black" then
+                            obj.Text = string.format('<font color="rgb(20,20,20)">%s</font>', clean)
+                        else
+                            obj.Text = orig
+                        end
+                    end
                 end
             end
         end
