@@ -2560,18 +2560,18 @@ local function esp_get_or_create_tag(player, char)
     bbg.Name = "ESP_PlayerTag"
     bbg.Adornee = head
     bbg.AlwaysOnTop = true
-    bbg.Size = UDim2.new(0, 260, 0, 44)
+    bbg.Size = UDim2.new(0, 240, 0, 38)
     bbg.StudsOffset = Vector3.new(0, 2.5, 0)
     bbg.ResetOnSpawn = false
 
     -- Baris 1 (Atas): Nama Pemain + Jarak (Selalu Putih)
     local nameLbl = Instance.new("TextLabel")
     nameLbl.Name = "NameLabel"
-    nameLbl.Size = UDim2.new(1, 0, 0, 20)
+    nameLbl.Size = UDim2.new(1, 0, 0, 18)
     nameLbl.Position = UDim2.new(0, 0, 0, 0)
     nameLbl.BackgroundTransparency = 1
     nameLbl.Font = Enum.Font.GothamBold
-    nameLbl.TextSize = 13
+    nameLbl.TextSize = 11
     nameLbl.TextColor3 = ESP_WHITE
     nameLbl.TextStrokeColor3 = Color3.new(0, 0, 0)
     nameLbl.TextStrokeTransparency = 0
@@ -2581,11 +2581,11 @@ local function esp_get_or_create_tag(player, char)
     -- Baris 2 (Bawah): Status di samping Item (Status berwarna, Item putih)
     local infoLbl = Instance.new("TextLabel")
     infoLbl.Name = "InfoLabel"
-    infoLbl.Size = UDim2.new(1, 0, 0, 18)
-    infoLbl.Position = UDim2.new(0, 0, 0, 20)
+    infoLbl.Size = UDim2.new(1, 0, 0, 16)
+    infoLbl.Position = UDim2.new(0, 0, 0, 18)
     infoLbl.BackgroundTransparency = 1
     infoLbl.Font = Enum.Font.GothamBold
-    infoLbl.TextSize = 12
+    infoLbl.TextSize = 10
     infoLbl.RichText = true
     infoLbl.TextColor3 = ESP_WHITE
     infoLbl.TextStrokeColor3 = Color3.new(0, 0, 0)
