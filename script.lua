@@ -2336,10 +2336,10 @@ local function esp_is_killer(char)
 end
 
 local STATUS_ICONS = {
-    Aman    = "✅",
-    Injured = "🩹",
-    Knocked = "💀",
-    Hooked  = "🪝",
+    Aman    = "[OK]",
+    Injured = "[~]",
+    Knocked = "[KO]",
+    Hooked  = "[HK]",
 }
 
 local function esp_get_status(char)
@@ -2501,7 +2501,7 @@ local function esp_update_player(player)
         -- [FIX] Baris 2 (bawah): Nama + Jarak | Item  →  selalu PUTIH
         local nameText = player.DisplayName .. " (" .. math.floor(dist) .. "m)"
         if item then
-            nameText = nameText .. "  |  🎒 " .. item
+            nameText = nameText .. " | " .. item
         end
         d.name.Text     = nameText
         d.name.Position = sp - Vector2.new(0, 12)
