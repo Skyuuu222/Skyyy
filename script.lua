@@ -1257,8 +1257,13 @@ local PlayerGui       = LocalPlayer:WaitForChild("PlayerGui")
 
 local autoGenEnabled  = false
 local autoGenConn     = nil
-local autoGenLastHit  = 0
 local autoGenHitCount = 0
+
+-- State tracking untuk siklus minigame aktif
+local isMinigameActive       = false
+local hasHitCurrentMinigame  = false
+local lastLineRotation       = nil
+local lineMoveCount          = 0
 
 -- Helper untuk memastikan GUI benar-benar aktif & terlihat di layar
 local function is_gui_visible(v)
@@ -1275,29 +1280,21 @@ local function is_gui_visible(v)
 end
 
 -- Deteksi circular skill check (Violence District):
--- Line (jarum putar), Goal (arc zona sukses), Space (tombol prompt tengah)
-local function agen_find_circular()
-    local lineObj  = nil
-    local goalObj  = nil
-    local spaceObj = nil
+-- Line (jarum putar), Goal (arc zona sukses), Space (tombol prompt) selalu satu parent!
+local function agen_get_skillcheck_ui()
     for _, v in ipairs(PlayerGui:GetDescendants()) do
-        if v:IsA("GuiObject") and is_gui_visible(v) then
-            local sx = v.AbsoluteSize.X
-            local sy = v.AbsoluteSize.Y
-            -- Elemen circular skill check berukuran ~200x200
-            if sx >= 80 and sx <= 350 and sy >= 80 and sy <= 350 then
-                local name = v.Name
-                if name == "Line" then
-                    lineObj = v
-                elseif name == "Goal" then
-                    goalObj = v
-                elseif name == "Space" then
-                    spaceObj = v
+        if v:IsA("GuiObject") and v.Name == "Line" and is_gui_visible(v) then
+            local p = v.Parent
+            if p then
+                local goal = p:FindFirstChild("Goal")
+                if goal and goal:IsA("GuiObject") and is_gui_visible(goal) then
+                    local space = p:FindFirstChild("Space")
+                    return v, goal, space, p
                 end
             end
         end
     end
-    return lineObj, goalObj, spaceObj
+    return nil, nil, nil, nil
 end
 
 -- Input simulator multi-metode (bekerja di semua executor & platform)
@@ -1358,61 +1355,70 @@ end
 
 local function agen_tick()
     if not autoGenEnabled then return end
-    local now = tick()
-    if now - autoGenLastHit < 0.35 then return end
 
-    -- Deteksi circular skill check (Violence District)
-    local lineObj, goalObj, spaceObj = agen_find_circular()
-    if lineObj and goalObj then
-        local lineRot = lineObj.Rotation % 360
-        if lineRot < 0 then lineRot = lineRot + 360 end
+    local lineObj, goalObj, spaceObj = agen_get_skillcheck_ui()
 
-        local goalRot = goalObj.Rotation % 360
-        if goalRot < 0 then goalRot = goalRot + 360 end
-
-        -- Cek jika Goal memiliki child penanda zona putih / perfect
-        for _, c in ipairs(goalObj:GetDescendants()) do
-            if c:IsA("GuiObject") and (c.Name:lower():find("white") or c.Name:lower():find("perfect") or c.Name:lower():find("great")) then
-                local cr = c.Rotation % 360
-                if cr < 0 then cr = cr + 360 end
-                goalRot = cr
-                break
-            end
-        end
-
-        local diff = math.abs(lineRot - goalRot)
-        if diff > 180 then diff = 360 - diff end
-
-        -- Jarum pas mengenai zona putih (toleransi optimal 10 derajat)
-        if diff <= 10 then
-            autoGenLastHit = now
-            autoGenHitCount = autoGenHitCount + 1
-            agen_press(spaceObj)
+    -- Jika minigame tidak ada atau sudah tertutup
+    if not lineObj or not goalObj then
+        if isMinigameActive then
+            isMinigameActive = false
+            hasHitCurrentMinigame = false
+            lastLineRotation = nil
+            lineMoveCount = 0
         end
         return
     end
 
-    -- Fallback Linear skill check
-    local spaceBtn = nil
-    for _, v in ipairs(PlayerGui:GetDescendants()) do
-        if v:IsA("GuiObject") and is_gui_visible(v) and v.Name == "Space" then
-            local sx = v.AbsoluteSize.X
-            if sx > 10 and sx < 100 then
-                spaceBtn = v
-                break
-            end
-        end
+    -- Minigame baru saja muncul
+    if not isMinigameActive then
+        isMinigameActive = true
+        hasHitCurrentMinigame = false
+        lastLineRotation = lineObj.Rotation
+        lineMoveCount = 0
+        return
     end
-    if spaceBtn and is_gui_visible(spaceBtn) then
-        autoGenLastHit = now
+
+    -- Jika sudah pernah menekan untuk minigame ini, jangan tekan lagi (hindari double tap / fail)
+    if hasHitCurrentMinigame then return end
+
+    local currentRot = lineObj.Rotation
+    -- Deteksi pergerakan jarum (memastikan jarum sudah aktif berputar dan bukan di titik awal/freeze)
+    if lastLineRotation ~= nil and math.abs(currentRot - lastLineRotation) > 0.05 then
+        lineMoveCount = lineMoveCount + 1
+    end
+    lastLineRotation = currentRot
+
+    -- Tunggu minimal 2 frame pergerakan agar tidak pernah "berhenti di asal" saat baru spawn
+    if lineMoveCount < 2 then return end
+
+    -- Normalisasi rotasi needle dan target (0 - 360 derajat)
+    local lineRot = currentRot % 360
+    if lineRot < 0 then lineRot = lineRot + 360 end
+
+    local goalRot = goalObj.Rotation % 360
+    if goalRot < 0 then goalRot = goalRot + 360 end
+
+    -- Hitung selisih sudut terdekat
+    local diff = math.abs(lineRot - goalRot)
+    if diff > 180 then diff = 360 - diff end
+
+    -- Toleransi Perfect Hit:
+    -- Zona putih memiliki lebar ~10 derajat dengan titik tengah di Goal.Rotation.
+    -- Toleransi diff <= 7 memicu input tepat di zona putih (Perfect Skill Check).
+    if diff <= 7 then
+        hasHitCurrentMinigame = true
         autoGenHitCount = autoGenHitCount + 1
-        agen_press(spaceBtn)
+        agen_press(spaceObj)
     end
 end
 
 local function agen_start()
     if autoGenConn then return end
     autoGenHitCount = 0
+    isMinigameActive = false
+    hasHitCurrentMinigame = false
+    lastLineRotation = nil
+    lineMoveCount = 0
     autoGenConn = RunService.RenderStepped:Connect(agen_tick)
 end
 
@@ -1421,6 +1427,10 @@ local function agen_stop()
         autoGenConn:Disconnect()
         autoGenConn = nil
     end
+    isMinigameActive = false
+    hasHitCurrentMinigame = false
+    lastLineRotation = nil
+    lineMoveCount = 0
 end
 
 -- ==============================================================================
