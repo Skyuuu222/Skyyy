@@ -1257,118 +1257,163 @@ local PlayerGui       = LocalPlayer:WaitForChild("PlayerGui")
 
 local autoGenEnabled  = false
 local autoGenConn     = nil
-local autoGenRemote   = nil
 local autoGenLastHit  = 0
 local autoGenHitCount = 0
 
--- Deteksi circular skill check: cari frame "Line" (jarum) dan "Goal" (zona sukses)
--- keduanya berukuran ~200x200 dan pakai Rotation untuk posisi
+-- Helper untuk memastikan GUI benar-benar aktif & terlihat di layar
+local function is_gui_visible(v)
+    if not v or not v:IsA("GuiObject") then return false end
+    if not v.Visible then return false end
+    if v.AbsoluteSize.X < 5 or v.AbsoluteSize.Y < 5 then return false end
+    local p = v.Parent
+    while p and not p:IsA("PlayerGui") do
+        if p:IsA("ScreenGui") and not p.Enabled then return false end
+        if p:IsA("GuiObject") and not p.Visible then return false end
+        p = p.Parent
+    end
+    return true
+end
+
+-- Deteksi circular skill check (Violence District):
+-- Line (jarum putar), Goal (arc zona sukses), Space (tombol prompt tengah)
 local function agen_find_circular()
-    local lineFrame = nil
-    local goalFrame = nil
+    local lineObj  = nil
+    local goalObj  = nil
+    local spaceObj = nil
     for _, v in ipairs(PlayerGui:GetDescendants()) do
-        if v:IsA("Frame") and v.Visible then
+        if v:IsA("GuiObject") and is_gui_visible(v) then
             local sx = v.AbsoluteSize.X
             local sy = v.AbsoluteSize.Y
-            -- Frame ~200x200 adalah bagian dari circular skill check
-            if sx > 100 and sx < 350 and sy > 100 and sy < 350 then
-                if v.Name == "Line" then lineFrame = v end
-                if v.Name == "Goal" then goalFrame = v end
+            -- Elemen circular skill check berukuran ~200x200
+            if sx >= 80 and sx <= 350 and sy >= 80 and sy <= 350 then
+                local name = v.Name
+                if name == "Line" then
+                    lineObj = v
+                elseif name == "Goal" then
+                    goalObj = v
+                elseif name == "Space" then
+                    spaceObj = v
+                end
             end
         end
     end
-    return lineFrame, goalFrame
+    return lineObj, goalObj, spaceObj
 end
 
-local function agen_press()
-    -- Metode 1: VirtualInputManager
-    local ok1 = pcall(function()
+-- Input simulator multi-metode (bekerja di semua executor & platform)
+local function agen_press(spaceObj)
+    -- 1. VirtualInputManager (Core Roblox)
+    pcall(function()
         local vim = game:GetService("VirtualInputManager")
         vim:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
-        task.wait(0.04)
+        task.wait(0.02)
         vim:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
     end)
-    if ok1 then return end
-    -- Metode 2: keypress/keyrelease (syn, krnl, etc)
-    pcall(function()
-        keypress(Enum.KeyCode.Space.Value)
-        task.wait(0.04)
-        keyrelease(Enum.KeyCode.Space.Value)
-    end)
-end
 
-local function agen_find_remote()
-    local rs = game:GetService("ReplicatedStorage")
-    for _, v in ipairs(rs:GetDescendants()) do
-        if v:IsA("RemoteEvent") then
-            local n = v.Name:lower()
-            if n:find("skill") or n:find("check") or n:find("generator")
-                or n:find("repair") or n:find("perfect") or n:find("minigame") then
-                return v
-            end
+    -- 2. VirtualUser (Universal Roblox Input)
+    pcall(function()
+        local vu = game:GetService("VirtualUser")
+        vu:CaptureController()
+        vu:SetKeyDown("0x20")
+        task.wait(0.02)
+        vu:SetKeyUp("0x20")
+    end)
+
+    -- 3. Executor keypress VK_SPACE
+    pcall(function()
+        if keypress and keyrelease then
+            keypress(32)
+            task.wait(0.02)
+            keyrelease(32)
         end
+    end)
+
+    -- 4. Executor keypress KeyCode
+    pcall(function()
+        if keypress and keyrelease then
+            keypress(Enum.KeyCode.Space.Value)
+            task.wait(0.02)
+            keyrelease(Enum.KeyCode.Space.Value)
+        end
+    end)
+
+    -- 5. GUI Button activation (jika tombol Space adalah GuiButton atau punya child button)
+    if spaceObj then
+        pcall(function()
+            if spaceObj:IsA("GuiButton") and firesignal then
+                firesignal(spaceObj.Activated)
+                firesignal(spaceObj.MouseButton1Down)
+                firesignal(spaceObj.MouseButton1Click)
+            end
+            for _, btn in ipairs(spaceObj:GetDescendants()) do
+                if btn:IsA("GuiButton") and firesignal then
+                    firesignal(btn.Activated)
+                    firesignal(btn.MouseButton1Down)
+                    firesignal(btn.MouseButton1Click)
+                end
+            end
+        end)
     end
-    return nil
 end
 
 local function agen_tick()
     if not autoGenEnabled then return end
     local now = tick()
-    if now - autoGenLastHit < 0.05 then return end
+    if now - autoGenLastHit < 0.35 then return end
 
-    -- Metode 1: Circular skill check (Violence District) - pakai Rotation
-    local lineFrame, goalFrame = agen_find_circular()
-    if lineFrame and goalFrame then
-        -- Hitung selisih sudut antara jarum (Line) dan zona sukses (Goal)
-        local lineRot = lineFrame.Rotation % 360
-        local goalRot = goalFrame.Rotation % 360
+    -- Deteksi circular skill check (Violence District)
+    local lineObj, goalObj, spaceObj = agen_find_circular()
+    if lineObj and goalObj then
+        local lineRot = lineObj.Rotation % 360
+        if lineRot < 0 then lineRot = lineRot + 360 end
+
+        local goalRot = goalObj.Rotation % 360
+        if goalRot < 0 then goalRot = goalRot + 360 end
+
+        -- Cek jika Goal memiliki child penanda zona putih / perfect
+        for _, c in ipairs(goalObj:GetDescendants()) do
+            if c:IsA("GuiObject") and (c.Name:lower():find("white") or c.Name:lower():find("perfect") or c.Name:lower():find("great")) then
+                local cr = c.Rotation % 360
+                if cr < 0 then cr = cr + 360 end
+                goalRot = cr
+                break
+            end
+        end
+
         local diff = math.abs(lineRot - goalRot)
         if diff > 180 then diff = 360 - diff end
 
-        -- Hit jika needle dalam 18 derajat dari goal center
-        if diff < 18 then
-            if autoGenRemote then
-                pcall(function() autoGenRemote:FireServer() end)
-            else
-                agen_press()
-            end
+        -- Jarum pas mengenai zona putih (toleransi optimal 10 derajat)
+        if diff <= 10 then
             autoGenLastHit = now
-            autoGenHitCount += 1
+            autoGenHitCount = autoGenHitCount + 1
+            agen_press(spaceObj)
         end
-        return -- sudah handle circular, selesai
+        return
     end
 
-    -- Metode 2: Linear skill check (fallback untuk game lain)
-    -- Cari frame bernama "Space" berukuran kecil (indikator posisi)
+    -- Fallback Linear skill check
     local spaceBtn = nil
     for _, v in ipairs(PlayerGui:GetDescendants()) do
-        if v:IsA("Frame") and v.Visible and v.Name == "Space" then
+        if v:IsA("GuiObject") and is_gui_visible(v) and v.Name == "Space" then
             local sx = v.AbsoluteSize.X
-            if sx > 10 and sx < 100 then -- yang kecil, bukan yang 200x200
+            if sx > 10 and sx < 100 then
                 spaceBtn = v
                 break
             end
         end
     end
-    if not spaceBtn then return end
-    -- Jika Space prompt visible, langsung tekan
-    if spaceBtn.Visible then
-        if autoGenRemote then
-            pcall(function() autoGenRemote:FireServer() end)
-        else
-            agen_press()
-        end
+    if spaceBtn and is_gui_visible(spaceBtn) then
         autoGenLastHit = now
-        autoGenHitCount += 1
+        autoGenHitCount = autoGenHitCount + 1
+        agen_press(spaceBtn)
     end
 end
 
 local function agen_start()
     if autoGenConn then return end
-    -- Cari remote sekali saat start
-    autoGenRemote = agen_find_remote()
     autoGenHitCount = 0
-    autoGenConn = RunService.Heartbeat:Connect(agen_tick)
+    autoGenConn = RunService.RenderStepped:Connect(agen_tick)
 end
 
 local function agen_stop()
@@ -1376,7 +1421,6 @@ local function agen_stop()
         autoGenConn:Disconnect()
         autoGenConn = nil
     end
-    autoGenRemote = nil
 end
 
 -- ==============================================================================
