@@ -1782,7 +1782,7 @@ SecCross:Button({
 })
 
 -- ==============================================================================
--- MODUL ESP PLAYER (SURVIVOR & KILLER)
+-- MODUL ESP Player - Survivor dan Killer
 -- ==============================================================================
 local espPlayerEnabled = false
 
@@ -2171,7 +2171,7 @@ end
 local TabESP = tabGroup:Tab({ Name = "ESP", Image = "lucide/eye" })
 
 local SecESPPlayer = TabESP:Section({})
-SecESPPlayer:Header({ Name = WMacLib:Gradient("ESP Player (Survivor & Killer)", Color3.fromRGB(255, 80, 80), Color3.fromRGB(255, 200, 80)) })
+SecESPPlayer:Header({ Name = WMacLib:Gradient("ESP Player - Survivor dan Killer", Color3.fromRGB(255, 80, 80), Color3.fromRGB(255, 200, 80)) })
 
 SecESPPlayer:Toggle({
     Name = "Aktifkan ESP Player",
