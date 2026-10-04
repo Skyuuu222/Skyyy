@@ -1258,6 +1258,7 @@ local PlayerGui       = LocalPlayer:WaitForChild("PlayerGui")
 local autoGenEnabled  = false
 local autoGenConn     = nil
 local autoGenHitCount = 0
+local autoGenOffset   = 0
 
 -- State tracking untuk siklus minigame aktif
 local isMinigameActive       = false
@@ -1297,14 +1298,11 @@ local function agen_get_skillcheck_ui()
     return nil, nil, nil, nil
 end
 
--- Input simulator multi-metode (bekerja di semua executor & platform)
+-- Input simulator multi-metode INSTAN (0ms delay, tanpa task.wait yang menghambat)
 local function agen_press(spaceObj)
     -- 1. VirtualInputManager (Core Roblox)
     pcall(function()
-        local vim = game:GetService("VirtualInputManager")
-        vim:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
-        task.wait(0.02)
-        vim:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
+        game:GetService("VirtualInputManager"):SendKeyEvent(true, Enum.KeyCode.Space, false, game)
     end)
 
     -- 2. VirtualUser (Universal Roblox Input)
@@ -1312,29 +1310,15 @@ local function agen_press(spaceObj)
         local vu = game:GetService("VirtualUser")
         vu:CaptureController()
         vu:SetKeyDown("0x20")
-        task.wait(0.02)
-        vu:SetKeyUp("0x20")
     end)
 
     -- 3. Executor keypress VK_SPACE
     pcall(function()
-        if keypress and keyrelease then
-            keypress(32)
-            task.wait(0.02)
-            keyrelease(32)
-        end
+        if keypress then keypress(32) end
+        if keypress then keypress(Enum.KeyCode.Space.Value) end
     end)
 
-    -- 4. Executor keypress KeyCode
-    pcall(function()
-        if keypress and keyrelease then
-            keypress(Enum.KeyCode.Space.Value)
-            task.wait(0.02)
-            keyrelease(Enum.KeyCode.Space.Value)
-        end
-    end)
-
-    -- 5. GUI Button activation (jika tombol Space adalah GuiButton atau punya child button)
+    -- 4. GUI Button activation (jika tombol Space adalah GuiButton atau punya child button)
     if spaceObj then
         pcall(function()
             if spaceObj:IsA("GuiButton") and firesignal then
@@ -1351,6 +1335,21 @@ local function agen_press(spaceObj)
             end
         end)
     end
+
+    -- Release tombol secara asinkron di background setelah 35ms (TIDAK MEMBLOKIR THREAD UTAMA)
+    task.spawn(function()
+        task.wait(0.035)
+        pcall(function()
+            game:GetService("VirtualInputManager"):SendKeyEvent(false, Enum.KeyCode.Space, false, game)
+        end)
+        pcall(function()
+            game:GetService("VirtualUser"):SetKeyUp("0x20")
+        end)
+        pcall(function()
+            if keyrelease then keyrelease(32) end
+            if keyrelease then keyrelease(Enum.KeyCode.Space.Value) end
+        end)
+    end)
 end
 
 local function agen_tick()
@@ -1382,6 +1381,18 @@ local function agen_tick()
     if hasHitCurrentMinigame then return end
 
     local currentRot = lineObj.Rotation
+
+    -- Normalisasi rotasi needle dan target (0 - 360 derajat)
+    local lineRot = currentRot % 360
+    if lineRot < 0 then lineRot = lineRot + 360 end
+
+    local goalRot = goalObj.Rotation % 360
+    if goalRot < 0 then goalRot = goalRot + 360 end
+
+    -- Target zona putih (dengan toleransi offset fine-tune)
+    local targetRot = (goalRot + autoGenOffset) % 360
+    if targetRot < 0 then targetRot = targetRot + 360 end
+
     -- Deteksi pergerakan jarum (memastikan jarum sudah aktif berputar dan bukan di titik awal/freeze)
     if lastLineRotation ~= nil and math.abs(currentRot - lastLineRotation) > 0.05 then
         lineMoveCount = lineMoveCount + 1
@@ -1391,24 +1402,29 @@ local function agen_tick()
     -- Tunggu minimal 2 frame pergerakan agar tidak pernah "berhenti di asal" saat baru spawn
     if lineMoveCount < 2 then return end
 
-    -- Normalisasi rotasi needle dan target (0 - 360 derajat)
-    local lineRot = currentRot % 360
-    if lineRot < 0 then lineRot = lineRot + 360 end
-
-    local goalRot = goalObj.Rotation % 360
-    if goalRot < 0 then goalRot = goalRot + 360 end
-
-    -- Hitung selisih sudut terdekat
-    local diff = math.abs(lineRot - goalRot)
+    -- Hitung selisih sudut absolut
+    local diff = math.abs(lineRot - targetRot)
     if diff > 180 then diff = 360 - diff end
 
-    -- Toleransi Perfect Hit:
-    -- Zona putih memiliki lebar ~10 derajat dengan titik tengah di Goal.Rotation.
-    -- Toleransi diff <= 7 memicu input tepat di zona putih (Perfect Skill Check).
-    if diff <= 7 then
+    -- Jarak jarum menuju target searah jarum jam
+    local distAhead = (targetRot - lineRot) % 360
+
+    -- Timing Presisi:
+    -- Jarum harus benar-benar berada di dalam zona putih (toleransi ketat <= 3.5 derajat)
+    if diff <= 3.5 or (distAhead <= 3.5 or distAhead >= 358) then
         hasHitCurrentMinigame = true
         autoGenHitCount = autoGenHitCount + 1
         agen_press(spaceObj)
+
+        -- Feedback notifikasi & console
+        pcall(function()
+            Window:Notify({
+                Title = "Auto Perfect Gen",
+                Description = string.format("Hit! Jarum: %.0f° | Target: %.0f° (Offset: %+d°)", lineRot, targetRot, autoGenOffset),
+                Lifetime = 3
+            })
+            print(string.format("[AutoGen] HIT! Jarum: %.1f° | Target: %.1f° | Diff: %.1f° | Offset: %+d°", lineRot, targetRot, diff, autoGenOffset))
+        end)
     end
 end
 
@@ -1732,11 +1748,23 @@ SecAutoGen:Toggle({
         autoGenEnabled = enabled
         if enabled then
             agen_start()
-            Window:Notify({ Title = "Auto Perfect Gen", Description = "Aktif! Akan otomatis tekan Space saat needle di zona sukses.", Lifetime = 4 })
+            Window:Notify({ Title = "Auto Perfect Gen", Description = "Aktif! Otomatis tekan Space pas di zona putih.", Lifetime = 4 })
         else
             agen_stop()
             Window:Notify({ Title = "Auto Perfect Gen", Description = "Dimatikan.", Lifetime = 3 })
         end
+    end
+})
+
+SecAutoGen:Slider({
+    Name = "Timing Offset (Fine Tune)",
+    Default = 0,
+    Minimum = -25,
+    Maximum = 25,
+    DisplayMethod = "Round",
+    Precision = 0,
+    Callback = function(val)
+        autoGenOffset = tonumber(val) or 0
     end
 })
 
