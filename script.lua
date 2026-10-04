@@ -1782,7 +1782,237 @@ SecCross:Button({
 })
 
 -- ==============================================================================
--- TAB 3: MODIFIKASI (VERTIKAL SCROLL KE BAWAH)
+-- MODUL ESP GENERATOR
+-- ==============================================================================
+local espGenEnabled   = false
+local espHighlight    = true
+local espMaxDist      = 3000
+
+local GEN_KEYWORDS = { "generator", "gen" }
+local genData_esp   = {}
+local espConn       = nil
+
+local function is_gen_esp(obj)
+    if not (obj:IsA("Model") or obj:IsA("BasePart")) then return false end
+    local n = obj.Name:lower()
+    for _, kw in ipairs(GEN_KEYWORDS) do
+        if n:find(kw, 1, true) then return true end
+    end
+    return false
+end
+
+local function get_gen_pos(gen)
+    if gen:IsA("BasePart") then return gen.Position end
+    local pp = gen.PrimaryPart or gen:FindFirstChildOfClass("BasePart")
+    if pp then return pp.Position end
+    local ok, cf = pcall(function() return gen:GetBoundingBox() end)
+    if ok then return cf.Position end
+    return nil
+end
+
+local function get_gen_progress(gen)
+    for _, v in ipairs(gen:GetDescendants()) do
+        if v:IsA("NumberValue") or v:IsA("IntValue") then
+            local n = v.Name:lower()
+            if n:find("progress") or n:find("charge") or n:find("repair")
+                or n:find("power") or n:find("percent") then
+                return math.clamp(v.Value, 0, 100)
+            end
+        end
+    end
+    for _, k in ipairs({"Progress","Charge","Repair","Power","Percent"}) do
+        local v = gen:GetAttribute(k)
+        if type(v) == "number" then return math.clamp(v, 0, 100) end
+    end
+    return nil
+end
+
+local function pct_color_esp(p)
+    if not p then return Color3.fromRGB(100, 200, 255) end
+    if p >= 100 then return Color3.fromRGB(80, 255, 80) end
+    if p >= 50  then return Color3.fromRGB(255, 200, 50) end
+    return Color3.fromRGB(100, 200, 255)
+end
+
+local function esp_new_draw(dtype, props)
+    local d = Drawing.new(dtype)
+    for k, v in pairs(props) do d[k] = v end
+    return d
+end
+
+local function esp_setup_gen(gen)
+    if genData_esp[gen] then return end
+    local h = nil
+    if espHighlight and gen:IsA("Model") then
+        h = Instance.new("Highlight")
+        h.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
+        h.FillTransparency    = 0.65
+        h.OutlineTransparency = 0
+        h.Parent              = gen
+    end
+    genData_esp[gen] = {
+        pct = esp_new_draw("Text", {
+            Size         = 13,
+            Center       = true,
+            Outline      = true,
+            Color        = Color3.new(1,1,1),
+            OutlineColor = Color3.new(0,0,0),
+            Visible      = false,
+        }),
+        highlight = h,
+    }
+end
+
+local function esp_remove_gen(gen)
+    local e = genData_esp[gen]
+    if not e then return end
+    pcall(function() e.pct:Remove() end)
+    if e.highlight then pcall(function() e.highlight:Destroy() end) end
+    genData_esp[gen] = nil
+end
+
+local function esp_hide_all()
+    for _, e in pairs(genData_esp) do
+        pcall(function() e.pct.Visible = false end)
+        if e.highlight then pcall(function() e.highlight.FillTransparency = 1; e.highlight.OutlineTransparency = 1 end) end
+    end
+end
+
+local function esp_scan()
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if is_gen_esp(obj) then esp_setup_gen(obj) end
+    end
+    for g in pairs(genData_esp) do
+        if not g.Parent then esp_remove_gen(g) end
+    end
+end
+
+local function start_esp_gen()
+    if espConn then return end
+    esp_scan()
+    local cam = workspace.CurrentCamera
+    local scanTimer = 0
+    espConn = RunService.RenderStepped:Connect(function(dt)
+        scanTimer += dt
+        if scanTimer >= 5 then
+            scanTimer = 0
+            esp_scan()
+        end
+
+        for gen, e in pairs(genData_esp) do
+            if not gen.Parent or not espGenEnabled then
+                pcall(function() e.pct.Visible = false end)
+            else
+                local pos = get_gen_pos(gen)
+                if not pos then
+                    pcall(function() e.pct.Visible = false end)
+                else
+                    local dist = (cam.CFrame.Position - pos).Magnitude
+                    if espMaxDist > 0 and dist > espMaxDist then
+                        pcall(function() e.pct.Visible = false end)
+                    else
+                        local sc, vis = cam:WorldToViewportPoint(pos + Vector3.new(0, 3, 0))
+                        if not vis then
+                            pcall(function() e.pct.Visible = false end)
+                        else
+                            local progress = get_gen_progress(gen)
+                            local color    = pct_color_esp(progress)
+                            local label    = progress and string.format("%.0f%%", progress) or "0%"
+                            if progress and progress >= 100 then label = "✓ 100%" end
+
+                            if e.highlight then
+                                e.highlight.FillColor        = color
+                                e.highlight.OutlineColor     = color
+                                e.highlight.FillTransparency    = espHighlight and 0.65 or 1
+                                e.highlight.OutlineTransparency = espHighlight and 0   or 1
+                            end
+
+                            e.pct.Text     = label
+                            e.pct.Position = Vector2.new(sc.X, sc.Y)
+                            e.pct.Color    = color
+                            e.pct.Visible  = true
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
+local function stop_esp_gen()
+    if espConn then
+        espConn:Disconnect()
+        espConn = nil
+    end
+    esp_hide_all()
+end
+
+-- ==============================================================================
+-- TAB 3: ESP
+-- ==============================================================================
+local TabESP = tabGroup:Tab({ Name = "ESP", Image = "lucide/eye" })
+
+local SecESPGen = TabESP:Section({})
+SecESPGen:Header({ Name = WMacLib:Gradient("ESP Generator", Color3.fromRGB(100, 220, 255), Color3.fromRGB(80, 255, 160)) })
+
+SecESPGen:Toggle({
+    Name = "Aktifkan ESP Generator",
+    Default = false,
+    Callback = function(enabled)
+        espGenEnabled = enabled
+        if enabled then
+            start_esp_gen()
+            Window:Notify({ Title = "ESP Generator", Description = "ESP Generator aktif! Progress ditampilkan di atas generator.", Lifetime = 3 })
+        else
+            stop_esp_gen()
+            Window:Notify({ Title = "ESP Generator", Description = "ESP Generator dimatikan.", Lifetime = 3 })
+        end
+    end
+})
+
+SecESPGen:Toggle({
+    Name = "Highlight Generator (Aura Warna)",
+    Default = true,
+    Callback = function(enabled)
+        espHighlight = enabled
+        -- Rebuild ESP to apply/remove highlight instances
+        if espGenEnabled then
+            stop_esp_gen()
+            for g in pairs(genData_esp) do esp_remove_gen(g) end
+            start_esp_gen()
+        end
+    end
+})
+
+SecESPGen:Slider({
+    Name = "Jarak Maksimum ESP (studs)",
+    Default = 3000,
+    Minimum = 100,
+    Maximum = 5000,
+    DisplayMethod = "Round",
+    Precision = 0,
+    Callback = function(val)
+        espMaxDist = val
+    end
+})
+
+SecESPGen:Button({
+    Name = "Rescan Generator",
+    Callback = function()
+        for g in pairs(genData_esp) do esp_remove_gen(g) end
+        esp_scan()
+        local n = 0
+        for _ in pairs(genData_esp) do n += 1 end
+        Window:Notify({
+            Title = "ESP Generator",
+            Description = "Rescan selesai! Ditemukan " .. tostring(n) .. " generator.",
+            Lifetime = 4
+        })
+    end
+})
+
+-- ==============================================================================
+-- TAB 4: MODIFIKASI (VERTIKAL SCROLL KE BAWAH)
 -- ==============================================================================
 local TabMod = tabGroup:Tab({ Name = "Modifikasi", Image = "lucide/sparkles" })
 
