@@ -7,6 +7,7 @@ local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CoreGui = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer
@@ -1489,11 +1490,13 @@ end
 
 local function agen_start()
     if autoGenConn then return end
-    autoGenHitCount = 0
-    isMinigameActive = false
+    autoGenHitCount       = 0
+    isMinigameActive      = false
     hasHitCurrentMinigame = false
-    lastLineRotation = nil
-    lineMoveCount = 0
+    lastLineRotation      = nil
+    lastGoalRotation      = nil
+    lastHitTick           = 0
+    lineMoveCount         = 0
     autoGenConn = RunService.RenderStepped:Connect(agen_tick)
 end
 
@@ -1506,6 +1509,222 @@ local function agen_stop()
     hasHitCurrentMinigame = false
     lastLineRotation = nil
     lineMoveCount = 0
+end
+
+-- ==============================================================================
+-- MODUL 4.5: AUTO PARRY (PARRYING DAGGER)
+-- ==============================================================================
+local autoParryEnabled = false
+local autoParryConn    = nil
+local PARRY_DISTANCE   = 16.0
+local PARRY_COOLDOWN   = 1.2
+local lastParryTick    = 0
+local isParrying       = false
+
+local KNOWN_ATTACK_ANIM_IDS = {
+    -- Abysswalker
+    ["98833771436786"]  = true,
+    ["118907603246885"] = true,
+    ["78432063483146"]  = true,
+    ["126626340093785"] = true,
+    -- Masked
+    ["129784271201071"] = true,
+    ["132817836308238"] = true,
+    ["76503974441748"]  = true,
+    ["82666958311998"]  = true,
+    ["133002120549396"] = true,
+    -- Hidden Killer
+    ["73681849513551"]  = true,
+}
+
+local IGNORED_LOOP_NAMES = {
+    ["idle"] = true, ["walk"] = true, ["run"] = true, ["jump"] = true,
+    ["fall"] = true, ["strafe"] = true, ["climb"] = true,
+}
+
+local cachedParryClient = nil
+local cachedParryRemote = nil
+
+local function get_parry_instance()
+    if cachedParryClient and cachedParryClient.Parry then
+        return cachedParryClient
+    end
+
+    local char = LocalPlayer and LocalPlayer.Character
+    if not char then return nil end
+
+    local daggerModel = char:FindFirstChild("Parrying Dagger")
+    local toolPart = daggerModel and daggerModel:FindFirstChild("Left Arm") and daggerModel["Left Arm"]:FindFirstChild("Parry Dagger")
+
+    pcall(function()
+        local mod = ReplicatedStorage:WaitForChild("Modules", 1):WaitForChild("Items", 1):WaitForChild("ParryClient", 1)
+        local ParryClient = require(mod)
+        if ParryClient then
+            cachedParryClient = ParryClient.new({
+                animationId = 109133187196613,
+                lockDuration = 0.8,
+                tool = toolPart or (daggerModel and daggerModel:FindFirstChildOfClass("Model")) or daggerModel
+            })
+        end
+    end)
+
+    return cachedParryClient
+end
+
+LocalPlayer.CharacterAdded:Connect(function()
+    cachedParryClient = nil
+    cachedParryRemote = nil
+    isParrying = false
+end)
+
+local function execute_perfect_parry(killerModel, killerName, reason, dist)
+    local now = tick()
+    if isParrying or (now - lastParryTick < PARRY_COOLDOWN) then return end
+    lastParryTick = now
+    isParrying = true
+
+    local myChar = LocalPlayer.Character
+    local myHrp = myChar and (myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Torso"))
+    local killerHrp = killerModel and (killerModel:FindFirstChild("HumanoidRootPart") or killerModel:FindFirstChild("Torso"))
+
+    -- 1. Auto-Face: Hadapkan badan tepat ke arah killer (0ms snap)
+    if myHrp and killerHrp then
+        local toKiller = Vector3.new(killerHrp.Position.X - myHrp.Position.X, 0, killerHrp.Position.Z - myHrp.Position.Z)
+        if toKiller.Magnitude > 0 then
+            myHrp.CFrame = CFrame.new(myHrp.Position, myHrp.Position + toKiller.Unit)
+        end
+    end
+
+    -- 2. Panggil Method Resmi ParryClient
+    local parryObj = get_parry_instance()
+    local called = false
+
+    if parryObj then
+        pcall(function()
+            if parryObj.isParryOnCooldown then parryObj.isParryOnCooldown = false end
+            if parryObj.isParryResolving then parryObj.isParryResolving = false end
+        end)
+
+        local ok = pcall(function()
+            parryObj:Parry()
+        end)
+        called = ok
+    end
+
+    -- 3. Backup Server Remote
+    if not called then
+        pcall(function()
+            if not cachedParryRemote then
+                cachedParryRemote = ReplicatedStorage.Remotes.Items["Parrying Dagger"].parry
+            end
+            if cachedParryRemote then
+                cachedParryRemote:FireServer()
+            end
+        end)
+    end
+
+    pcall(function()
+        print(string.format("[AutoParry] PERFECT PARRY! Killer: %s | Jarak: %.1f studs | %s", tostring(killerName), dist or 0, reason))
+    end)
+
+    task.delay(0.9, function()
+        isParrying = false
+    end)
+end
+
+local trackedAnimators = {}
+
+local function monitorAnimator(animator, ownerModel, ownerName)
+    if trackedAnimators[animator] then return end
+    trackedAnimators[animator] = true
+
+    animator.AnimationPlayed:Connect(function(track)
+        if not autoParryEnabled then return end
+        if isParrying or (tick() - lastParryTick < PARRY_COOLDOWN) then return end
+
+        local myChar = LocalPlayer and LocalPlayer.Character
+        local myHrp = myChar and (myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Torso"))
+        local killerHrp = ownerModel and (ownerModel:FindFirstChild("HumanoidRootPart") or ownerModel:FindFirstChild("Torso"))
+
+        if not myHrp or not killerHrp then return end
+
+        local dist = (myHrp.Position - killerHrp.Position).Magnitude
+        if dist <= PARRY_DISTANCE then
+            -- DIRECTIONAL CHECK: Hanya tangkis jika killer menghadap kita
+            local killerLook = killerHrp.CFrame.LookVector
+            local killerLookFlat = Vector3.new(killerLook.X, 0, killerLook.Z).Unit
+            local toPlayer = (myHrp.Position - killerHrp.Position)
+            local toPlayerFlat = Vector3.new(toPlayer.X, 0, toPlayer.Z).Unit
+
+            local facingAngle = killerLookFlat:Dot(toPlayerFlat)
+            if facingAngle < 0.45 then
+                return -- Killer mengayun ke arah lain / membelakangi
+            end
+
+            local anim = track.Animation
+            local animId = anim and anim.AnimationId or ""
+            local cleanId = tostring(animId):match("%d+")
+            local animName = (track.Name or ""):lower()
+
+            local isAttack = false
+            local reason = ""
+
+            if cleanId and KNOWN_ATTACK_ANIM_IDS[cleanId] then
+                isAttack = true
+                reason = "ID: " .. cleanId
+            elseif animName:find("attack") or animName:find("swing") or animName:find("slash")
+                or animName:find("m1") or animName:find("hit") or animName:find("strike") then
+                isAttack = true
+                reason = "Keyword: " .. animName
+            elseif not track.Looped and not IGNORED_LOOP_NAMES[animName] then
+                if track.Speed >= 0.4 then
+                    isAttack = true
+                    reason = string.format("Action Swing (Facing: %.2f)", facingAngle)
+                end
+            end
+
+            if isAttack then
+                execute_perfect_parry(ownerModel, ownerName, reason, dist)
+            end
+        end
+    end)
+end
+
+local function scanAllEntities()
+    if not autoParryEnabled then return end
+    local myChar = LocalPlayer and LocalPlayer.Character
+    if not myChar then return end
+
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            local hum = p.Character:FindFirstChildOfClass("Humanoid")
+            local anim = hum and hum:FindFirstChildOfClass("Animator")
+            if anim then monitorAnimator(anim, p.Character, p.DisplayName or p.Name) end
+        end
+    end
+
+    for _, obj in ipairs(workspace:GetChildren()) do
+        if obj:IsA("Model") and obj ~= myChar then
+            local hum = obj:FindFirstChildOfClass("Humanoid")
+            local anim = hum and hum:FindFirstChildOfClass("Animator")
+            if anim then monitorAnimator(anim, obj, obj.Name) end
+        end
+    end
+end
+
+local function autoparry_start()
+    if autoParryConn then return end
+    isParrying = false
+    lastParryTick = 0
+    autoParryConn = RunService.Heartbeat:Connect(scanAllEntities)
+end
+
+local function autoparry_stop()
+    if autoParryConn then
+        autoParryConn:Disconnect()
+        autoParryConn = nil
+    end
+    isParrying = false
 end
 
 -- ==============================================================================
@@ -1811,6 +2030,24 @@ SecAutoGen:Toggle({
         else
             agen_stop()
             Window:Notify({ Title = "Auto Perfect Gen", Description = "Dimatikan.", Lifetime = 2 })
+        end
+    end
+})
+
+local SecAutoParry = TabMain:Section({})
+SecAutoParry:Header({ Name = WMacLib:Gradient("Auto Parry", Color3.fromRGB(255, 90, 90), Color3.fromRGB(255, 180, 50)) })
+
+SecAutoParry:Toggle({
+    Name = "Aktifkan Auto Parry",
+    Default = false,
+    Callback = function(enabled)
+        autoParryEnabled = enabled
+        if enabled then
+            autoparry_start()
+            Window:Notify({ Title = "Auto Parry", Description = "Aktif! Menangkis serangan killer otomatis.", Lifetime = 3 })
+        else
+            autoparry_stop()
+            Window:Notify({ Title = "Auto Parry", Description = "Auto Parry dimatikan.", Lifetime = 2 })
         end
     end
 })
