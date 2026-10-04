@@ -2471,7 +2471,9 @@ local function tof_stop()
     -- Unhook Result jika tersedia
     if tofResultHooked and tofOrigResultFire and tofResultEvent then
         pcall(function()
-            hookfunction(tofResultEvent.Fire, tofOrigResultFire)
+            if hookfunction then
+                hookfunction(tofResultEvent.Fire, tofOrigResultFire)
+            end
         end)
         tofResultHooked = false
     end
@@ -3094,7 +3096,7 @@ local function start_esp_gen()
     local cam = workspace.CurrentCamera
     local scanTimer = 0
     espConn = RunService.RenderStepped:Connect(function(dt)
-        scanTimer += dt
+        scanTimer = scanTimer + dt
         if scanTimer >= 5 then
             scanTimer = 0
             esp_scan()
@@ -3629,8 +3631,8 @@ watermark:SetVisible(false)
 
 local fpsCount, fpsElapsed = 0, 0
 RunService.Heartbeat:Connect(function(dt)
-    fpsCount += 1
-    fpsElapsed += dt
+    fpsCount = fpsCount + 1
+    fpsElapsed = fpsElapsed + dt
     if fpsElapsed >= 0.5 then
         pcall(function()
             watermark:Set("FPS", math.round(fpsCount / fpsElapsed) .. " FPS")
