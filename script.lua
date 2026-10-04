@@ -1517,9 +1517,10 @@ end
 local autoParryEnabled = false
 local autoParryConn    = nil
 local PARRY_DISTANCE   = 16.0
-local PARRY_COOLDOWN   = 1.2
+local PARRY_COOLDOWN   = 3.5  -- Mengikuti cooldown resmi game (minimal 3.5 detik)
 local lastParryTick    = 0
 local isParrying       = false
+local gameParryCooldownEnd = 0
 
 local KNOWN_ATTACK_ANIM_IDS = {
     -- Abysswalker
@@ -1565,66 +1566,137 @@ local function get_parry_instance()
     return cachedParryClient
 end
 
+-- Dengarkan event parryResult resmi game untuk mengetahui kapan cooldown selesai
+pcall(function()
+    local remotes = ReplicatedStorage:WaitForChild("Remotes", 2)
+    local items = remotes and remotes:WaitForChild("Items", 2)
+    local dagger = items and items:WaitForChild("Parrying Dagger", 2)
+    local parryResult = dagger and dagger:WaitForChild("parryResult", 2)
+    if parryResult then
+        parryResult.OnClientEvent:Connect(function(arg1, cd)
+            local cooldownDuration = tonumber(cd) or 3.5
+            gameParryCooldownEnd = tick() + cooldownDuration
+            isParrying = false
+        end)
+    end
+end)
+
 LocalPlayer.CharacterAdded:Connect(function()
     cachedParryClient = nil
     cachedParryRemote = nil
     isParrying = false
+    lastParryTick = 0
+    gameParryCooldownEnd = 0
+    -- Reset tracker agar listener lama tidak menumpuk setelah respawn
+    trackedAnimators = {}
 end)
 
 local function execute_perfect_parry(killerModel, killerName, reason, dist)
     local now = tick()
-    if isParrying or (now - lastParryTick < PARRY_COOLDOWN) then return end
-    lastParryTick = now
-    isParrying = true
+    -- Cek cooldown internal & cooldown dari game
+    if isParrying or (now - lastParryTick < PARRY_COOLDOWN) or (now < gameParryCooldownEnd) then
+        return
+    end
 
     local myChar = LocalPlayer.Character
-    local myHrp = myChar and (myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Torso"))
+    if not myChar then return end
+    local myHrp = myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Torso")
     local killerHrp = killerModel and (killerModel:FindFirstChild("HumanoidRootPart") or killerModel:FindFirstChild("Torso"))
+    if not myHrp or not killerHrp then return end
+
+    -- Cek apakah karakter sedang melakukan aksi lain / dibawa / di-hook
+    local cs = game:GetService("CollectionService")
+    if cs:HasTag(myHrp, "doing action") or myChar:GetAttribute("IsCarried") or myChar:GetAttribute("IsHooked") then
+        return
+    end
+
+    -- Cek instance ParryClient game: apakah sedang cooldown / resolving
+    local parryObj = get_parry_instance()
+    if parryObj then
+        if parryObj.isParryOnCooldown or parryObj.isParryResolving then
+            return -- Sedang cooldown di dalam game!
+        end
+        if parryObj.CanUse and not parryObj:CanUse() then
+            return -- Tidak bisa digunakan (cooldown / busy)
+        end
+    end
+
+    lastParryTick = now
+    isParrying = true
+    -- Pasang cooldown awal minimal 3.5s sampai di-update oleh event parryResult
+    gameParryCooldownEnd = now + PARRY_COOLDOWN
 
     -- 1. Auto-Face: Hadapkan badan tepat ke arah killer (0ms snap)
-    if myHrp and killerHrp then
-        local toKiller = Vector3.new(killerHrp.Position.X - myHrp.Position.X, 0, killerHrp.Position.Z - myHrp.Position.Z)
-        if toKiller.Magnitude > 0 then
-            myHrp.CFrame = CFrame.new(myHrp.Position, myHrp.Position + toKiller.Unit)
-        end
+    local toKiller = Vector3.new(killerHrp.Position.X - myHrp.Position.X, 0, killerHrp.Position.Z - myHrp.Position.Z)
+    if toKiller.Magnitude > 0 then
+        myHrp.CFrame = CFrame.new(myHrp.Position, myHrp.Position + toKiller.Unit)
     end
 
-    -- 2. Panggil Method Resmi ParryClient jika ada dari game
-    local parryObj = get_parry_instance()
+    -- 2. Panggil Method Resmi ParryClient
     local called = false
-
     if parryObj and parryObj.Parry then
-        pcall(function()
-            if parryObj.isParryOnCooldown then parryObj.isParryOnCooldown = false end
-            if parryObj.isParryResolving then parryObj.isParryResolving = false end
+        local ok = pcall(function()
             parryObj:Parry()
-            called = true
+        end)
+        called = ok
+    end
+
+    -- 3. HANYA panggil Remote jika parryObj TIDAK ADA atau GAGAL
+    -- (PENTING: Jangan pernah panggil keduanya sekaligus agar tidak terjadi parry 2x)
+    if not called then
+        pcall(function()
+            if not cachedParryRemote then
+                local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
+                local itemsFolder = remotesFolder and remotesFolder:FindFirstChild("Items")
+                local daggerFolder = itemsFolder and itemsFolder:FindFirstChild("Parrying Dagger")
+                cachedParryRemote = daggerFolder and daggerFolder:FindFirstChild("parry")
+            end
+            if cachedParryRemote then
+                cachedParryRemote:FireServer()
+            end
         end)
     end
-
-    -- 3. Trigger Server Remote Resmi (Selalu aman dan tidak merusak skin)
-    pcall(function()
-        if not cachedParryRemote then
-            local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
-            local itemsFolder = remotesFolder and remotesFolder:FindFirstChild("Items")
-            local daggerFolder = itemsFolder and itemsFolder:FindFirstChild("Parrying Dagger")
-            cachedParryRemote = daggerFolder and daggerFolder:FindFirstChild("parry")
-        end
-        if cachedParryRemote then
-            cachedParryRemote:FireServer()
-        end
-    end)
 
     pcall(function()
         print(string.format("[AutoParry] PERFECT PARRY! Killer: %s | Jarak: %.1f studs | %s", tostring(killerName), dist or 0, reason))
     end)
 
-    task.delay(0.9, function()
+    -- Fallback: reset isParrying setelah PARRY_COOLDOWN detik
+    -- (event parryResult akan reset lebih cepat jika server merespons)
+    task.delay(PARRY_COOLDOWN, function()
         isParrying = false
     end)
 end
 
 local trackedAnimators = {}
+
+local function is_killer_entity(model)
+    if not model or not model:IsA("Model") then return false end
+    -- 1. Cek Model "Weapon" di karakter (Killer selalu memegang child Model "Weapon")
+    if model:FindFirstChild("Weapon") then return true end
+    -- 2. Cek CollectionService Tag "Killer"
+    local cs = game:GetService("CollectionService")
+    if cs:HasTag(model, "Killer") then return true end
+    local ok, tags = pcall(function() return cs:GetTags(model) end)
+    if ok and tags then
+        for _, t in ipairs(tags) do
+            if t:lower():find("killer") then return true end
+        end
+    end
+    -- 3. Cek Attribute khas Killer
+    if model:GetAttribute("TerrorRadius") or model:GetAttribute("SuspenseRadius")
+        or model:GetAttribute("Chasemusic") or model:GetAttribute("BloodLust") then
+        return true
+    end
+    -- 4. Cek Player jika entity adalah karakter Player
+    local p = Players:GetPlayerFromCharacter(model)
+    if p then
+        local role = p:GetAttribute("CurrentRole") or p:GetAttribute("Role")
+        if role and tostring(role):lower() == "killer" then return true end
+        if p.Character and p.Character:FindFirstChild("Weapon") then return true end
+    end
+    return false
+end
 
 local function monitorAnimator(animator, ownerModel, ownerName)
     if trackedAnimators[animator] then return end
@@ -1632,7 +1704,14 @@ local function monitorAnimator(animator, ownerModel, ownerName)
 
     animator.AnimationPlayed:Connect(function(track)
         if not autoParryEnabled then return end
-        if isParrying or (tick() - lastParryTick < PARRY_COOLDOWN) then return end
+        -- [FIX] Cek SEMUA kondisi cooldown sebelum parry
+        local now2 = tick()
+        if isParrying or (now2 - lastParryTick < PARRY_COOLDOWN) or (now2 < gameParryCooldownEnd) then return end
+
+        -- [FIX] HANYA AUTO PARRY JIKA ENTITY ADALAH KILLER! JANGAN PARRY JIKA SURVIVOR NEMBAK!
+        if not is_killer_entity(ownerModel) then
+            return
+        end
 
         local myChar = LocalPlayer and LocalPlayer.Character
         local myHrp = myChar and (myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Torso"))
@@ -1641,12 +1720,11 @@ local function monitorAnimator(animator, ownerModel, ownerName)
         if not myHrp or not killerHrp then return end
 
         -- [FIX] Skip jika killer sedang MEMBAWA survivor (bukan menyerang kita)
-        -- Cek attribute IsCarrying / IsCarried dari karakter killer
         local killerIsCarrying = ownerModel:GetAttribute("IsCarrying") or ownerModel:GetAttribute("Carrying")
         if killerIsCarrying and killerIsCarrying ~= false and killerIsCarrying ~= 0 then
             return -- Killer sedang bawa survi, bukan menyerang
         end
-        -- Juga cek apakah kita sedang di-carry (tidak perlu parry saat di bawa)
+        -- Juga cek apakah kita sedang di-carry
         if myChar:GetAttribute("IsCarried") then
             return
         end
@@ -1669,11 +1747,17 @@ local function monitorAnimator(animator, ownerModel, ownerName)
             local cleanId = tostring(animId):match("%d+")
             local animName = (track.Name or ""):lower()
 
-            -- [FIX] Skip animasi yang berhubungan dengan carry / pickup
+            -- [FIX] Skip animasi carry / pickup
             local isCarryAnim = animName:find("carry") or animName:find("pickup")
                 or animName:find("pick_up") or animName:find("grab") or animName:find("lift")
                 or animName:find("drop") or animName:find("throw") or animName:find("release")
             if isCarryAnim then return end
+
+            -- [FIX] Skip animasi tembakan senjata api / flare
+            if animName:find("shoot") or animName:find("gun") or animName:find("fire")
+                or animName:find("flare") or animName:find("aim") then
+                return
+            end
 
             local isAttack = false
             local reason = ""
@@ -1705,7 +1789,7 @@ local function scanAllEntities()
     if not myChar then return end
 
     for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and p.Character then
+        if p ~= LocalPlayer and p.Character and is_killer_entity(p.Character) then
             local hum = p.Character:FindFirstChildOfClass("Humanoid")
             local anim = hum and hum:FindFirstChildOfClass("Animator")
             if anim then monitorAnimator(anim, p.Character, p.DisplayName or p.Name) end
@@ -1713,7 +1797,7 @@ local function scanAllEntities()
     end
 
     for _, obj in ipairs(workspace:GetChildren()) do
-        if obj:IsA("Model") and obj ~= myChar then
+        if obj:IsA("Model") and obj ~= myChar and is_killer_entity(obj) then
             local hum = obj:FindFirstChildOfClass("Humanoid")
             local anim = hum and hum:FindFirstChildOfClass("Animator")
             if anim then monitorAnimator(anim, obj, obj.Name) end
@@ -1721,11 +1805,35 @@ local function scanAllEntities()
     end
 end
 
+local autoParryDescConn = nil
+
 local function autoparry_start()
     if autoParryConn then return end
     isParrying = false
     lastParryTick = 0
-    autoParryConn = RunService.Heartbeat:Connect(scanAllEntities)
+    gameParryCooldownEnd = 0
+    -- Scan awal sekali
+    scanAllEntities()
+    -- Event-driven: pasang listener saat ada child/descendant baru di workspace
+    autoParryDescConn = workspace.DescendantAdded:Connect(function(desc)
+        if not autoParryEnabled then return end
+        if desc:IsA("Animator") then
+            local ownerModel = desc.Parent and desc.Parent.Parent
+            if ownerModel and is_killer_entity(ownerModel) then
+                monitorAnimator(desc, ownerModel, ownerModel.Name)
+            end
+        end
+    end)
+    -- Heartbeat hanya untuk re-scan entitas baru secara berkala (jarang)
+    local scanTimer2 = 0
+    autoParryConn = RunService.Heartbeat:Connect(function(dt)
+        if not autoParryEnabled then return end
+        scanTimer2 = scanTimer2 + dt
+        if scanTimer2 >= 3 then  -- re-scan setiap 3 detik, bukan setiap frame
+            scanTimer2 = 0
+            scanAllEntities()
+        end
+    end)
 end
 
 local function autoparry_stop()
@@ -1733,7 +1841,13 @@ local function autoparry_stop()
         autoParryConn:Disconnect()
         autoParryConn = nil
     end
+    if autoParryDescConn then
+        autoParryDescConn:Disconnect()
+        autoParryDescConn = nil
+    end
     isParrying = false
+    -- Bersihkan tracker agar tidak ada listener lama saat diaktifkan kembali
+    trackedAnimators = {}
 end
 
 -- ==============================================================================
@@ -2450,42 +2564,53 @@ local function esp_get_or_create_tag(player, char)
     bbg.StudsOffset = Vector3.new(0, 2.5, 0)
     bbg.ResetOnSpawn = false
 
-    local statusLbl = Instance.new("TextLabel")
-    statusLbl.Name = "StatusLabel"
-    statusLbl.Size = UDim2.new(1, 0, 0, 20)
-    statusLbl.Position = UDim2.new(0, 0, 0, 0)
-    statusLbl.BackgroundTransparency = 1
-    statusLbl.Font = Enum.Font.GothamBold
-    statusLbl.TextSize = 13
-    statusLbl.TextColor3 = ESP_YELLOW
-    statusLbl.TextStrokeColor3 = Color3.new(0, 0, 0)
-    statusLbl.TextStrokeTransparency = 0
-    statusLbl.Text = "[OK] Aman"
-    statusLbl.Parent = bbg
-
+    -- Baris 1 (Atas): Nama Pemain + Jarak (Selalu Putih)
     local nameLbl = Instance.new("TextLabel")
     nameLbl.Name = "NameLabel"
-    nameLbl.Size = UDim2.new(1, 0, 0, 18)
-    nameLbl.Position = UDim2.new(0, 0, 0, 20)
+    nameLbl.Size = UDim2.new(1, 0, 0, 20)
+    nameLbl.Position = UDim2.new(0, 0, 0, 0)
     nameLbl.BackgroundTransparency = 1
     nameLbl.Font = Enum.Font.GothamBold
-    nameLbl.TextSize = 12
+    nameLbl.TextSize = 13
     nameLbl.TextColor3 = ESP_WHITE
     nameLbl.TextStrokeColor3 = Color3.new(0, 0, 0)
     nameLbl.TextStrokeTransparency = 0
     nameLbl.Text = player.DisplayName
     nameLbl.Parent = bbg
 
+    -- Baris 2 (Bawah): Status di samping Item (Status berwarna, Item putih)
+    local infoLbl = Instance.new("TextLabel")
+    infoLbl.Name = "InfoLabel"
+    infoLbl.Size = UDim2.new(1, 0, 0, 18)
+    infoLbl.Position = UDim2.new(0, 0, 0, 20)
+    infoLbl.BackgroundTransparency = 1
+    infoLbl.Font = Enum.Font.GothamBold
+    infoLbl.TextSize = 12
+    infoLbl.RichText = true
+    infoLbl.TextColor3 = ESP_WHITE
+    infoLbl.TextStrokeColor3 = Color3.new(0, 0, 0)
+    infoLbl.TextStrokeTransparency = 0
+    infoLbl.Text = "[OK] Aman"
+    infoLbl.Parent = bbg
+
     bbg.Parent = head
 
     tagData = {
         bbg = bbg,
-        statusLbl = statusLbl,
         nameLbl = nameLbl,
+        infoLbl = infoLbl,
         head = head,
     }
     espPlayerTags[player] = tagData
     return tagData
+end
+
+local function to_hex_color(col)
+    return string.format("#%02X%02X%02X",
+        math.clamp(math.floor(col.R * 255), 0, 255),
+        math.clamp(math.floor(col.G * 255), 0, 255),
+        math.clamp(math.floor(col.B * 255), 0, 255)
+    )
 end
 
 local function esp_update_player(player)
@@ -2507,24 +2632,27 @@ local function esp_update_player(player)
 
     if esp_is_killer(char) then
         esp_set_highlight_player(player, char, ESP_RED)
-        tagData.statusLbl.Text = "[KILLER]"
-        tagData.statusLbl.TextColor3 = ESP_RED
-        tagData.nameLbl.Text = player.DisplayName .. " (" .. math.floor(dist) .. "m)"
+        -- Baris 1 (Atas): Nama Killer (Merah)
+        tagData.nameLbl.Text = "[KILLER] " .. player.DisplayName .. " (" .. math.floor(dist) .. "m)"
         tagData.nameLbl.TextColor3 = ESP_RED
+        -- Baris 2 (Bawah): Status Killer (Merah)
+        tagData.infoLbl.Text = '<font color="#FF3232">[KILLER]</font>'
     else
         local status, statusColor = esp_get_status(char)
         local item = esp_get_item(char)
         esp_set_highlight_player(player, char, ESP_WHITE)
 
-        tagData.statusLbl.Text = status
-        tagData.statusLbl.TextColor3 = statusColor
-
-        local nameText = player.DisplayName .. " (" .. math.floor(dist) .. "m)"
-        if item and item ~= "" then
-            nameText = nameText .. " | " .. item
-        end
-        tagData.nameLbl.Text = nameText
+        -- Baris 1 (Atas): Nama Pemain + Jarak (Selalu PUTIH)
+        tagData.nameLbl.Text = player.DisplayName .. " (" .. math.floor(dist) .. "m)"
         tagData.nameLbl.TextColor3 = ESP_WHITE
+
+        -- Baris 2 (Bawah): Status di samping Item (Status warna dinamis, Item selalu PUTIH)
+        local hex = to_hex_color(statusColor)
+        if item and item ~= "" then
+            tagData.infoLbl.Text = string.format('<font color="%s">%s</font> <font color="#FFFFFF">| %s</font>', hex, status, item)
+        else
+            tagData.infoLbl.Text = string.format('<font color="%s">%s</font>', hex, status)
+        end
     end
 end
 
