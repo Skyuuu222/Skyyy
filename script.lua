@@ -1260,10 +1260,12 @@ local autoGenConn     = nil
 local autoGenHitCount = 0
 local autoGenOffset   = 0
 
--- State tracking untuk siklus minigame aktif
+-- State tracking untuk siklus minigame aktif & King's Scourge
 local isMinigameActive       = false
 local hasHitCurrentMinigame  = false
 local lastLineRotation       = nil
+local lastGoalRotation       = nil
+local lastHitTick            = 0
 local lineMoveCount          = 0
 
 -- Helper untuk memastikan GUI benar-benar aktif & terlihat di layar
@@ -1378,21 +1380,44 @@ local function agen_tick()
             isMinigameActive       = false
             hasHitCurrentMinigame  = false
             lastLineRotation       = nil
+            lastGoalRotation       = nil
+            lastHitTick            = 0
             lineMoveCount          = 0
         end
         return
     end
 
-    -- Minigame baru saja muncul: simpan rotasi awal dan tunggu 3 frame sebelum mulai hitung kecepatan
+    local currentRot = lineObj.Rotation
+    local goalRot    = goalObj.Rotation % 360
+    if goalRot < 0 then goalRot = goalRot + 360 end
+
+    -- DUKUNGAN KHUSUS KING'S SCOURGE & SKILL CHECK BERUNTUN (RAPID CHECKS):
+    -- 1. Jika Goal berpindah posisi sudut (> 4°), ini adalah ronde baru dalam rangkaian King's Scourge!
+    if lastGoalRotation ~= nil then
+        local goalDiff = math.abs((goalRot - lastGoalRotation + 180) % 360 - 180)
+        if goalDiff > 4 then
+            hasHitCurrentMinigame = false
+            lineMoveCount         = 0
+            lastGoalRotation      = goalRot
+        end
+    else
+        lastGoalRotation = goalRot
+    end
+
+    -- 2. Jika sudah pernah hit, tapi sudah lewat 0.28 detik, re-arm otomatis untuk check berikutnya
+    if hasHitCurrentMinigame and (tick() - lastHitTick > 0.28) then
+        hasHitCurrentMinigame = false
+    end
+
+    -- Minigame baru saja muncul
     if not isMinigameActive then
         isMinigameActive      = true
         hasHitCurrentMinigame = false
         lastLineRotation      = lineObj.Rotation
+        lastGoalRotation      = goalRot
         lineMoveCount         = 0
         return
     end
-
-    local currentRot = lineObj.Rotation
 
     -- Hitung kecepatan jarum (derajat per frame, searah jarum jam)
     local rawSpeed = 0
@@ -1402,7 +1427,7 @@ local function agen_tick()
     end
     lastLineRotation = currentRot
 
-    -- Jika minigame sedang standby/idle (jarum diam di 0° atau baru saja reset):
+    -- Jika minigame sedang standby/idle (jarum diam di 0°):
     if math.abs(rawSpeed) < 0.05 and (currentRot % 360 == 0) then
         isMinigameActive      = false
         hasHitCurrentMinigame = false
@@ -1415,39 +1440,37 @@ local function agen_tick()
         lineMoveCount = lineMoveCount + 1
     end
 
-    -- Tunggu minimal 5 frame pergerakan jarum aktif (mencegah trigger saat minigame baru spawn)
-    if lineMoveCount < 5 then return end
+    -- Tunggu minimal 2 frame pergerakan jarum aktif (respons cepat untuk King's Scourge)
+    if lineMoveCount < 2 then return end
 
-    -- Jangan tekan lagi jika sudah pernah hit untuk ronde minigame ini
+    -- Jangan tekan lagi jika sudah pernah hit untuk ronde ini
     if hasHitCurrentMinigame then return end
 
-    -- Normalisasi rotasi needle dan target (0-360)
+    -- Normalisasi rotasi needle (0-360)
     local lineRot = currentRot % 360
     if lineRot < 0 then lineRot = lineRot + 360 end
 
-    local goalRot = goalObj.Rotation % 360
-    if goalRot < 0 then goalRot = goalRot + 360 end
-
     -- TARGET ZONA PUTIH (PERFECT ZONE):
-    -- Zona putih memiliki lebar ~10° (rentang 104° - 112° dari Goal), dengan titik tengah di Goal + 108.0°
-    -- Minigame berpindah-pindah posisi secara acak, dan Goal.Rotation otomatis menyesuaikan sudutnya!
-    local baseOffset = 108.0
+    -- Dari log konsol: jarum sebelumnya menekan di Goal + 102° (sedikit terlalu awal sebelum putih).
+    -- Dengan baseOffset = 114.0°, jarum akan menekan tepat di Goal + 108.5° (persis di tengah-tengah zona putih)!
+    local baseOffset = 114.0
     local targetRot = (goalRot + baseOffset + autoGenOffset) % 360
     if targetRot < 0 then targetRot = targetRot + 360 end
 
     -- Jarak jarum searah putaran jarum jam menuju target
     local distCW = (targetRot - lineRot) % 360
 
-    -- Kompensasi kecepatan jarum & latency (Lead target):
+    -- Kompensasi latency & kecepatan jarum:
     local speed = math.abs(rawSpeed)
-    local leadDeg = speed * 1.5 -- lead 1.5 frame ke depan untuk kompensasi input
-    local hitWindow = math.max(speed * 1.2, 4.5)
+    local leadDeg = speed * 1.0
+    local hitWindow = math.max(speed * 0.9, 3.8)
 
-    -- Tembak ketika jarum tepat berada di jendela lead zona putih (dan bukan berputar dari arah belakang)
+    -- Tembak ketika jarum tepat berada di jendela lead zona putih
     local shouldHit = (distCW <= (leadDeg + hitWindow)) and (distCW >= 0) and (distCW < 180)
 
     if shouldHit then
         hasHitCurrentMinigame = true
+        lastHitTick           = tick()
         autoGenHitCount       = autoGenHitCount + 1
         agen_press(spaceObj)
 
@@ -1455,12 +1478,12 @@ local function agen_tick()
         pcall(function()
             Window:Notify({
                 Title = "Auto Perfect Gen",
-                Description = string.format("PERFECT! Jarum: %.0f° | Target: %.0f° (Goal+113°)", lineRot, targetRot),
-                Lifetime = 3
+                Description = string.format("PERFECT! Jarum: %.0f° | Target: %.0f°", lineRot, targetRot),
+                Lifetime = 2
             })
             print(string.format(
-                "[AutoGen] PERFECT HIT! Jarum: %.1f° | Goal: %.1f° | Target: %.1f° | DistCW: %.1f° | Speed: %.2f°/f | Offset: %+d°",
-                lineRot, goalRot, targetRot, distCW, speed, autoGenOffset
+                "[AutoGen] PERFECT HIT! Jarum: %.1f° | Goal: %.1f° | Selisih: %.1f° | Speed: %.2f°/f",
+                lineRot, goalRot, (lineRot - goalRot) % 360, speed
             ))
         end)
     end
