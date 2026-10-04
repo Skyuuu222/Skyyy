@@ -2290,29 +2290,34 @@ local function update_crosshair()
 end
 
 -- ==============================================================================
--- MODUL 4.6: TWIST OF FATE - ANTI MISS (100% HIT CHANCE)
+-- MODUL 4.6: TWIST OF FATE - ANTI MISS (100% HIT CHANCE) [ULTRA MODE]
 -- ==============================================================================
--- Berdasarkan diagnostic, struktur Twist of Fate:
+-- Struktur Twist of Fate:
 --   Remotes/Items/Twist of Fate/Fire          → RemoteEvent (client→server shoot)
 --   Remotes/Items/Twist of Fate/VisualizeBullet → RemoteEvent (server→client visual)
 --   Remotes/Items/Twist of Fate/Result        → BindableEvent (client-local, miss/hit result)
 --
--- Karena Result adalah BindableEvent, miss chance DIHITUNG DI CLIENT (LocalScript tool).
--- Strategi: (1) Hook Result:Fire agar miss tidak bisa dikirim/diproses
---           (2) Hook math.random agar dice roll miss-check selalu gagal
---           (3) Intercept Fire:FireServer agar server selalu terima argumen "hit"
+-- Miss chance DIHITUNG DI CLIENT (LocalScript tool).
+-- STRATEGI ULTRA:
+--   [L1] Hook math.random — cover SEMUA pola: integer(1,N), float(0..1), random(N)
+--   [L2] Hook Result BindableEvent.Fire — blok miss event langsung
+--   [L3] Hook FireServer RemoteEvent — paksa argumen hit ke server
+--   [L4] getgc() scan + patch tabel GunClient langsung (missChance=0, hitChance=100)
+--   [L5] Attribute Character patch — setiap Heartbeat
 -- ==============================================================================
-local tofAntiMissEnabled = false
-local tofHookActive       = false
-local tofOriginalRandom   = nil
-local tofUpdateConn       = nil
-local tofResultHooked     = false
-local tofFireHooked       = false
-local tofOrigResultFire   = nil
-local tofOrigFireServer   = nil
-local tofResultEvent      = nil
-local tofFireEvent        = nil
-local TOF_HOOK_BYPASS     = false
+local tofAntiMissEnabled  = false
+local tofHookActive        = false
+local tofOriginalRandom    = nil
+local tofUpdateConn        = nil
+local tofResultHooked      = false
+local tofFireHooked        = false
+local tofOrigResultFire    = nil
+local tofOrigFireServer    = nil
+local tofResultEvent       = nil
+local tofFireEvent         = nil
+local TOF_HOOK_BYPASS      = false
+local tofGunTable          = nil
+local tofRepatchInterval   = 0.5  -- default: re-patch tiap 0.5 detik
 
 -- [Layer 1] Cari remote Twist of Fate
 local function tof_get_remotes()
@@ -2329,75 +2334,70 @@ local function tof_get_remotes()
     return tofResultEvent ~= nil
 end
 
--- [Layer 2] Hook Result BindableEvent.Fire
--- Ketika game LocalScript ingin memproses "miss", ia akan memanggil Result:Fire(missData)
--- Kita intercept dengan hookfunction agar miss result tidak pernah diproses
+-- [Layer 2] Hook Result BindableEvent.Fire — blok miss event
 local function tof_hook_result()
     if tofResultHooked then return end
     if not tofResultEvent then return end
-    if not hookfunction then return end  -- Executor perlu support hookfunction
+    if not hookfunction then return end
 
-    local ok = pcall(function()
-        -- Simpan original Fire dan hook-nya
+    pcall(function()
         tofOrigResultFire = tofResultEvent.Fire
         hookfunction(tofOrigResultFire, function(self, ...)
             if not tofAntiMissEnabled then
                 return tofOrigResultFire(self, ...)
             end
             local args = {...}
-            -- Deteksi "miss" dari argumen:
-            -- Pola umum: Result:Fire(false) atau Result:Fire("miss") atau Result:Fire(true/false, data)
             local firstArg = args[1]
             local isMiss = false
             if type(firstArg) == "boolean" and firstArg == false then
                 isMiss = true
             elseif type(firstArg) == "string" then
-                if firstArg:lower():find("miss") or firstArg:lower():find("fail")
-                   or firstArg:lower():find("self") or firstArg:lower() == "false" then
+                local fs = firstArg:lower()
+                if fs:find("miss") or fs:find("fail") or fs:find("self") or fs == "false" then
                     isMiss = true
                 end
             elseif type(firstArg) == "number" and firstArg == 0 then
                 isMiss = true
             end
-
-            if isMiss then
-                -- BLOK miss: jangan teruskan panggilan Result:Fire ke miss handler
-                return
-            end
-            -- Bukan miss → teruskan normal
+            if isMiss then return end  -- BLOK miss
             return tofOrigResultFire(self, ...)
         end)
         tofResultHooked = true
     end)
 end
 
--- [Layer 3] Hook math.random - Twist of Fate LocalScript kemungkinan:
---   local roll = math.random(1, 100)
---   if roll <= missChance then  →  miss!
--- Dengan hook: selalu return 100 saat called dengan range (1, N) N≤100
--- Sehingga: 100 <= missChance → hanya true jika missChance == 100 (tidak mungkin)
+-- [Layer 3] Hook math.random — ULTRA: cover integer(1,N), float(0..1), dan random()
+-- Pattern miss check yang mungkin dipakai game:
+--   a) local roll = math.random(1, 100); if roll <= missChance → MISS
+--      → Solusi: return b (nilai max) sehingga roll > missChance
+--   b) local roll = math.random(); if roll < missChance/100 → MISS
+--      → Solusi: return 1.0 (float max) sehingga roll >= missChance/100 hampir impossible
+--   c) local roll = math.random(100); if roll <= missChance → MISS
+--      → Solusi: return 100 (max integer)
 local function tof_hook_random()
     if tofHookActive then return end
     tofOriginalRandom = math.random
     tofHookActive = true
     math.random = function(a, b)
         if not tofAntiMissEnabled or TOF_HOOK_BYPASS then
-            if a and b then return tofOriginalRandom(a, b)
-            elseif a then return tofOriginalRandom(a)
+            if a ~= nil and b ~= nil then return tofOriginalRandom(a, b)
+            elseif a ~= nil then return tofOriginalRandom(a)
             else return tofOriginalRandom() end
         end
         TOF_HOOK_BYPASS = true
         local result
-        if type(a) == "number" and type(b) == "number" and a >= 1 and b <= 100 then
-            -- Paksa return MAX agar miss condition (roll <= missChance) tidak terpenuhi
+        if a ~= nil and b ~= nil then
+            -- random(min, max) — integer range
+            -- Return MAX agar roll > missChance selalu terpenuhi
             result = b
-        elseif type(a) == "number" and not b then
-            -- random(N) — kemungkinan float 0..1 check, return tofOriginalRandom agar aman
-            result = tofOriginalRandom(a)
+        elseif a ~= nil and type(a) == "number" then
+            -- random(N) — integer 1..N, return N (max)
+            result = a
         else
-            if a and b then result = tofOriginalRandom(a, b)
-            elseif a then result = tofOriginalRandom(a)
-            else result = tofOriginalRandom() end
+            -- random() — float 0..1
+            -- Pola: if math.random() < missChance/100 → miss
+            -- Return 0.9999... agar miss condition gagal kecuali missChance = 100
+            result = 0.9999
         end
         TOF_HOOK_BYPASS = false
         return result
@@ -2410,19 +2410,59 @@ local function tof_unhook_random()
     tofHookActive = false
 end
 
--- [Layer 4] Untuk getgc — scan LocalScript Twist of Fate dan patch nilai missChance langsung
-local tofGunTable = nil
+-- [Layer 3b] Hook FireServer RemoteEvent Twist of Fate/Fire
+-- Intercept panggilan FireServer dari LocalScript agar argumen selalu = "hit"/true
+local function tof_hook_fireserver()
+    if tofFireHooked then return end
+    if not tofFireEvent then return end
+    if not hookfunction then return end
+
+    pcall(function()
+        tofOrigFireServer = tofFireEvent.FireServer
+        hookfunction(tofOrigFireServer, function(self, ...)
+            if not tofAntiMissEnabled then
+                return tofOrigFireServer(self, ...)
+            end
+            local args = {...}
+            -- Jika argumen pertama adalah boolean false atau string "miss" → ubah ke true
+            local modified = false
+            if type(args[1]) == "boolean" and args[1] == false then
+                args[1] = true
+                modified = true
+            elseif type(args[1]) == "string" then
+                local s = args[1]:lower()
+                if s:find("miss") or s:find("fail") or s:find("self") then
+                    args[1] = "hit"
+                    modified = true
+                end
+            elseif type(args[1]) == "number" and args[1] == 0 then
+                args[1] = 1
+                modified = true
+            end
+            return tofOrigFireServer(self, table.unpack(args))
+        end)
+        tofFireHooked = true
+    end)
+end
+
+-- [Layer 4] getgc() scan + patch tabel GunClient langsung
 local function tof_patch_gun_table()
     if tofGunTable then
-        -- Sudah ketemu, langsung patch
         pcall(function()
             for k, v in pairs(tofGunTable) do
                 if type(v) == "number" then
                     local ks = tostring(k):lower()
-                    if ks:find("miss") or ks:find("fail") then
+                    if ks:find("miss") or ks:find("fail") or ks:find("penalty") then
                         tofGunTable[k] = 0
-                    elseif ks:find("chance") or ks:find("accuracy") or ks:find("hit") then
+                    elseif ks:find("chance") or ks:find("accuracy") or ks:find("hit") or ks:find("success") then
                         tofGunTable[k] = 100
+                    end
+                elseif type(v) == "boolean" then
+                    local ks = tostring(k):lower()
+                    if ks:find("miss") or ks:find("fail") then
+                        tofGunTable[k] = false
+                    elseif ks:find("hit") or ks:find("success") then
+                        tofGunTable[k] = true
                     end
                 end
             end
@@ -2433,17 +2473,53 @@ local function tof_patch_gun_table()
     pcall(function()
         for _, v in pairs(getgc(true)) do
             if type(v) == "table" then
-                -- Cari tabel yang punya key terkait pistol/twist
-                local hasMiss    = rawget(v, "missChance") or rawget(v, "MissChance")
-                    or rawget(v, "miss_chance") or rawget(v, "failChance")
-                local hasShoot   = rawget(v, "Shoot") or rawget(v, "shoot")
+                local hasMiss  = rawget(v, "missChance") or rawget(v, "MissChance")
+                    or rawget(v, "miss_chance") or rawget(v, "failChance") or rawget(v, "misschance")
+                local hasShoot = rawget(v, "Shoot") or rawget(v, "shoot")
                     or rawget(v, "Fire") or rawget(v, "CanFire") or rawget(v, "canFire")
-                local hasAmmo    = rawget(v, "ammo") or rawget(v, "Ammo")
-                    or rawget(v, "BulletCount") or rawget(v, "bulletCount")
+                local hasAmmo  = rawget(v, "ammo") or rawget(v, "Ammo")
+                    or rawget(v, "BulletCount") or rawget(v, "bulletCount") or rawget(v, "Bullets")
                 if hasMiss or (hasShoot and hasAmmo) then
                     tofGunTable = v
-                    tof_patch_gun_table()  -- Langsung patch
+                    tof_patch_gun_table()
                     return
+                end
+            end
+        end
+    end)
+end
+
+-- [Layer 5] Patch attribute Character — beberapa game simpan miss chance di sini
+local function tof_patch_character_attrs()
+    local char = LocalPlayer and LocalPlayer.Character
+    if not char then return end
+    pcall(function()
+        -- Key umum yang game pakai
+        local missKeys = {"MissChance", "missChance", "miss_chance", "FailChance", "failChance",
+                          "GunPenalty", "WeaponPenalty", "TwistPenalty"}
+        local hitKeys  = {"HitChance", "hitChance", "Accuracy", "accuracy", "GunAccuracy"}
+        for _, k in ipairs(missKeys) do
+            if char:GetAttribute(k) ~= nil then
+                char:SetAttribute(k, 0)
+            end
+        end
+        for _, k in ipairs(hitKeys) do
+            if char:GetAttribute(k) ~= nil then
+                char:SetAttribute(k, 100)
+            end
+        end
+        -- Cek juga di tool yang dipegang
+        for _, child in ipairs(char:GetChildren()) do
+            if child:IsA("Tool") and child.Name:lower():find("twist") then
+                for _, k in ipairs(missKeys) do
+                    if child:GetAttribute(k) ~= nil then
+                        child:SetAttribute(k, 0)
+                    end
+                end
+                for _, k in ipairs(hitKeys) do
+                    if child:GetAttribute(k) ~= nil then
+                        child:SetAttribute(k, 100)
+                    end
                 end
             end
         end
@@ -2454,24 +2530,25 @@ local function tof_start()
     tof_get_remotes()
     tof_hook_random()
     tof_hook_result()
+    tof_hook_fireserver()
     tof_patch_gun_table()
+    tof_patch_character_attrs()
 
     if tofUpdateConn then tofUpdateConn:Disconnect() end
     local tofTimer = 0
     tofUpdateConn = RunService.Heartbeat:Connect(function(dt)
         if not tofAntiMissEnabled then return end
         tofTimer = tofTimer + dt
-        if tofTimer >= 2 then
+        if tofTimer >= tofRepatchInterval then
             tofTimer = 0
-            -- Re-patch setiap 2 detik (antisipasi game reset nilai)
             tof_patch_gun_table()
+            tof_patch_character_attrs()
         end
     end)
 end
 
 local function tof_stop()
     tof_unhook_random()
-    -- Unhook Result jika tersedia
     if tofResultHooked and tofOrigResultFire and tofResultEvent then
         pcall(function()
             if hookfunction then
@@ -2479,6 +2556,14 @@ local function tof_stop()
             end
         end)
         tofResultHooked = false
+    end
+    if tofFireHooked and tofOrigFireServer and tofFireEvent then
+        pcall(function()
+            if hookfunction then
+                hookfunction(tofFireEvent.FireServer, tofOrigFireServer)
+            end
+        end)
+        tofFireHooked = false
     end
     if tofUpdateConn then
         tofUpdateConn:Disconnect()
@@ -2629,19 +2714,19 @@ SecCross:Button({
 -- SECTION: TWIST OF FATE - ANTI MISS
 -- ==============================================================================
 local SecTOF = TabCombat:Section({})
-SecTOF:Header({ Name = WMacLib:Gradient("Twist of Fate - Anti Miss", Color3.fromRGB(255, 160, 60), Color3.fromRGB(255, 80, 200)) })
+SecTOF:Header({ Name = WMacLib:Gradient("Twist of Fate - Anti Miss [ULTRA]", Color3.fromRGB(255, 160, 60), Color3.fromRGB(255, 80, 200)) })
 
 SecTOF:Toggle({
-    Name = "Anti Miss (100% Hit Chance)",
+    Name = "Anti Miss (100% Hit Chance) [ULTRA]",
     Default = false,
     Callback = function(enabled)
         tofAntiMissEnabled = enabled
         if enabled then
             tof_start()
             Window:Notify({
-                Title = "Twist of Fate",
-                Description = "Anti Miss aktif! Peluru tidak akan meleset ke diri sendiri.",
-                Lifetime = 4
+                Title = "⚡ Twist of Fate ULTRA",
+                Description = "Anti Miss aktif! 5 layer proteksi: random hook, result block, fireserver intercept, GC patch, & attribute patch.",
+                Lifetime = 5
             })
         else
             tof_stop()
@@ -2651,6 +2736,53 @@ SecTOF:Toggle({
                 Lifetime = 3
             })
         end
+    end
+})
+
+-- Slider: seberapa sering re-patch dilakukan
+SecTOF:Slider({
+    Name = "Agresivitas Patch (detik)",
+    Default = 5,
+    Minimum = 1,
+    Maximum = 10,
+    DisplayMethod = "Round",
+    Precision = 0,
+    Callback = function(val)
+        -- Nilai 1 = paling agresif (re-patch tiap 0.1 detik)
+        -- Nilai 10 = paling ringan (re-patch tiap 2 detik)
+        tofRepatchInterval = val == 1 and 0.1
+            or val == 2 and 0.2
+            or val == 3 and 0.3
+            or val == 4 and 0.5
+            or val == 5 and 0.5
+            or val == 6 and 0.75
+            or val == 7 and 1.0
+            or val == 8 and 1.5
+            or val == 9 and 2.0
+            or 2.0
+        Window:Notify({
+            Title = "TOF Agresivitas",
+            Description = string.format("Re-patch setiap %.1f detik. Semakin kecil = semakin kuat.", tofRepatchInterval),
+            Lifetime = 3
+        })
+    end
+})
+
+SecTOF:Button({
+    Name = "Force Patch Sekarang",
+    Callback = function()
+        if not tofAntiMissEnabled then
+            Window:Notify({ Title = "TOF", Description = "Aktifkan Anti Miss terlebih dahulu!", Lifetime = 3 })
+            return
+        end
+        tof_get_remotes()
+        tof_patch_gun_table()
+        tof_patch_character_attrs()
+        Window:Notify({
+            Title = "⚡ Force Patch",
+            Description = "Semua layer di-patch ulang! GC scan + attribute reset.",
+            Lifetime = 3
+        })
     end
 })
 end -- [End TabCombat]
