@@ -2318,40 +2318,66 @@ local function esp_is_killer(char)
     return char:FindFirstChild("Weapon") ~= nil
 end
 
+local STATUS_ICONS = {
+    Aman    = "✅",
+    Injured = "🩹",
+    Knocked = "💀",
+    Hooked  = "🪝",
+}
+
 local function esp_get_status(char)
     local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum then return "?", ESP_GREY end
-    for _, v in ipairs(char:GetDescendants()) do
-        local n = v.Name:lower()
-        if (n == "hooked" or n == "onhook" or n == "ishook") and
-            ((v:IsA("BoolValue") and v.Value == true) or (v:IsA("IntValue") and v.Value == 1)) then
-            return "Hooked", ESP_PURPLE
+    if not hum then return "?", "?", ESP_GREY end
+
+    -- Cek Hooked via Collection Tag (paling akurat)
+    local cs = game:GetService("CollectionService")
+    local tags = cs:GetTags(char)
+    for _, tag in ipairs(tags) do
+        if tag:lower():find("hook") then
+            return "Hooked", STATUS_ICONS.Hooked, ESP_PURPLE
         end
     end
-    for _, k in ipairs({"Hooked","OnHook","IsHooked"}) do
-        local v = char:GetAttribute(k)
-        if v == true or v == 1 then return "Hooked", ESP_PURPLE end
+
+    -- Cek Hooked via Attribute
+    local hookedAttr = char:GetAttribute("IsHooked") or char:GetAttribute("Hooked") or char:GetAttribute("OnHook")
+    if hookedAttr == true or hookedAttr == 1 then
+        return "Hooked", STATUS_ICONS.Hooked, ESP_PURPLE
     end
+
+    -- Cek Knocked via Attribute (dari data scan: char:GetAttribute("Knocked"))
+    local knockedAttr = char:GetAttribute("Knocked")
+    if knockedAttr == true or knockedAttr == 1 then
+        return "Knocked", STATUS_ICONS.Knocked, ESP_RED
+    end
+
+    -- Fallback via HP
     local hp, maxHp = hum.Health, hum.MaxHealth
-    if maxHp <= 0 then return "?", ESP_GREY end
+    if maxHp <= 0 then return "?", "?", ESP_GREY end
     local ratio = hp / maxHp
-    if ratio <= 0   then return "Knocked", ESP_RED    end
-    if ratio < 0.99 then return "Injured",  ESP_ORANGE end
-    return "Aman", ESP_YELLOW
+    if ratio <= 0   then return "Knocked", STATUS_ICONS.Knocked, ESP_RED    end
+    if ratio < 0.99 then return "Injured",  STATUS_ICONS.Injured,  ESP_ORANGE end
+    return "Aman", STATUS_ICONS.Aman, ESP_YELLOW
 end
 
 local function esp_get_item(char)
-    for _, v in ipairs(char:GetChildren()) do
-        if v:IsA("Tool") then return v.Name end
-    end
+    -- Prioritas utama: EquippedItem dari Attribute Player (paling akurat)
     local player = Players:GetPlayerFromCharacter(char)
     if player then
+        local equippedItem = player:GetAttribute("EquippedItem")
+        if equippedItem and equippedItem ~= "" then
+            return tostring(equippedItem)
+        end
+        -- Fallback: Cek Backpack
         local bp = player:FindFirstChildOfClass("Backpack")
         if bp then
             for _, v in ipairs(bp:GetChildren()) do
                 if v:IsA("Tool") then return v.Name end
             end
         end
+    end
+    -- Fallback: Cek Tool yang sedang dipegang di Character
+    for _, v in ipairs(char:GetChildren()) do
+        if v:IsA("Tool") then return v.Name end
     end
     return nil
 end
@@ -2443,16 +2469,22 @@ local function esp_update_player(player)
         d.name.Visible  = true
         d.info.Visible  = false
     else
-        local status, statusColor = esp_get_status(char)
+        local status, statusIcon, statusColor = esp_get_status(char)
         local item = esp_get_item(char)
         esp_set_highlight_player(player, char, ESP_WHITE)
+
+        -- Baris 1: Nama + Jarak
         d.name.Text     = player.DisplayName .. " (" .. math.floor(dist) .. "m)"
         d.name.Position = sp - Vector2.new(0, 18)
         d.name.Color    = ESP_WHITE
         d.name.Visible  = true
-        local info = status
-        if item then info = info .. " | " .. item end
-        d.info.Text     = info
+
+        -- Baris 2: Icon Status + Nama Status | Icon Item + Nama Item
+        local infoText = statusIcon .. " " .. status
+        if item then
+            infoText = infoText .. "  |  🎒 " .. item
+        end
+        d.info.Text     = infoText
         d.info.Position = sp - Vector2.new(0, 5)
         d.info.Color    = statusColor
         d.info.Visible  = true
