@@ -2335,45 +2335,42 @@ local function esp_is_killer(char)
     return char:FindFirstChild("Weapon") ~= nil
 end
 
-local STATUS_ICONS = {
-    Aman    = "[OK]",
-    Injured = "[~]",
-    Knocked = "[KO]",
-    Hooked  = "[HK]",
-}
+local CollectionService_ESP = game:GetService("CollectionService")
 
 local function esp_get_status(char)
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum then return "?", "?", ESP_GREY end
+    local ok, hum = pcall(function() return char:FindFirstChildOfClass("Humanoid") end)
+    if not ok or not hum then return "?", ESP_GREY end
 
-    -- Cek Hooked via Collection Tag (paling akurat)
-    local cs = game:GetService("CollectionService")
-    local tags = cs:GetTags(char)
-    for _, tag in ipairs(tags) do
-        if tag:lower():find("hook") then
-            return "Hooked", STATUS_ICONS.Hooked, ESP_PURPLE
+    -- Cek Hooked via Collection Tag
+    local tagOk, tags = pcall(function() return CollectionService_ESP:GetTags(char) end)
+    if tagOk and tags then
+        for _, tag in ipairs(tags) do
+            if tag:lower():find("hook") then
+                return "[HK] Hooked", ESP_PURPLE
+            end
         end
     end
 
     -- Cek Hooked via Attribute
     local hookedAttr = char:GetAttribute("IsHooked") or char:GetAttribute("Hooked") or char:GetAttribute("OnHook")
     if hookedAttr == true or hookedAttr == 1 then
-        return "Hooked", STATUS_ICONS.Hooked, ESP_PURPLE
+        return "[HK] Hooked", ESP_PURPLE
     end
 
-    -- Cek Knocked via Attribute (dari data scan: char:GetAttribute("Knocked"))
+    -- Cek Knocked via Attribute
     local knockedAttr = char:GetAttribute("Knocked")
     if knockedAttr == true or knockedAttr == 1 then
-        return "Knocked", STATUS_ICONS.Knocked, ESP_RED
+        return "[KO] Knocked", ESP_RED
     end
 
     -- Fallback via HP
-    local hp, maxHp = hum.Health, hum.MaxHealth
-    if maxHp <= 0 then return "?", "?", ESP_GREY end
+    local hp  = hum.Health
+    local maxHp = hum.MaxHealth
+    if maxHp <= 0 then return "?", ESP_GREY end
     local ratio = hp / maxHp
-    if ratio <= 0   then return "Knocked", STATUS_ICONS.Knocked, ESP_RED    end
-    if ratio < 0.99 then return "Injured",  STATUS_ICONS.Injured,  ESP_ORANGE end
-    return "Aman", STATUS_ICONS.Aman, ESP_YELLOW
+    if ratio <= 0   then return "[KO] Knocked", ESP_RED    end
+    if ratio < 0.99 then return "[~] Injured",  ESP_ORANGE end
+    return "[OK] Aman", ESP_YELLOW
 end
 
 local function esp_get_item(char)
@@ -2487,18 +2484,17 @@ local function esp_update_player(player)
         d.name.Visible  = true
         d.info.Visible  = false
     else
-        local status, statusIcon, statusColor = esp_get_status(char)
+        local status, statusColor = esp_get_status(char)
         local item = esp_get_item(char)
         esp_set_highlight_player(player, char, ESP_WHITE)
 
-        -- [FIX] Baris 1 (atas): Status Icon + Nama Status  →  warna status
-        local statusText = statusIcon .. " " .. status
-        d.info.Text     = statusText
+        -- Baris atas: Status (warna sesuai kondisi)
+        d.info.Text     = status
         d.info.Position = sp - Vector2.new(0, 26)
         d.info.Color    = statusColor
         d.info.Visible  = true
 
-        -- [FIX] Baris 2 (bawah): Nama + Jarak | Item  →  selalu PUTIH
+        -- Baris bawah: Nama + Jarak + Item (selalu putih)
         local nameText = player.DisplayName .. " (" .. math.floor(dist) .. "m)"
         if item then
             nameText = nameText .. " | " .. item
@@ -2519,7 +2515,9 @@ local function start_esp_player()
     Players.PlayerRemoving:Connect(esp_remove_player)
     espPlayerConn = RunService.RenderStepped:Connect(function()
         for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= LocalPlayer then esp_update_player(p) end
+            if p ~= LocalPlayer then
+                pcall(esp_update_player, p)
+            end
         end
     end)
 end
