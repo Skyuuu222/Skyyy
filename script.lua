@@ -1853,6 +1853,7 @@ end
 -- ==============================================================================
 -- MODUL 5: PLAYER CONTROLS (SPEED & INFINITE YIELD FLY ENGINE)
 -- ==============================================================================
+do
 local currentSpeed = 16
 local loopSpeed = false
 local speedConn = nil
@@ -2132,6 +2133,7 @@ SecUtil:Toggle({
         })
     end
 })
+end -- [End TabPlayer]
 
 -- ==============================================================================
 
@@ -2179,6 +2181,7 @@ SecAutoParry:Toggle({
 -- ==============================================================================
 -- MODUL CROSSHAIR
 -- ==============================================================================
+do
 local crosshairGui = nil
 local crosshairEnabled = false
 local crosshairOffsetX = 0
@@ -2650,10 +2653,12 @@ SecTOF:Toggle({
         end
     end
 })
+end -- [End TabCombat]
 
 -- ==============================================================================
 -- MODUL ESP Player - Survivor dan Killer
 -- ==============================================================================
+do
 local espPlayerEnabled = false
 
 local ESP_WHITE  = Color3.fromRGB(255, 255, 255)
@@ -3182,10 +3187,12 @@ SecESPGen:Toggle({
         end
     end
 })
+end -- [End TabESP]
 
 -- ==============================================================================
 -- TAB 4: MODIFIKASI (VERTIKAL SCROLL KE BAWAH)
 -- ==============================================================================
+do
 local TabMod = tabGroup:Tab({ Name = "Modifikasi", Image = "lucide/sparkles" })
 
 
@@ -3480,11 +3487,13 @@ SecBody:Button({
         })
     end,
 })
+end -- [End TabMod]
 
 -- ==============================================================================
 -- TAB 3: PENGATURAN & TEMA
 -- ==============================================================================
 tabGroup:Divider()
+do
 local TabConfig = tabGroup:Tab({ Name = "Pengaturan", Image = "lucide/settings" })
 
 -- SEKSI 1: PENAMPILAN & TEMA
@@ -3679,4 +3688,5 @@ Window:Notify({
 })
 
 print("[OK] Sky Hub berhasil dijalankan!")
+end -- [End TabConfig]
 
