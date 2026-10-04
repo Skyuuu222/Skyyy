@@ -1648,6 +1648,17 @@ local function monitorAnimator(animator, ownerModel, ownerName)
 
         if not myHrp or not killerHrp then return end
 
+        -- [FIX] Skip jika killer sedang MEMBAWA survivor (bukan menyerang kita)
+        -- Cek attribute IsCarrying / IsCarried dari karakter killer
+        local killerIsCarrying = ownerModel:GetAttribute("IsCarrying") or ownerModel:GetAttribute("Carrying")
+        if killerIsCarrying and killerIsCarrying ~= false and killerIsCarrying ~= 0 then
+            return -- Killer sedang bawa survi, bukan menyerang
+        end
+        -- Juga cek apakah kita sedang di-carry (tidak perlu parry saat di bawa)
+        if myChar:GetAttribute("IsCarried") then
+            return
+        end
+
         local dist = (myHrp.Position - killerHrp.Position).Magnitude
         if dist <= PARRY_DISTANCE then
             -- DIRECTIONAL CHECK: Hanya tangkis jika killer menghadap kita
@@ -1665,6 +1676,12 @@ local function monitorAnimator(animator, ownerModel, ownerName)
             local animId = anim and anim.AnimationId or ""
             local cleanId = tostring(animId):match("%d+")
             local animName = (track.Name or ""):lower()
+
+            -- [FIX] Skip animasi yang berhubungan dengan carry / pickup
+            local isCarryAnim = animName:find("carry") or animName:find("pickup")
+                or animName:find("pick_up") or animName:find("grab") or animName:find("lift")
+                or animName:find("drop") or animName:find("throw") or animName:find("release")
+            if isCarryAnim then return end
 
             local isAttack = false
             local reason = ""
@@ -2456,7 +2473,8 @@ local function esp_update_player(player)
     local dist  = (cam.CFrame.Position - root.Position).Magnitude
     local head  = char:FindFirstChild("Head")
     local hPos  = head and head.Position or (root.Position + Vector3.new(0, 2.5, 0))
-    local sc, vis = cam:WorldToViewportPoint(hPos + Vector3.new(0, 0.5, 0))
+    -- [FIX] Naikkan posisi ESP jauh lebih tinggi di atas kepala
+    local sc, vis = cam:WorldToViewportPoint(hPos + Vector3.new(0, 1.8, 0))
     if not vis then esp_hide_player(player); return end
 
     local sp = Vector2.new(sc.X, sc.Y)
@@ -2473,21 +2491,22 @@ local function esp_update_player(player)
         local item = esp_get_item(char)
         esp_set_highlight_player(player, char, ESP_WHITE)
 
-        -- Baris 1: Nama + Jarak
-        d.name.Text     = player.DisplayName .. " (" .. math.floor(dist) .. "m)"
-        d.name.Position = sp - Vector2.new(0, 18)
-        d.name.Color    = ESP_WHITE
-        d.name.Visible  = true
-
-        -- Baris 2: Icon Status + Nama Status | Icon Item + Nama Item
-        local infoText = statusIcon .. " " .. status
-        if item then
-            infoText = infoText .. "  |  🎒 " .. item
-        end
-        d.info.Text     = infoText
-        d.info.Position = sp - Vector2.new(0, 5)
+        -- [FIX] Baris 1 (atas): Status Icon + Nama Status  →  warna status
+        local statusText = statusIcon .. " " .. status
+        d.info.Text     = statusText
+        d.info.Position = sp - Vector2.new(0, 26)
         d.info.Color    = statusColor
         d.info.Visible  = true
+
+        -- [FIX] Baris 2 (bawah): Nama + Jarak | Item  →  selalu PUTIH
+        local nameText = player.DisplayName .. " (" .. math.floor(dist) .. "m)"
+        if item then
+            nameText = nameText .. "  |  🎒 " .. item
+        end
+        d.name.Text     = nameText
+        d.name.Position = sp - Vector2.new(0, 12)
+        d.name.Color    = ESP_WHITE
+        d.name.Visible  = true
     end
 end
 
