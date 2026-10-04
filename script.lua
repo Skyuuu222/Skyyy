@@ -1281,8 +1281,23 @@ local function is_gui_visible(v)
 end
 
 -- Deteksi circular skill check (Violence District):
--- Line (jarum putar), Goal (arc zona sukses), Space (tombol prompt) selalu satu parent!
+-- Jalur presisi: SkillCheckPromptGui -> Check -> (Line, Goal, Space)
 local function agen_get_skillcheck_ui()
+    -- 1. Jalur langsung berkecepatan tinggi O(1)
+    local scpGui = PlayerGui:FindFirstChild("SkillCheckPromptGui")
+    if scpGui and scpGui.Enabled then
+        local check = scpGui:FindFirstChild("Check")
+        if check and check.Visible then
+            local line = check:FindFirstChild("Line")
+            local goal = check:FindFirstChild("Goal")
+            local space = check:FindFirstChild("Space")
+            if line and goal and line.Visible and goal.Visible then
+                return line, goal, space, check
+            end
+        end
+    end
+
+    -- 2. Fallback scan jika struktur GUI di-update oleh game
     for _, v in ipairs(PlayerGui:GetDescendants()) do
         if v:IsA("GuiObject") and v.Name == "Line" and is_gui_visible(v) then
             local p = v.Parent
@@ -1360,70 +1375,93 @@ local function agen_tick()
     -- Jika minigame tidak ada atau sudah tertutup
     if not lineObj or not goalObj then
         if isMinigameActive then
-            isMinigameActive = false
-            hasHitCurrentMinigame = false
-            lastLineRotation = nil
-            lineMoveCount = 0
+            isMinigameActive       = false
+            hasHitCurrentMinigame  = false
+            lastLineRotation       = nil
+            lineMoveCount          = 0
         end
         return
     end
 
-    -- Minigame baru saja muncul
+    -- Minigame baru saja muncul: simpan rotasi awal dan tunggu 3 frame sebelum mulai hitung kecepatan
     if not isMinigameActive then
-        isMinigameActive = true
+        isMinigameActive      = true
         hasHitCurrentMinigame = false
-        lastLineRotation = lineObj.Rotation
-        lineMoveCount = 0
+        lastLineRotation      = lineObj.Rotation
+        lineMoveCount         = 0
         return
     end
 
-    -- Jika sudah pernah menekan untuk minigame ini, jangan tekan lagi (hindari double tap / fail)
-    if hasHitCurrentMinigame then return end
-
     local currentRot = lineObj.Rotation
 
-    -- Normalisasi rotasi needle dan target (0 - 360 derajat)
+    -- Hitung kecepatan jarum (derajat per frame, searah jarum jam)
+    local rawSpeed = 0
+    if lastLineRotation ~= nil then
+        rawSpeed = (currentRot - lastLineRotation) % 360
+        if rawSpeed > 180 then rawSpeed = rawSpeed - 360 end
+    end
+    lastLineRotation = currentRot
+
+    -- Jika minigame sedang standby/idle (jarum diam di 0° atau baru saja reset):
+    if math.abs(rawSpeed) < 0.05 and (currentRot % 360 == 0) then
+        isMinigameActive      = false
+        hasHitCurrentMinigame = false
+        lineMoveCount         = 0
+        return
+    end
+
+    -- Deteksi pergerakan jarum aktif
+    if math.abs(rawSpeed) > 0.05 then
+        lineMoveCount = lineMoveCount + 1
+    end
+
+    -- Tunggu minimal 5 frame pergerakan jarum aktif (mencegah trigger saat minigame baru spawn)
+    if lineMoveCount < 5 then return end
+
+    -- Jangan tekan lagi jika sudah pernah hit untuk ronde minigame ini
+    if hasHitCurrentMinigame then return end
+
+    -- Normalisasi rotasi needle dan target (0-360)
     local lineRot = currentRot % 360
     if lineRot < 0 then lineRot = lineRot + 360 end
 
     local goalRot = goalObj.Rotation % 360
     if goalRot < 0 then goalRot = goalRot + 360 end
 
-    -- Target zona putih (dengan toleransi offset fine-tune)
-    local targetRot = (goalRot + autoGenOffset) % 360
+    -- TARGET ZONA PUTIH (PERFECT ZONE):
+    -- Zona putih memiliki lebar ~10° (rentang 104° - 112° dari Goal), dengan titik tengah di Goal + 108.0°
+    -- Minigame berpindah-pindah posisi secara acak, dan Goal.Rotation otomatis menyesuaikan sudutnya!
+    local baseOffset = 108.0
+    local targetRot = (goalRot + baseOffset + autoGenOffset) % 360
     if targetRot < 0 then targetRot = targetRot + 360 end
 
-    -- Deteksi pergerakan jarum (memastikan jarum sudah aktif berputar dan bukan di titik awal/freeze)
-    if lastLineRotation ~= nil and math.abs(currentRot - lastLineRotation) > 0.05 then
-        lineMoveCount = lineMoveCount + 1
-    end
-    lastLineRotation = currentRot
+    -- Jarak jarum searah putaran jarum jam menuju target
+    local distCW = (targetRot - lineRot) % 360
 
-    -- Tunggu minimal 2 frame pergerakan agar tidak pernah "berhenti di asal" saat baru spawn
-    if lineMoveCount < 2 then return end
+    -- Kompensasi kecepatan jarum & latency (Lead target):
+    local speed = math.abs(rawSpeed)
+    local leadDeg = speed * 1.5 -- lead 1.5 frame ke depan untuk kompensasi input
+    local hitWindow = math.max(speed * 1.2, 4.5)
 
-    -- Hitung selisih sudut absolut
-    local diff = math.abs(lineRot - targetRot)
-    if diff > 180 then diff = 360 - diff end
+    -- Tembak ketika jarum tepat berada di jendela lead zona putih (dan bukan berputar dari arah belakang)
+    local shouldHit = (distCW <= (leadDeg + hitWindow)) and (distCW >= 0) and (distCW < 180)
 
-    -- Jarak jarum menuju target searah jarum jam
-    local distAhead = (targetRot - lineRot) % 360
-
-    -- Timing Presisi:
-    -- Jarum harus benar-benar berada di dalam zona putih (toleransi ketat <= 3.5 derajat)
-    if diff <= 3.5 or (distAhead <= 3.5 or distAhead >= 358) then
+    if shouldHit then
         hasHitCurrentMinigame = true
-        autoGenHitCount = autoGenHitCount + 1
+        autoGenHitCount       = autoGenHitCount + 1
         agen_press(spaceObj)
 
-        -- Feedback notifikasi & console
+        -- Feedback notifikasi & console (F9)
         pcall(function()
             Window:Notify({
                 Title = "Auto Perfect Gen",
-                Description = string.format("Hit! Jarum: %.0f° | Target: %.0f° (Offset: %+d°)", lineRot, targetRot, autoGenOffset),
+                Description = string.format("PERFECT! Jarum: %.0f° | Target: %.0f° (Goal+113°)", lineRot, targetRot),
                 Lifetime = 3
             })
-            print(string.format("[AutoGen] HIT! Jarum: %.1f° | Target: %.1f° | Diff: %.1f° | Offset: %+d°", lineRot, targetRot, diff, autoGenOffset))
+            print(string.format(
+                "[AutoGen] PERFECT HIT! Jarum: %.1f° | Goal: %.1f° | Target: %.1f° | DistCW: %.1f° | Speed: %.2f°/f | Offset: %+d°",
+                lineRot, goalRot, targetRot, distCW, speed, autoGenOffset
+            ))
         end)
     end
 end
@@ -2228,70 +2266,63 @@ local function get_gen_pos(gen)
 end
 
 local function get_gen_progress(gen)
-    -- Keyword kuat = harus ada salah satu ini agar dianggap progress
-    local STRONG = { "progress", "repair", "charge", "percent", "fill", "complete", "fix", "done" }
-    -- Keyword lemah = bisa dipakai kalau tidak ada yang kuat
-    local WEAK   = { "power", "current", "energy", "build", "gen", "value" }
+    local curVal = nil
+    local maxVal = nil
 
-    local bestScore = 0   -- harus > 0 agar dipakai (tidak boleh tanpa keyword)
-    local bestVal   = nil
-
+    -- 1. Cari Nilai Maximum jika ada (misal MaxProgress = 100)
     for _, v in ipairs(gen:GetDescendants()) do
         if v:IsA("NumberValue") or v:IsA("IntValue") then
-            local raw = v.Value
-            local val
-            -- Nilai 0-1 (eksklusif): normalisasi ke 0-100 HANYA jika keyword kuat ada
-            -- Nilai > 1 dan <= 100: langsung pakai
-            if raw > 1 and raw <= 100 then
-                val = raw
-            elseif raw > 0 and raw < 1 then
-                -- strict: hanya normalize jika ada keyword kuat
-                local n2 = v.Name:lower()
-                for _, kw in ipairs(STRONG) do
-                    if n2:find(kw, 1, true) then val = raw * 100; break end
-                end
-            elseif raw == 0 then
-                val = 0  -- 0% valid
+            local n = v.Name:lower()
+            if (n:find("max") or n:find("req") or n:find("goal") or n:find("total")) 
+                and (n:find("progress") or n:find("charge") or n:find("repair")) then
+                if v.Value > 0 then maxVal = v.Value end
             end
+        end
+    end
 
-            if val ~= nil and val >= 0 and val <= 100 then
+    -- 2. Cari Nilai Progress Saat Ini (Abaikan semua yang mengandung 'max', 'req', 'goal', 'total')
+    local BEST_NAMES = { "progress", "currentprogress", "repairprogress", "charge", "repair", "percent" }
+    for _, kw in ipairs(BEST_NAMES) do
+        for _, v in ipairs(gen:GetDescendants()) do
+            if v:IsA("NumberValue") or v:IsA("IntValue") then
                 local n = v.Name:lower()
-                local score = 0
-                for i, kw in ipairs(STRONG) do
-                    if n:find(kw, 1, true) then score = 100 + (#STRONG - i); break end
-                end
-                if score == 0 then
-                    for i, kw in ipairs(WEAK) do
-                        if n:find(kw, 1, true) then score = #WEAK - i + 1; break end
+                if not (n:find("max") or n:find("req") or n:find("goal") or n:find("total")) then
+                    if n == kw or n:find(kw, 1, true) then
+                        curVal = v.Value
+                        break
                     end
                 end
-                if score > bestScore then
-                    bestScore = score
-                    bestVal   = val
+            end
+        end
+        if curVal ~= nil then break end
+    end
+
+    -- 3. Cari dari Attributes jika belum ketemu
+    if curVal == nil then
+        local ok, attrs = pcall(function() return gen:GetAttributes() end)
+        if ok and attrs then
+            for attrName, av in pairs(attrs) do
+                if type(av) == "number" then
+                    local n = attrName:lower()
+                    if not (n:find("max") or n:find("req") or n:find("goal") or n:find("total")) then
+                        if n:find("progress") or n:find("charge") or n:find("repair") or n:find("percent") then
+                            curVal = av
+                            break
+                        end
+                    end
                 end
             end
         end
     end
 
-    -- Hanya kembalikan jika ada keyword yang match (score > 0)
-    if bestVal ~= nil and bestScore > 0 then
-        return math.clamp(bestVal, 0, 100)
-    end
-
-    -- Prioritas 2: Attribute dengan keyword kuat
-    local ok, attrs = pcall(function() return gen:GetAttributes() end)
-    if ok and attrs then
-        for attrName, av in pairs(attrs) do
-            if type(av) == "number" then
-                local n = attrName:lower()
-                for _, kw in ipairs(STRONG) do
-                    if n:find(kw, 1, true) then
-                        local v = av
-                        if v > 0 and v < 1 then v = v * 100 end
-                        if v >= 0 and v <= 100 then return math.clamp(v, 0, 100) end
-                    end
-                end
-            end
+    -- Kalkulasi persentase yang benar
+    if curVal ~= nil then
+        if maxVal and maxVal > 0 then
+            return math.clamp((curVal / maxVal) * 100, 0, 100)
+        elseif curVal > 0 and curVal <= 1 then
+            return math.clamp(curVal * 100, 0, 100)
+        elseif curVal >= 0 and curVal <= 100 then
+            return math.clamp(curVal, 0, 100)
         end
     end
 
