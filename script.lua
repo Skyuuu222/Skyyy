@@ -2508,11 +2508,19 @@ end
 
 local espPlayerConn = nil
 
+local espPlayerAddedConn   = nil
+local espPlayerRemovingConn = nil
+
 local function start_esp_player()
     if espPlayerConn then return end
+    -- Bersihkan dan buat ulang semua Drawing objects (fresh start)
+    for p in pairs(espDrawings) do esp_remove_player(p) end
     for _, p in ipairs(Players:GetPlayers()) do esp_add_player(p) end
-    Players.PlayerAdded:Connect(esp_add_player)
-    Players.PlayerRemoving:Connect(esp_remove_player)
+    -- Connect events (disconnect lama dulu supaya tidak dobel)
+    if espPlayerAddedConn then espPlayerAddedConn:Disconnect() end
+    if espPlayerRemovingConn then espPlayerRemovingConn:Disconnect() end
+    espPlayerAddedConn   = Players.PlayerAdded:Connect(esp_add_player)
+    espPlayerRemovingConn = Players.PlayerRemoving:Connect(esp_remove_player)
     espPlayerConn = RunService.RenderStepped:Connect(function()
         for _, p in ipairs(Players:GetPlayers()) do
             if p ~= LocalPlayer then
@@ -2527,6 +2535,8 @@ local function stop_esp_player()
         espPlayerConn:Disconnect()
         espPlayerConn = nil
     end
+    if espPlayerAddedConn then espPlayerAddedConn:Disconnect(); espPlayerAddedConn = nil end
+    if espPlayerRemovingConn then espPlayerRemovingConn:Disconnect(); espPlayerRemovingConn = nil end
     for p in pairs(espDrawings) do esp_remove_player(p) end
 end
 
