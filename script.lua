@@ -1550,23 +1550,17 @@ local function get_parry_instance()
         return cachedParryClient
     end
 
-    local char = LocalPlayer and LocalPlayer.Character
-    if not char then return nil end
-
-    local daggerModel = char:FindFirstChild("Parrying Dagger")
-    local toolPart = daggerModel and daggerModel:FindFirstChild("Left Arm") and daggerModel["Left Arm"]:FindFirstChild("Parry Dagger")
-
-    pcall(function()
-        local mod = ReplicatedStorage:WaitForChild("Modules", 1):WaitForChild("Items", 1):WaitForChild("ParryClient", 1)
-        local ParryClient = require(mod)
-        if ParryClient then
-            cachedParryClient = ParryClient.new({
-                animationId = 109133187196613,
-                lockDuration = 0.8,
-                tool = toolPart or (daggerModel and daggerModel:FindFirstChildOfClass("Model")) or daggerModel
-            })
-        end
-    end)
+    -- Cari instance ParryClient yang SUDAH DIBUAT oleh game (agar model skin dagger tidak hilang/reset)
+    if getgc then
+        pcall(function()
+            for _, v in pairs(getgc(true)) do
+                if type(v) == "table" and rawget(v, "Parry") and rawget(v, "isParryOnCooldown") ~= nil then
+                    cachedParryClient = v
+                    return
+                end
+            end
+        end)
+    end
 
     return cachedParryClient
 end
@@ -1595,33 +1589,31 @@ local function execute_perfect_parry(killerModel, killerName, reason, dist)
         end
     end
 
-    -- 2. Panggil Method Resmi ParryClient
+    -- 2. Panggil Method Resmi ParryClient jika ada dari game
     local parryObj = get_parry_instance()
     local called = false
 
-    if parryObj then
+    if parryObj and parryObj.Parry then
         pcall(function()
             if parryObj.isParryOnCooldown then parryObj.isParryOnCooldown = false end
             if parryObj.isParryResolving then parryObj.isParryResolving = false end
-        end)
-
-        local ok = pcall(function()
             parryObj:Parry()
+            called = true
         end)
-        called = ok
     end
 
-    -- 3. Backup Server Remote
-    if not called then
-        pcall(function()
-            if not cachedParryRemote then
-                cachedParryRemote = ReplicatedStorage.Remotes.Items["Parrying Dagger"].parry
-            end
-            if cachedParryRemote then
-                cachedParryRemote:FireServer()
-            end
-        end)
-    end
+    -- 3. Trigger Server Remote Resmi (Selalu aman dan tidak merusak skin)
+    pcall(function()
+        if not cachedParryRemote then
+            local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
+            local itemsFolder = remotesFolder and remotesFolder:FindFirstChild("Items")
+            local daggerFolder = itemsFolder and itemsFolder:FindFirstChild("Parrying Dagger")
+            cachedParryRemote = daggerFolder and daggerFolder:FindFirstChild("parry")
+        end
+        if cachedParryRemote then
+            cachedParryRemote:FireServer()
+        end
+    end)
 
     pcall(function()
         print(string.format("[AutoParry] PERFECT PARRY! Killer: %s | Jarak: %.1f studs | %s", tostring(killerName), dist or 0, reason))
@@ -2396,14 +2388,8 @@ local function esp_get_item(char)
     return nil
 end
 
-local espDrawings   = {}
+local espPlayerTags = {}
 local espHighlights = {}
-
-local function esp_new_player_draw(dtype, props)
-    local d = Drawing.new(dtype)
-    for k, v in pairs(props) do d[k] = v end
-    return d
-end
 
 local function esp_set_highlight_player(player, char, color)
     local h = espHighlights[player]
@@ -2426,38 +2412,83 @@ local function esp_remove_highlight_player(player)
     end
 end
 
-local function esp_add_player(player)
-    if player == LocalPlayer or espDrawings[player] then return end
-    espDrawings[player] = {
-        name = esp_new_player_draw("Text", {
-            Size=13, Center=true, Outline=true,
-            Color=ESP_WHITE, OutlineColor=Color3.new(0,0,0), Visible=false,
-        }),
-        info = esp_new_player_draw("Text", {
-            Size=12, Center=true, Outline=true,
-            Color=ESP_WHITE, OutlineColor=Color3.new(0,0,0), Visible=false,
-        }),
-    }
-end
-
 local function esp_remove_player(player)
-    if espDrawings[player] then
-        for _, d in pairs(espDrawings[player]) do pcall(function() d:Remove() end) end
-        espDrawings[player] = nil
+    if espPlayerTags[player] then
+        if espPlayerTags[player].bbg then
+            pcall(function() espPlayerTags[player].bbg:Destroy() end)
+        end
+        espPlayerTags[player] = nil
     end
     esp_remove_highlight_player(player)
 end
 
 local function esp_hide_player(player)
-    local d = espDrawings[player]
-    if not d then return end
-    for _, obj in pairs(d) do pcall(function() obj.Visible = false end) end
+    if espPlayerTags[player] and espPlayerTags[player].bbg then
+        espPlayerTags[player].bbg.Enabled = false
+    end
     esp_remove_highlight_player(player)
 end
 
+local function esp_get_or_create_tag(player, char)
+    local head = char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
+    if not head then return nil end
+
+    local tagData = espPlayerTags[player]
+    if tagData and tagData.bbg and tagData.bbg.Parent and tagData.head == head then
+        return tagData
+    end
+
+    if tagData and tagData.bbg then
+        pcall(function() tagData.bbg:Destroy() end)
+    end
+
+    local bbg = Instance.new("BillboardGui")
+    bbg.Name = "ESP_PlayerTag"
+    bbg.Adornee = head
+    bbg.AlwaysOnTop = true
+    bbg.Size = UDim2.new(0, 260, 0, 44)
+    bbg.StudsOffset = Vector3.new(0, 2.5, 0)
+    bbg.ResetOnSpawn = false
+
+    local statusLbl = Instance.new("TextLabel")
+    statusLbl.Name = "StatusLabel"
+    statusLbl.Size = UDim2.new(1, 0, 0, 20)
+    statusLbl.Position = UDim2.new(0, 0, 0, 0)
+    statusLbl.BackgroundTransparency = 1
+    statusLbl.Font = Enum.Font.GothamBold
+    statusLbl.TextSize = 13
+    statusLbl.TextColor3 = ESP_YELLOW
+    statusLbl.TextStrokeColor3 = Color3.new(0, 0, 0)
+    statusLbl.TextStrokeTransparency = 0
+    statusLbl.Text = "[OK] Aman"
+    statusLbl.Parent = bbg
+
+    local nameLbl = Instance.new("TextLabel")
+    nameLbl.Name = "NameLabel"
+    nameLbl.Size = UDim2.new(1, 0, 0, 18)
+    nameLbl.Position = UDim2.new(0, 0, 0, 20)
+    nameLbl.BackgroundTransparency = 1
+    nameLbl.Font = Enum.Font.GothamBold
+    nameLbl.TextSize = 12
+    nameLbl.TextColor3 = ESP_WHITE
+    nameLbl.TextStrokeColor3 = Color3.new(0, 0, 0)
+    nameLbl.TextStrokeTransparency = 0
+    nameLbl.Text = player.DisplayName
+    nameLbl.Parent = bbg
+
+    bbg.Parent = head
+
+    tagData = {
+        bbg = bbg,
+        statusLbl = statusLbl,
+        nameLbl = nameLbl,
+        head = head,
+    }
+    espPlayerTags[player] = tagData
+    return tagData
+end
+
 local function esp_update_player(player)
-    local d = espDrawings[player]
-    if not d then return end
     if not espPlayerEnabled then esp_hide_player(player); return end
 
     local char = player.Character
@@ -2466,61 +2497,47 @@ local function esp_update_player(player)
     local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
     if not root then esp_hide_player(player); return end
 
-    local cam   = workspace.CurrentCamera
-    local dist  = (cam.CFrame.Position - root.Position).Magnitude
-    local head  = char:FindFirstChild("Head")
-    local hPos  = head and head.Position or (root.Position + Vector3.new(0, 2.5, 0))
-    -- [FIX] Naikkan posisi ESP jauh lebih tinggi di atas kepala
-    local sc, vis = cam:WorldToViewportPoint(hPos + Vector3.new(0, 1.8, 0))
-    if not vis then esp_hide_player(player); return end
+    local cam = workspace.CurrentCamera
+    local dist = (cam.CFrame.Position - root.Position).Magnitude
 
-    local sp = Vector2.new(sc.X, sc.Y)
+    local tagData = esp_get_or_create_tag(player, char)
+    if not tagData then esp_hide_player(player); return end
+
+    tagData.bbg.Enabled = true
 
     if esp_is_killer(char) then
         esp_set_highlight_player(player, char, ESP_RED)
-        d.name.Text     = "[KILLER] " .. player.DisplayName .. " (" .. math.floor(dist) .. "m)"
-        d.name.Position = sp - Vector2.new(0, 10)
-        d.name.Color    = ESP_RED
-        d.name.Visible  = true
-        d.info.Visible  = false
+        tagData.statusLbl.Text = "[KILLER]"
+        tagData.statusLbl.TextColor3 = ESP_RED
+        tagData.nameLbl.Text = player.DisplayName .. " (" .. math.floor(dist) .. "m)"
+        tagData.nameLbl.TextColor3 = ESP_RED
     else
         local status, statusColor = esp_get_status(char)
         local item = esp_get_item(char)
         esp_set_highlight_player(player, char, ESP_WHITE)
 
-        -- Baris atas: Status (warna sesuai kondisi)
-        d.info.Text     = status
-        d.info.Position = sp - Vector2.new(0, 26)
-        d.info.Color    = statusColor
-        d.info.Visible  = true
+        tagData.statusLbl.Text = status
+        tagData.statusLbl.TextColor3 = statusColor
 
-        -- Baris bawah: Nama + Jarak + Item (selalu putih)
         local nameText = player.DisplayName .. " (" .. math.floor(dist) .. "m)"
-        if item then
+        if item and item ~= "" then
             nameText = nameText .. " | " .. item
         end
-        d.name.Text     = nameText
-        d.name.Position = sp - Vector2.new(0, 12)
-        d.name.Color    = ESP_WHITE
-        d.name.Visible  = true
+        tagData.nameLbl.Text = nameText
+        tagData.nameLbl.TextColor3 = ESP_WHITE
     end
 end
 
 local espPlayerConn = nil
-
-local espPlayerAddedConn   = nil
 local espPlayerRemovingConn = nil
 
 local function start_esp_player()
     if espPlayerConn then return end
-    -- Bersihkan dan buat ulang semua Drawing objects (fresh start)
-    for p in pairs(espDrawings) do esp_remove_player(p) end
-    for _, p in ipairs(Players:GetPlayers()) do esp_add_player(p) end
-    -- Connect events (disconnect lama dulu supaya tidak dobel)
-    if espPlayerAddedConn then espPlayerAddedConn:Disconnect() end
+    for p in pairs(espPlayerTags) do esp_remove_player(p) end
+
     if espPlayerRemovingConn then espPlayerRemovingConn:Disconnect() end
-    espPlayerAddedConn   = Players.PlayerAdded:Connect(esp_add_player)
     espPlayerRemovingConn = Players.PlayerRemoving:Connect(esp_remove_player)
+
     espPlayerConn = RunService.RenderStepped:Connect(function()
         for _, p in ipairs(Players:GetPlayers()) do
             if p ~= LocalPlayer then
@@ -2535,9 +2552,8 @@ local function stop_esp_player()
         espPlayerConn:Disconnect()
         espPlayerConn = nil
     end
-    if espPlayerAddedConn then espPlayerAddedConn:Disconnect(); espPlayerAddedConn = nil end
     if espPlayerRemovingConn then espPlayerRemovingConn:Disconnect(); espPlayerRemovingConn = nil end
-    for p in pairs(espDrawings) do esp_remove_player(p) end
+    for p in pairs(espPlayerTags) do esp_remove_player(p) end
 end
 
 -- ==============================================================================
@@ -2636,12 +2652,6 @@ end
 
 local ESP_GEN_COLOR = Color3.fromRGB(100, 200, 255) -- Biru tetap, tidak berubah
 
-local function esp_new_draw(dtype, props)
-    local d = Drawing.new(dtype)
-    for k, v in pairs(props) do d[k] = v end
-    return d
-end
-
 local function esp_has_registered_ancestor(obj)
     local p = obj.Parent
     while p and p ~= workspace do
@@ -2653,8 +2663,9 @@ end
 
 local function esp_setup_gen(gen)
     if genData_esp[gen] then return end
-    -- Jangan daftarkan jika ada ancestor yang sudah terdaftar (hindari duplikat)
     if esp_has_registered_ancestor(gen) then return end
+
+    local part = gen:FindFirstChildWhichIsA("BasePart") or gen.PrimaryPart
     local h = nil
     if espHighlight and gen:IsA("Model") then
         h = Instance.new("Highlight")
@@ -2665,30 +2676,52 @@ local function esp_setup_gen(gen)
         h.OutlineTransparency = 0
         h.Parent              = gen
     end
+
+    local bbg = nil
+    local pctLbl = nil
+    if part then
+        bbg = Instance.new("BillboardGui")
+        bbg.Name = "ESP_GenTag"
+        bbg.Adornee = part
+        bbg.AlwaysOnTop = true
+        bbg.Size = UDim2.new(0, 100, 0, 26)
+        bbg.StudsOffset = Vector3.new(0, 3.0, 0)
+        bbg.ResetOnSpawn = false
+
+        pctLbl = Instance.new("TextLabel")
+        pctLbl.Name = "PctLabel"
+        pctLbl.Size = UDim2.new(1, 0, 1, 0)
+        pctLbl.BackgroundTransparency = 1
+        pctLbl.Font = Enum.Font.GothamBold
+        pctLbl.TextSize = 14
+        pctLbl.TextColor3 = ESP_GEN_COLOR
+        pctLbl.TextStrokeColor3 = Color3.new(0, 0, 0)
+        pctLbl.TextStrokeTransparency = 0
+        pctLbl.Text = "0%"
+        pctLbl.Parent = bbg
+
+        bbg.Parent = part
+    end
+
     genData_esp[gen] = {
-        pct = esp_new_draw("Text", {
-            Size         = 13,
-            Center       = true,
-            Outline      = true,
-            Color        = ESP_GEN_COLOR,
-            OutlineColor = Color3.new(0,0,0),
-            Visible      = false,
-        }),
+        bbg = bbg,
+        pctLbl = pctLbl,
         highlight = h,
+        part = part,
     }
 end
 
 local function esp_remove_gen(gen)
     local e = genData_esp[gen]
     if not e then return end
-    pcall(function() e.pct:Remove() end)
+    if e.bbg then pcall(function() e.bbg:Destroy() end) end
     if e.highlight then pcall(function() e.highlight:Destroy() end) end
     genData_esp[gen] = nil
 end
 
 local function esp_hide_all()
     for _, e in pairs(genData_esp) do
-        pcall(function() e.pct.Visible = false end)
+        if e.bbg then pcall(function() e.bbg.Enabled = false end) end
         if e.highlight then pcall(function() e.highlight.FillTransparency = 1; e.highlight.OutlineTransparency = 1 end) end
     end
 end
@@ -2716,31 +2749,28 @@ local function start_esp_gen()
 
         for gen, e in pairs(genData_esp) do
             if not gen.Parent or not espGenEnabled then
-                pcall(function() e.pct.Visible = false end)
+                if e.bbg then e.bbg.Enabled = false end
+                if e.highlight then e.highlight.FillTransparency = 1; e.highlight.OutlineTransparency = 1 end
             else
                 local pos = get_gen_pos(gen)
                 if not pos then
-                    pcall(function() e.pct.Visible = false end)
+                    if e.bbg then e.bbg.Enabled = false end
                 else
                     local dist = (cam.CFrame.Position - pos).Magnitude
                     if espMaxDist > 0 and dist > espMaxDist then
-                        pcall(function() e.pct.Visible = false end)
+                        if e.bbg then e.bbg.Enabled = false end
                     else
-                        local sc, vis = cam:WorldToViewportPoint(pos + Vector3.new(0, 3, 0))
-                        if not vis then
-                            pcall(function() e.pct.Visible = false end)
-                        else
-                            local progress = get_gen_progress(gen)
-                            local label    = progress and string.format("%.0f%%", progress) or "0%"
+                        local progress = get_gen_progress(gen)
+                        local label    = progress and string.format("%.0f%%", progress) or "0%"
 
-                            if e.highlight then
-                                e.highlight.FillTransparency    = espHighlight and 0.65 or 1
-                                e.highlight.OutlineTransparency = espHighlight and 0   or 1
-                            end
+                        if e.highlight then
+                            e.highlight.FillTransparency    = espHighlight and 0.65 or 1
+                            e.highlight.OutlineTransparency = espHighlight and 0   or 1
+                        end
 
-                            e.pct.Text     = label
-                            e.pct.Position = Vector2.new(sc.X, sc.Y)
-                            e.pct.Visible  = true
+                        if e.bbg and e.pctLbl then
+                            e.pctLbl.Text = label
+                            e.bbg.Enabled = true
                         end
                     end
                 end
