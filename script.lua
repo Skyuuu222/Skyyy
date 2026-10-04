@@ -1251,6 +1251,158 @@ local acc_id = "10159600649"
 local mod_target = ""
 
 -- ==============================================================================
+-- MODUL AUTO PERFECT GENERATOR (SKILL CHECK AUTOMATION)
+-- ==============================================================================
+local PlayerGui       = LocalPlayer:WaitForChild("PlayerGui")
+
+local autoGenEnabled  = false
+local autoGenConn     = nil
+local autoGenRemote   = nil
+local autoGenLastHit  = 0
+local autoGenHitCount = 0
+
+local function agen_find_skill_check()
+    for _, v in ipairs(PlayerGui:GetDescendants()) do
+        if (v:IsA("Frame") or v:IsA("ImageLabel") or v:IsA("CanvasGroup")) and v.Visible then
+            local n = v.Name:lower()
+            if (n:find("skill") or n:find("check") or n:find("minigame")
+                or n:find("timing") or n:find("generator") or n:find("repair")
+                or n:find("quicktime") or n:find("qte") or n:find("event"))
+                and v.AbsoluteSize.X > 30 and v.AbsoluteSize.Y > 10 then
+                return v
+            end
+        end
+    end
+    return nil
+end
+
+local function agen_find_needle(gui)
+    -- Prioritas: nama yang dikenal
+    for _, v in ipairs(gui:GetDescendants()) do
+        if v:IsA("Frame") or v:IsA("ImageLabel") then
+            local n = v.Name:lower()
+            if n:find("needle") or n:find("arrow") or n:find("indicator")
+                or n:find("pointer") or n:find("cursor") or n:find("marker")
+                or n:find("bar") or n:find("slide") or n:find("mover") then
+                return v
+            end
+        end
+    end
+    -- Fallback: frame terkecil & tipis yang bergerak
+    local best = nil
+    for _, v in ipairs(gui:GetDescendants()) do
+        if v:IsA("Frame") and v.AbsoluteSize.X > 1 and v.AbsoluteSize.X < 30 then
+            if not best or v.AbsoluteSize.X < best.AbsoluteSize.X then
+                best = v
+            end
+        end
+    end
+    return best
+end
+
+local function agen_find_success_zone(gui)
+    for _, v in ipairs(gui:GetDescendants()) do
+        if v:IsA("Frame") then
+            local n = v.Name:lower()
+            if n:find("success") or n:find("perfect") or n:find("good")
+                or n:find("green") or n:find("zone") or n:find("hit") then
+                return v
+            end
+            -- Warna hijau dominan
+            local ok, c = pcall(function() return v.BackgroundColor3 end)
+            if ok and c and c.G > 0.4 and c.R < 0.55 and v.BackgroundTransparency < 0.75
+                and v.AbsoluteSize.X > 5 then
+                return v
+            end
+        end
+    end
+    return nil
+end
+
+local function agen_press()
+    -- Metode 1: VirtualInputManager
+    local ok1 = pcall(function()
+        local vim = game:GetService("VirtualInputManager")
+        vim:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
+        task.wait(0.05)
+        vim:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
+    end)
+    if ok1 then return end
+    -- Metode 2: keypress/keyrelease (syn, krnl, etc)
+    pcall(function()
+        keypress(Enum.KeyCode.Space.Value)
+        task.wait(0.05)
+        keyrelease(Enum.KeyCode.Space.Value)
+    end)
+end
+
+local function agen_find_remote()
+    local rs = game:GetService("ReplicatedStorage")
+    for _, v in ipairs(rs:GetDescendants()) do
+        if v:IsA("RemoteEvent") then
+            local n = v.Name:lower()
+            if n:find("skill") or n:find("check") or n:find("generator")
+                or n:find("repair") or n:find("perfect") or n:find("minigame") then
+                return v
+            end
+        end
+    end
+    return nil
+end
+
+local function agen_tick()
+    if not autoGenEnabled then return end
+    local now = tick()
+    if now - autoGenLastHit < 0.08 then return end
+
+    local gui = agen_find_skill_check()
+    if not gui then return end
+
+    local needle = agen_find_needle(gui)
+    if not needle then return end
+
+    local zone   = agen_find_success_zone(gui)
+    local nCenter = needle.AbsolutePosition.X + needle.AbsoluteSize.X / 2
+    local shouldHit = false
+
+    if zone then
+        local zMin = zone.AbsolutePosition.X
+        local zMax = zMin + zone.AbsoluteSize.X
+        shouldHit = (nCenter >= zMin and nCenter <= zMax)
+    else
+        local gCenter = gui.AbsolutePosition.X + gui.AbsoluteSize.X / 2
+        local margin  = gui.AbsoluteSize.X * 0.15
+        shouldHit = math.abs(nCenter - gCenter) < margin
+    end
+
+    if shouldHit then
+        if autoGenRemote then
+            pcall(function() autoGenRemote:FireServer() end)
+        else
+            agen_press()
+        end
+        autoGenLastHit  = now
+        autoGenHitCount += 1
+    end
+end
+
+local function agen_start()
+    if autoGenConn then return end
+    -- Cari remote sekali saat start
+    autoGenRemote = agen_find_remote()
+    autoGenHitCount = 0
+    autoGenConn = RunService.Heartbeat:Connect(agen_tick)
+end
+
+local function agen_stop()
+    if autoGenConn then
+        autoGenConn:Disconnect()
+        autoGenConn = nil
+    end
+    autoGenRemote = nil
+end
+
+-- ==============================================================================
 -- MODUL 5: PLAYER CONTROLS (SPEED & INFINITE YIELD FLY ENGINE)
 -- ==============================================================================
 local currentSpeed = 16
@@ -1530,6 +1682,65 @@ SecUtil:Toggle({
             Description = enabled and "Anti-AFK aktif! Anda tidak akan di-kick karena AFK." or "Anti-AFK dinonaktifkan.",
             Lifetime = 3
         })
+    end
+})
+
+-- ==============================================================================
+
+-- TAB 2: MAIN (AUTO PERFECT GENERATOR)
+-- ==============================================================================
+local TabMain = tabGroup:Tab({ Name = "Main", Image = "lucide/zap" })
+
+local SecAutoGen = TabMain:Section({})
+SecAutoGen:Header({ Name = WMacLib:Gradient("Auto Perfect Generator", Color3.fromRGB(100, 255, 180), Color3.fromRGB(60, 180, 255)) })
+
+SecAutoGen:Toggle({
+    Name = "Aktifkan Auto Perfect Gen",
+    Default = false,
+    Callback = function(enabled)
+        autoGenEnabled = enabled
+        if enabled then
+            agen_start()
+            Window:Notify({ Title = "Auto Perfect Gen", Description = "Aktif! Akan otomatis tekan Space saat needle di zona sukses.", Lifetime = 4 })
+        else
+            agen_stop()
+            Window:Notify({ Title = "Auto Perfect Gen", Description = "Dimatikan.", Lifetime = 3 })
+        end
+    end
+})
+
+SecAutoGen:Button({
+    Name = "Cari Remote Baru",
+    Description = "Scan ulang RemoteEvent generator di server",
+    Callback = function()
+        local r = agen_find_remote()
+        if r then
+            autoGenRemote = r
+            Window:Notify({ Title = "Remote Ditemukan", Description = "Remote: " .. r.Name, Lifetime = 4 })
+        else
+            autoGenRemote = nil
+            Window:Notify({ Title = "Remote", Description = "Tidak ditemukan, pakai metode keypress.", Lifetime = 4 })
+        end
+    end
+})
+
+SecAutoGen:Button({
+    Name = "Debug GUI Skill Check",
+    Description = "Print semua Frame visible di PlayerGui ke console",
+    Callback = function()
+        print("[AutoGen] Frame visible di PlayerGui:")
+        local found = 0
+        for _, v in ipairs(PlayerGui:GetDescendants()) do
+            if (v:IsA("Frame") or v:IsA("ImageLabel")) and v.Visible then
+                print(string.format("  %-40s size: %dx%d  pos: %d,%d",
+                    v.Name,
+                    math.floor(v.AbsoluteSize.X), math.floor(v.AbsoluteSize.Y),
+                    math.floor(v.AbsolutePosition.X), math.floor(v.AbsolutePosition.Y)))
+                found += 1
+            end
+        end
+        if found == 0 then print("  (tidak ada frame visible)") end
+        Window:Notify({ Title = "Debug", Description = "Cek console untuk hasil debug.", Lifetime = 3 })
     end
 })
 
