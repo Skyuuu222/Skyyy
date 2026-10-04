@@ -1477,13 +1477,8 @@ local function agen_tick()
         autoGenHitCount       = autoGenHitCount + 1
         agen_press(spaceObj)
 
-        -- Feedback notifikasi & console (F9)
+        -- Feedback console (F9) saja tanpa popup notifikasi di layar
         pcall(function()
-            Window:Notify({
-                Title = "Auto Perfect Gen",
-                Description = string.format("PERFECT! Selisih: %.1f° (Speed: %.1f°/f)", (lineRot - goalRot) % 360, speed),
-                Lifetime = 2
-            })
             print(string.format(
                 "[AutoGen] PERFECT HIT! Jarum: %.1f° | Goal: %.1f° | Selisih: %.1f° | Prediksi: %.1f° | Speed: %.2f°/f",
                 lineRot, goalRot, (lineRot - goalRot) % 360, predictedRot, speed
@@ -1812,23 +1807,11 @@ SecAutoGen:Toggle({
         autoGenEnabled = enabled
         if enabled then
             agen_start()
-            Window:Notify({ Title = "Auto Perfect Gen", Description = "Aktif! Otomatis tekan Space pas di zona putih.", Lifetime = 4 })
+            Window:Notify({ Title = "Auto Perfect Gen", Description = "Aktif! Otomatis Perfect di semua generator.", Lifetime = 3 })
         else
             agen_stop()
-            Window:Notify({ Title = "Auto Perfect Gen", Description = "Dimatikan.", Lifetime = 3 })
+            Window:Notify({ Title = "Auto Perfect Gen", Description = "Dimatikan.", Lifetime = 2 })
         end
-    end
-})
-
-SecAutoGen:Slider({
-    Name = "Timing Offset (Fine Tune)",
-    Default = 0,
-    Minimum = -25,
-    Maximum = 25,
-    DisplayMethod = "Round",
-    Precision = 0,
-    Callback = function(val)
-        autoGenOffset = tonumber(val) or 0
     end
 })
 
