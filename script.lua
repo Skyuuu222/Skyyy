@@ -1261,62 +1261,23 @@ local autoGenRemote   = nil
 local autoGenLastHit  = 0
 local autoGenHitCount = 0
 
-local function agen_find_skill_check()
+-- Deteksi circular skill check: cari frame "Line" (jarum) dan "Goal" (zona sukses)
+-- keduanya berukuran ~200x200 dan pakai Rotation untuk posisi
+local function agen_find_circular()
+    local lineFrame = nil
+    local goalFrame = nil
     for _, v in ipairs(PlayerGui:GetDescendants()) do
-        if (v:IsA("Frame") or v:IsA("ImageLabel") or v:IsA("CanvasGroup")) and v.Visible then
-            local n = v.Name:lower()
-            if (n:find("skill") or n:find("check") or n:find("minigame")
-                or n:find("timing") or n:find("generator") or n:find("repair")
-                or n:find("quicktime") or n:find("qte") or n:find("event"))
-                and v.AbsoluteSize.X > 30 and v.AbsoluteSize.Y > 10 then
-                return v
+        if v:IsA("Frame") and v.Visible then
+            local sx = v.AbsoluteSize.X
+            local sy = v.AbsoluteSize.Y
+            -- Frame ~200x200 adalah bagian dari circular skill check
+            if sx > 100 and sx < 350 and sy > 100 and sy < 350 then
+                if v.Name == "Line" then lineFrame = v end
+                if v.Name == "Goal" then goalFrame = v end
             end
         end
     end
-    return nil
-end
-
-local function agen_find_needle(gui)
-    -- Prioritas: nama yang dikenal
-    for _, v in ipairs(gui:GetDescendants()) do
-        if v:IsA("Frame") or v:IsA("ImageLabel") then
-            local n = v.Name:lower()
-            if n:find("needle") or n:find("arrow") or n:find("indicator")
-                or n:find("pointer") or n:find("cursor") or n:find("marker")
-                or n:find("bar") or n:find("slide") or n:find("mover") then
-                return v
-            end
-        end
-    end
-    -- Fallback: frame terkecil & tipis yang bergerak
-    local best = nil
-    for _, v in ipairs(gui:GetDescendants()) do
-        if v:IsA("Frame") and v.AbsoluteSize.X > 1 and v.AbsoluteSize.X < 30 then
-            if not best or v.AbsoluteSize.X < best.AbsoluteSize.X then
-                best = v
-            end
-        end
-    end
-    return best
-end
-
-local function agen_find_success_zone(gui)
-    for _, v in ipairs(gui:GetDescendants()) do
-        if v:IsA("Frame") then
-            local n = v.Name:lower()
-            if n:find("success") or n:find("perfect") or n:find("good")
-                or n:find("green") or n:find("zone") or n:find("hit") then
-                return v
-            end
-            -- Warna hijau dominan
-            local ok, c = pcall(function() return v.BackgroundColor3 end)
-            if ok and c and c.G > 0.4 and c.R < 0.55 and v.BackgroundTransparency < 0.75
-                and v.AbsoluteSize.X > 5 then
-                return v
-            end
-        end
-    end
-    return nil
+    return lineFrame, goalFrame
 end
 
 local function agen_press()
@@ -1324,14 +1285,14 @@ local function agen_press()
     local ok1 = pcall(function()
         local vim = game:GetService("VirtualInputManager")
         vim:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
-        task.wait(0.05)
+        task.wait(0.04)
         vim:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
     end)
     if ok1 then return end
     -- Metode 2: keypress/keyrelease (syn, krnl, etc)
     pcall(function()
         keypress(Enum.KeyCode.Space.Value)
-        task.wait(0.05)
+        task.wait(0.04)
         keyrelease(Enum.KeyCode.Space.Value)
     end)
 end
@@ -1353,35 +1314,51 @@ end
 local function agen_tick()
     if not autoGenEnabled then return end
     local now = tick()
-    if now - autoGenLastHit < 0.08 then return end
+    if now - autoGenLastHit < 0.05 then return end
 
-    local gui = agen_find_skill_check()
-    if not gui then return end
+    -- Metode 1: Circular skill check (Violence District) - pakai Rotation
+    local lineFrame, goalFrame = agen_find_circular()
+    if lineFrame and goalFrame then
+        -- Hitung selisih sudut antara jarum (Line) dan zona sukses (Goal)
+        local lineRot = lineFrame.Rotation % 360
+        local goalRot = goalFrame.Rotation % 360
+        local diff = math.abs(lineRot - goalRot)
+        if diff > 180 then diff = 360 - diff end
 
-    local needle = agen_find_needle(gui)
-    if not needle then return end
-
-    local zone   = agen_find_success_zone(gui)
-    local nCenter = needle.AbsolutePosition.X + needle.AbsoluteSize.X / 2
-    local shouldHit = false
-
-    if zone then
-        local zMin = zone.AbsolutePosition.X
-        local zMax = zMin + zone.AbsoluteSize.X
-        shouldHit = (nCenter >= zMin and nCenter <= zMax)
-    else
-        local gCenter = gui.AbsolutePosition.X + gui.AbsoluteSize.X / 2
-        local margin  = gui.AbsoluteSize.X * 0.15
-        shouldHit = math.abs(nCenter - gCenter) < margin
+        -- Hit jika needle dalam 18 derajat dari goal center
+        if diff < 18 then
+            if autoGenRemote then
+                pcall(function() autoGenRemote:FireServer() end)
+            else
+                agen_press()
+            end
+            autoGenLastHit = now
+            autoGenHitCount += 1
+        end
+        return -- sudah handle circular, selesai
     end
 
-    if shouldHit then
+    -- Metode 2: Linear skill check (fallback untuk game lain)
+    -- Cari frame bernama "Space" berukuran kecil (indikator posisi)
+    local spaceBtn = nil
+    for _, v in ipairs(PlayerGui:GetDescendants()) do
+        if v:IsA("Frame") and v.Visible and v.Name == "Space" then
+            local sx = v.AbsoluteSize.X
+            if sx > 10 and sx < 100 then -- yang kecil, bukan yang 200x200
+                spaceBtn = v
+                break
+            end
+        end
+    end
+    if not spaceBtn then return end
+    -- Jika Space prompt visible, langsung tekan
+    if spaceBtn.Visible then
         if autoGenRemote then
             pcall(function() autoGenRemote:FireServer() end)
         else
             agen_press()
         end
-        autoGenLastHit  = now
+        autoGenLastHit = now
         autoGenHitCount += 1
     end
 end
@@ -1709,40 +1686,6 @@ SecAutoGen:Toggle({
     end
 })
 
-SecAutoGen:Button({
-    Name = "Cari Remote Baru",
-    Description = "Scan ulang RemoteEvent generator di server",
-    Callback = function()
-        local r = agen_find_remote()
-        if r then
-            autoGenRemote = r
-            Window:Notify({ Title = "Remote Ditemukan", Description = "Remote: " .. r.Name, Lifetime = 4 })
-        else
-            autoGenRemote = nil
-            Window:Notify({ Title = "Remote", Description = "Tidak ditemukan, pakai metode keypress.", Lifetime = 4 })
-        end
-    end
-})
-
-SecAutoGen:Button({
-    Name = "Debug GUI Skill Check",
-    Description = "Print semua Frame visible di PlayerGui ke console",
-    Callback = function()
-        print("[AutoGen] Frame visible di PlayerGui:")
-        local found = 0
-        for _, v in ipairs(PlayerGui:GetDescendants()) do
-            if (v:IsA("Frame") or v:IsA("ImageLabel")) and v.Visible then
-                print(string.format("  %-40s size: %dx%d  pos: %d,%d",
-                    v.Name,
-                    math.floor(v.AbsoluteSize.X), math.floor(v.AbsoluteSize.Y),
-                    math.floor(v.AbsolutePosition.X), math.floor(v.AbsolutePosition.Y)))
-                found += 1
-            end
-        end
-        if found == 0 then print("  (tidak ada frame visible)") end
-        Window:Notify({ Title = "Debug", Description = "Cek console untuk hasil debug.", Lifetime = 3 })
-    end
-})
 
 -- ==============================================================================
 -- MODUL CROSSHAIR
@@ -2203,31 +2146,43 @@ local function get_gen_pos(gen)
 end
 
 local function get_gen_progress(gen)
-    -- Prioritas 1: keyword umum progress (0-100 langsung)
-    local PRIO = {
-        "progress","charge","repair","power","percent",
-        "fill","state","current","value","count",
-        "complete","done","fix","build","energy","gen"
-    }
-    local bestScore = -1
+    -- Keyword kuat = harus ada salah satu ini agar dianggap progress
+    local STRONG = { "progress", "repair", "charge", "percent", "fill", "complete", "fix", "done" }
+    -- Keyword lemah = bisa dipakai kalau tidak ada yang kuat
+    local WEAK   = { "power", "current", "energy", "build", "gen", "value" }
+
+    local bestScore = 0   -- harus > 0 agar dipakai (tidak boleh tanpa keyword)
     local bestVal   = nil
 
     for _, v in ipairs(gen:GetDescendants()) do
         if v:IsA("NumberValue") or v:IsA("IntValue") then
             local raw = v.Value
-            -- Normalisasi: nilai 0-1 dianggap persen
-            local val = raw
-            if raw >= 0 and raw <= 1 then val = raw * 100 end
-            if val >= 0 and val <= 100 then
+            local val
+            -- Nilai 0-1 (eksklusif): normalisasi ke 0-100 HANYA jika keyword kuat ada
+            -- Nilai > 1 dan <= 100: langsung pakai
+            if raw > 1 and raw <= 100 then
+                val = raw
+            elseif raw > 0 and raw < 1 then
+                -- strict: hanya normalize jika ada keyword kuat
+                local n2 = v.Name:lower()
+                for _, kw in ipairs(STRONG) do
+                    if n2:find(kw, 1, true) then val = raw * 100; break end
+                end
+            elseif raw == 0 then
+                val = 0  -- 0% valid
+            end
+
+            if val ~= nil and val >= 0 and val <= 100 then
                 local n = v.Name:lower()
                 local score = 0
-                for i, kw in ipairs(PRIO) do
-                    if n:find(kw, 1, true) then
-                        score = #PRIO - i + 1
-                        break
+                for i, kw in ipairs(STRONG) do
+                    if n:find(kw, 1, true) then score = 100 + (#STRONG - i); break end
+                end
+                if score == 0 then
+                    for i, kw in ipairs(WEAK) do
+                        if n:find(kw, 1, true) then score = #WEAK - i + 1; break end
                     end
                 end
-                -- jika tidak ada keyword, tetap simpan sebagai fallback (score 0)
                 if score > bestScore then
                     bestScore = score
                     bestVal   = val
@@ -2236,16 +2191,24 @@ local function get_gen_progress(gen)
         end
     end
 
-    if bestVal ~= nil then return math.clamp(bestVal, 0, 100) end
+    -- Hanya kembalikan jika ada keyword yang match (score > 0)
+    if bestVal ~= nil and bestScore > 0 then
+        return math.clamp(bestVal, 0, 100)
+    end
 
-    -- Prioritas 2: Attribute apapun bernilai 0-100 atau 0-1
+    -- Prioritas 2: Attribute dengan keyword kuat
     local ok, attrs = pcall(function() return gen:GetAttributes() end)
     if ok and attrs then
-        for _, av in pairs(attrs) do
+        for attrName, av in pairs(attrs) do
             if type(av) == "number" then
-                local v = av
-                if v >= 0 and v <= 1 then v = v * 100 end
-                if v >= 0 and v <= 100 then return math.clamp(v, 0, 100) end
+                local n = attrName:lower()
+                for _, kw in ipairs(STRONG) do
+                    if n:find(kw, 1, true) then
+                        local v = av
+                        if v > 0 and v < 1 then v = v * 100 end
+                        if v >= 0 and v <= 100 then return math.clamp(v, 0, 100) end
+                    end
+                end
             end
         end
     end
