@@ -2287,6 +2287,178 @@ local function update_crosshair()
 end
 
 -- ==============================================================================
+-- MODUL 4.6: TWIST OF FATE - ANTI MISS (100% HIT CHANCE)
+-- ==============================================================================
+local tofAntiMissEnabled = false
+local tofOriginalRandom   = nil
+local tofHookActive       = false
+local tofGunClient        = nil
+local tofUpdateConn       = nil
+local tofKnownChanceKeys  = {
+    "misschance", "miss_chance", "hitchance", "hit_chance",
+    "accuracy", "bulletaccuracy", "successchance", "failchance",
+    "shotaccuracy", "gunaccuracy", "shootchance", "chance",
+}
+
+-- Cari instance GunClient / TwistClient dari getgc()
+local function tof_find_gun_client()
+    if tofGunClient and type(tofGunClient) == "table" then return tofGunClient end
+    if not getgc then return nil end
+    local found = nil
+    pcall(function()
+        for _, v in pairs(getgc(true)) do
+            if type(v) == "table" then
+                for k in pairs(v) do
+                    local ks = tostring(k):lower()
+                    if ks == "shoot" or ks == "fire" or ks == "misschance" or ks == "hitchance"
+                        or ks == "accuracy" or ks == "bulletcount" or ks == "ammo"
+                        or ks == "isonshooting" or ks == "canshoot" or ks == "shootcooldown" then
+                        found = v
+                        return
+                    end
+                end
+            end
+        end
+    end)
+    tofGunClient = found
+    return tofGunClient
+end
+
+-- Override nilai chance di GunClient agar selalu hit
+local function tof_patch_gun_client()
+    local gc = tof_find_gun_client()
+    if not gc then return end
+    pcall(function()
+        for k, v in pairs(gc) do
+            local ks = tostring(k):lower()
+            local isChanceKey = false
+            for _, kw in ipairs(tofKnownChanceKeys) do
+                if ks == kw or ks:find(kw, 1, true) then
+                    isChanceKey = true
+                    break
+                end
+            end
+            if isChanceKey and type(v) == "number" then
+                if ks:find("miss") or ks:find("fail") then
+                    -- Key tentang miss: set ke 0 (tidak pernah miss)
+                    gc[k] = 0
+                else
+                    -- Key tentang hit/accuracy: set ke 100 (selalu hit)
+                    gc[k] = 100
+                end
+            end
+        end
+    end)
+end
+
+-- Hook math.random agar di konteks game peluru tidak miss
+-- Twist of Fate biasanya: random(1,100) <= missChance → miss
+-- Dengan hook: selalu return 100 saat range ≤ 100 (miss chance check)
+local tofRandomCallCount = 0
+local TOF_HOOK_BYPASS = false  -- Flag internal agar rekursi tidak terjadi
+
+local function tof_hook_random()
+    if tofHookActive then return end
+    if not tofOriginalRandom then
+        tofOriginalRandom = math.random
+    end
+    tofHookActive = true
+    math.random = function(a, b)
+        -- Jika tidak dalam konteks anti-miss, gunakan asli
+        if not tofAntiMissEnabled or TOF_HOOK_BYPASS then
+            return tofOriginalRandom(a, b)
+        end
+        TOF_HOOK_BYPASS = true
+        local result
+        -- Tangkap pola random(1, N) N<=100: kemungkinan besar adalah miss-chance check
+        if a and b and type(a)=="number" and type(b)=="number" and a == 1 and b <= 100 then
+            -- Selalu return nilai MAX agar: missChance check gagal → peluru tidak miss
+            result = b
+        elseif a and not b and type(a)=="number" and a <= 1 then
+            -- random(N) dimana N<=1 = mungkin 0..1 float check
+            result = tofOriginalRandom(a)
+        else
+            result = (a and b) and tofOriginalRandom(a, b)
+                or (a and not b) and tofOriginalRandom(a)
+                or tofOriginalRandom()
+        end
+        TOF_HOOK_BYPASS = false
+        return result
+    end
+end
+
+local function tof_unhook_random()
+    if not tofHookActive then return end
+    if tofOriginalRandom then
+        math.random = tofOriginalRandom
+    end
+    tofHookActive = false
+end
+
+-- Set attribute di karakter lokal (beberapa game baca attribute untuk chance)
+local function tof_patch_attributes()
+    local char = LocalPlayer and LocalPlayer.Character
+    if not char then return end
+    pcall(function()
+        local ok, attrs = pcall(function() return char:GetAttributes() end)
+        if ok and attrs then
+            for k in pairs(attrs) do
+                local ks = k:lower()
+                if ks:find("miss") or ks:find("failchance") then
+                    char:SetAttribute(k, 0)
+                elseif ks:find("hitchance") or ks:find("accuracy") or ks:find("successchance") then
+                    char:SetAttribute(k, 100)
+                end
+            end
+        end
+    end)
+    -- Cek juga di Tool yang sedang dipegang
+    for _, t in ipairs(char:GetChildren()) do
+        if t:IsA("Tool") then
+            local ok2, tattrs = pcall(function() return t:GetAttributes() end)
+            if ok2 and tattrs then
+                for k in pairs(tattrs) do
+                    local ks = k:lower()
+                    if ks:find("miss") or ks:find("failchance") then
+                        t:SetAttribute(k, 0)
+                    elseif ks:find("hitchance") or ks:find("accuracy") or ks:find("successchance") then
+                        t:SetAttribute(k, 100)
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function tof_start()
+    tofGunClient = nil  -- Reset cache agar dicari ulang
+    tof_hook_random()
+    tof_patch_attributes()
+    tof_patch_gun_client()
+    -- Update berkala: patch GunClient dan attribute setiap 2 detik (bukan setiap frame)
+    if tofUpdateConn then tofUpdateConn:Disconnect() end
+    local tofTimer = 0
+    tofUpdateConn = RunService.Heartbeat:Connect(function(dt)
+        if not tofAntiMissEnabled then return end
+        tofTimer = tofTimer + dt
+        if tofTimer >= 2 then
+            tofTimer = 0
+            tof_patch_gun_client()
+            tof_patch_attributes()
+        end
+    end)
+end
+
+local function tof_stop()
+    tof_unhook_random()
+    if tofUpdateConn then
+        tofUpdateConn:Disconnect()
+        tofUpdateConn = nil
+    end
+    tofGunClient = nil
+end
+
+-- ==============================================================================
 -- TAB 2: COMBAT (CROSSHAIR)
 -- ==============================================================================
 local TabCombat = tabGroup:Tab({ Name = "Combat", Image = "lucide/crosshair" })
@@ -2421,6 +2593,35 @@ SecCross:Button({
         crosshairOffsetY = 0
         update_crosshair()
         Window:Notify({ Title = "Crosshair", Description = "Posisi crosshair dikembalikan ke tengah layar.", Lifetime = 3 })
+    end
+})
+
+-- ==============================================================================
+-- SECTION: TWIST OF FATE - ANTI MISS
+-- ==============================================================================
+local SecTOF = TabCombat:Section({})
+SecTOF:Header({ Name = WMacLib:Gradient("Twist of Fate - Anti Miss", Color3.fromRGB(255, 160, 60), Color3.fromRGB(255, 80, 200)) })
+
+SecTOF:Toggle({
+    Name = "Anti Miss (100% Hit Chance)",
+    Default = false,
+    Callback = function(enabled)
+        tofAntiMissEnabled = enabled
+        if enabled then
+            tof_start()
+            Window:Notify({
+                Title = "Twist of Fate",
+                Description = "Anti Miss aktif! Peluru tidak akan meleset ke diri sendiri.",
+                Lifetime = 4
+            })
+        else
+            tof_stop()
+            Window:Notify({
+                Title = "Twist of Fate",
+                Description = "Anti Miss dimatikan.",
+                Lifetime = 3
+            })
+        end
     end
 })
 
