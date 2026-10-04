@@ -1785,15 +1785,16 @@ SecCross:Button({
 -- MODUL ESP GENERATOR
 -- ==============================================================================
 local espGenEnabled   = false
-local espHighlight    = true
-local espMaxDist      = 3000
+local espHighlight    = true   -- selalu aktif
+local espMaxDist      = math.huge -- tampilkan semua generator di map tanpa batas jarak
 
 local GEN_KEYWORDS = { "generator", "gen" }
 local genData_esp   = {}
 local espConn       = nil
 
 local function is_gen_esp(obj)
-    if not (obj:IsA("Model") or obj:IsA("BasePart")) then return false end
+    -- Hanya terima Model (bukan BasePart individual) agar tidak muncul banyak label
+    if not obj:IsA("Model") then return false end
     local n = obj.Name:lower()
     for _, kw in ipairs(GEN_KEYWORDS) do
         if n:find(kw, 1, true) then return true end
@@ -1835,8 +1836,19 @@ local function esp_new_draw(dtype, props)
     return d
 end
 
+local function esp_has_registered_ancestor(obj)
+    local p = obj.Parent
+    while p and p ~= workspace do
+        if genData_esp[p] then return true end
+        p = p.Parent
+    end
+    return false
+end
+
 local function esp_setup_gen(gen)
     if genData_esp[gen] then return end
+    -- Jangan daftarkan jika ada ancestor yang sudah terdaftar (hindari duplikat)
+    if esp_has_registered_ancestor(gen) then return end
     local h = nil
     if espHighlight and gen:IsA("Model") then
         h = Instance.new("Highlight")
@@ -1954,52 +1966,11 @@ SecESPGen:Toggle({
         espGenEnabled = enabled
         if enabled then
             start_esp_gen()
-            Window:Notify({ Title = "ESP Generator", Description = "ESP Generator aktif! Progress ditampilkan di atas generator.", Lifetime = 3 })
+            Window:Notify({ Title = "ESP Generator", Description = "ESP aktif! Semua generator di map terlihat.", Lifetime = 3 })
         else
             stop_esp_gen()
             Window:Notify({ Title = "ESP Generator", Description = "ESP Generator dimatikan.", Lifetime = 3 })
         end
-    end
-})
-
-SecESPGen:Toggle({
-    Name = "Highlight Generator (Aura Warna)",
-    Default = true,
-    Callback = function(enabled)
-        espHighlight = enabled
-        -- Rebuild ESP to apply/remove highlight instances
-        if espGenEnabled then
-            stop_esp_gen()
-            for g in pairs(genData_esp) do esp_remove_gen(g) end
-            start_esp_gen()
-        end
-    end
-})
-
-SecESPGen:Slider({
-    Name = "Jarak Maksimum ESP (studs)",
-    Default = 3000,
-    Minimum = 100,
-    Maximum = 5000,
-    DisplayMethod = "Round",
-    Precision = 0,
-    Callback = function(val)
-        espMaxDist = val
-    end
-})
-
-SecESPGen:Button({
-    Name = "Rescan Generator",
-    Callback = function()
-        for g in pairs(genData_esp) do esp_remove_gen(g) end
-        esp_scan()
-        local n = 0
-        for _ in pairs(genData_esp) do n += 1 end
-        Window:Notify({
-            Title = "ESP Generator",
-            Description = "Rescan selesai! Ditemukan " .. tostring(n) .. " generator.",
-            Lifetime = 4
-        })
     end
 })
 
