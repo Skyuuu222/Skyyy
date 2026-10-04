@@ -1782,6 +1782,186 @@ SecCross:Button({
 })
 
 -- ==============================================================================
+-- MODUL ESP PLAYER (SURVIVOR & KILLER)
+-- ==============================================================================
+local espPlayerEnabled = false
+
+local ESP_WHITE  = Color3.fromRGB(255, 255, 255)
+local ESP_RED    = Color3.fromRGB(255,  50,  50)
+local ESP_YELLOW = Color3.fromRGB(255, 200,  50)
+local ESP_ORANGE = Color3.fromRGB(255, 120,  30)
+local ESP_PURPLE = Color3.fromRGB(200, 100, 255)
+local ESP_GREY   = Color3.fromRGB(150, 150, 150)
+
+local function esp_is_killer(char)
+    if not char then return false end
+    return char:FindFirstChild("Weapon") ~= nil
+end
+
+local function esp_get_status(char)
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return "?", ESP_GREY end
+    for _, v in ipairs(char:GetDescendants()) do
+        local n = v.Name:lower()
+        if (n == "hooked" or n == "onhook" or n == "ishook") and
+            ((v:IsA("BoolValue") and v.Value == true) or (v:IsA("IntValue") and v.Value == 1)) then
+            return "Hooked", ESP_PURPLE
+        end
+    end
+    for _, k in ipairs({"Hooked","OnHook","IsHooked"}) do
+        local v = char:GetAttribute(k)
+        if v == true or v == 1 then return "Hooked", ESP_PURPLE end
+    end
+    local hp, maxHp = hum.Health, hum.MaxHealth
+    if maxHp <= 0 then return "?", ESP_GREY end
+    local ratio = hp / maxHp
+    if ratio <= 0   then return "Knocked", ESP_RED    end
+    if ratio < 0.99 then return "Injured",  ESP_ORANGE end
+    return "Aman", ESP_YELLOW
+end
+
+local function esp_get_item(char)
+    for _, v in ipairs(char:GetChildren()) do
+        if v:IsA("Tool") then return v.Name end
+    end
+    local player = Players:GetPlayerFromCharacter(char)
+    if player then
+        local bp = player:FindFirstChildOfClass("Backpack")
+        if bp then
+            for _, v in ipairs(bp:GetChildren()) do
+                if v:IsA("Tool") then return v.Name end
+            end
+        end
+    end
+    return nil
+end
+
+local espDrawings   = {}
+local espHighlights = {}
+
+local function esp_new_player_draw(dtype, props)
+    local d = Drawing.new(dtype)
+    for k, v in pairs(props) do d[k] = v end
+    return d
+end
+
+local function esp_set_highlight_player(player, char, color)
+    local h = espHighlights[player]
+    if not h then
+        h = Instance.new("Highlight")
+        h.DepthMode        = Enum.HighlightDepthMode.AlwaysOnTop
+        h.FillTransparency = 0.65
+        h.OutlineTransparency = 0
+        espHighlights[player] = h
+    end
+    h.FillColor    = color
+    h.OutlineColor = color
+    if h.Parent ~= char then h.Parent = char end
+end
+
+local function esp_remove_highlight_player(player)
+    if espHighlights[player] then
+        pcall(function() espHighlights[player]:Destroy() end)
+        espHighlights[player] = nil
+    end
+end
+
+local function esp_add_player(player)
+    if player == LocalPlayer or espDrawings[player] then return end
+    espDrawings[player] = {
+        name = esp_new_player_draw("Text", {
+            Size=13, Center=true, Outline=true,
+            Color=ESP_WHITE, OutlineColor=Color3.new(0,0,0), Visible=false,
+        }),
+        info = esp_new_player_draw("Text", {
+            Size=12, Center=true, Outline=true,
+            Color=ESP_WHITE, OutlineColor=Color3.new(0,0,0), Visible=false,
+        }),
+    }
+end
+
+local function esp_remove_player(player)
+    if espDrawings[player] then
+        for _, d in pairs(espDrawings[player]) do pcall(function() d:Remove() end) end
+        espDrawings[player] = nil
+    end
+    esp_remove_highlight_player(player)
+end
+
+local function esp_hide_player(player)
+    local d = espDrawings[player]
+    if not d then return end
+    for _, obj in pairs(d) do pcall(function() obj.Visible = false end) end
+    esp_remove_highlight_player(player)
+end
+
+local function esp_update_player(player)
+    local d = espDrawings[player]
+    if not d then return end
+    if not espPlayerEnabled then esp_hide_player(player); return end
+
+    local char = player.Character
+    if not char then esp_hide_player(player); return end
+
+    local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
+    if not root then esp_hide_player(player); return end
+
+    local cam   = workspace.CurrentCamera
+    local dist  = (cam.CFrame.Position - root.Position).Magnitude
+    local head  = char:FindFirstChild("Head")
+    local hPos  = head and head.Position or (root.Position + Vector3.new(0, 2.5, 0))
+    local sc, vis = cam:WorldToViewportPoint(hPos + Vector3.new(0, 0.5, 0))
+    if not vis then esp_hide_player(player); return end
+
+    local sp = Vector2.new(sc.X, sc.Y)
+
+    if esp_is_killer(char) then
+        esp_set_highlight_player(player, char, ESP_RED)
+        d.name.Text     = "[KILLER] " .. player.DisplayName .. " (" .. math.floor(dist) .. "m)"
+        d.name.Position = sp - Vector2.new(0, 10)
+        d.name.Color    = ESP_RED
+        d.name.Visible  = true
+        d.info.Visible  = false
+    else
+        local status, statusColor = esp_get_status(char)
+        local item = esp_get_item(char)
+        esp_set_highlight_player(player, char, ESP_WHITE)
+        d.name.Text     = player.DisplayName .. " (" .. math.floor(dist) .. "m)"
+        d.name.Position = sp - Vector2.new(0, 18)
+        d.name.Color    = ESP_WHITE
+        d.name.Visible  = true
+        local info = status
+        if item then info = info .. " | " .. item end
+        d.info.Text     = info
+        d.info.Position = sp - Vector2.new(0, 5)
+        d.info.Color    = statusColor
+        d.info.Visible  = true
+    end
+end
+
+local espPlayerConn = nil
+
+local function start_esp_player()
+    if espPlayerConn then return end
+    for _, p in ipairs(Players:GetPlayers()) do esp_add_player(p) end
+    Players.PlayerAdded:Connect(esp_add_player)
+    Players.PlayerRemoving:Connect(esp_remove_player)
+    espPlayerConn = RunService.RenderStepped:Connect(function()
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer then esp_update_player(p) end
+        end
+    end)
+end
+
+local function stop_esp_player()
+    if espPlayerConn then
+        espPlayerConn:Disconnect()
+        espPlayerConn = nil
+    end
+    for p in pairs(espDrawings) do esp_remove_player(p) end
+end
+
+-- ==============================================================================
 -- MODUL ESP GENERATOR
 -- ==============================================================================
 local espGenEnabled   = false
@@ -1989,6 +2169,24 @@ end
 -- TAB 3: ESP
 -- ==============================================================================
 local TabESP = tabGroup:Tab({ Name = "ESP", Image = "lucide/eye" })
+
+local SecESPPlayer = TabESP:Section({})
+SecESPPlayer:Header({ Name = WMacLib:Gradient("ESP Player (Survivor & Killer)", Color3.fromRGB(255, 80, 80), Color3.fromRGB(255, 200, 80)) })
+
+SecESPPlayer:Toggle({
+    Name = "Aktifkan ESP Player",
+    Default = false,
+    Callback = function(enabled)
+        espPlayerEnabled = enabled
+        if enabled then
+            start_esp_player()
+            Window:Notify({ Title = "ESP Player", Description = "ESP Player aktif! Putih=Survivor, Merah=Killer.", Lifetime = 3 })
+        else
+            stop_esp_player()
+            Window:Notify({ Title = "ESP Player", Description = "ESP Player dimatikan.", Lifetime = 3 })
+        end
+    end
+})
 
 local SecESPGen = TabESP:Section({})
 SecESPGen:Header({ Name = WMacLib:Gradient("ESP Generator", Color3.fromRGB(100, 220, 255), Color3.fromRGB(80, 255, 160)) })
