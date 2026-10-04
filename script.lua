@@ -1827,12 +1827,7 @@ local function get_gen_progress(gen)
     return nil
 end
 
-local function pct_color_esp(p)
-    if not p then return Color3.fromRGB(100, 200, 255) end
-    if p >= 100 then return Color3.fromRGB(80, 255, 80) end
-    if p >= 50  then return Color3.fromRGB(255, 200, 50) end
-    return Color3.fromRGB(100, 200, 255)
-end
+local ESP_GEN_COLOR = Color3.fromRGB(100, 200, 255) -- Biru tetap, tidak berubah
 
 local function esp_new_draw(dtype, props)
     local d = Drawing.new(dtype)
@@ -1846,6 +1841,8 @@ local function esp_setup_gen(gen)
     if espHighlight and gen:IsA("Model") then
         h = Instance.new("Highlight")
         h.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
+        h.FillColor           = ESP_GEN_COLOR
+        h.OutlineColor        = ESP_GEN_COLOR
         h.FillTransparency    = 0.65
         h.OutlineTransparency = 0
         h.Parent              = gen
@@ -1855,7 +1852,7 @@ local function esp_setup_gen(gen)
             Size         = 13,
             Center       = true,
             Outline      = true,
-            Color        = Color3.new(1,1,1),
+            Color        = ESP_GEN_COLOR,
             OutlineColor = Color3.new(0,0,0),
             Visible      = false,
         }),
@@ -1916,20 +1913,15 @@ local function start_esp_gen()
                             pcall(function() e.pct.Visible = false end)
                         else
                             local progress = get_gen_progress(gen)
-                            local color    = pct_color_esp(progress)
                             local label    = progress and string.format("%.0f%%", progress) or "0%"
-                            if progress and progress >= 100 then label = "✓ 100%" end
 
                             if e.highlight then
-                                e.highlight.FillColor        = color
-                                e.highlight.OutlineColor     = color
                                 e.highlight.FillTransparency    = espHighlight and 0.65 or 1
                                 e.highlight.OutlineTransparency = espHighlight and 0   or 1
                             end
 
                             e.pct.Text     = label
                             e.pct.Position = Vector2.new(sc.X, sc.Y)
-                            e.pct.Color    = color
                             e.pct.Visible  = true
                         end
                     end
