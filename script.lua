@@ -1812,19 +1812,53 @@ local function get_gen_pos(gen)
 end
 
 local function get_gen_progress(gen)
+    -- Prioritas 1: keyword umum progress (0-100 langsung)
+    local PRIO = {
+        "progress","charge","repair","power","percent",
+        "fill","state","current","value","count",
+        "complete","done","fix","build","energy","gen"
+    }
+    local bestScore = -1
+    local bestVal   = nil
+
     for _, v in ipairs(gen:GetDescendants()) do
         if v:IsA("NumberValue") or v:IsA("IntValue") then
-            local n = v.Name:lower()
-            if n:find("progress") or n:find("charge") or n:find("repair")
-                or n:find("power") or n:find("percent") then
-                return math.clamp(v.Value, 0, 100)
+            local raw = v.Value
+            -- Normalisasi: nilai 0-1 dianggap persen
+            local val = raw
+            if raw >= 0 and raw <= 1 then val = raw * 100 end
+            if val >= 0 and val <= 100 then
+                local n = v.Name:lower()
+                local score = 0
+                for i, kw in ipairs(PRIO) do
+                    if n:find(kw, 1, true) then
+                        score = #PRIO - i + 1
+                        break
+                    end
+                end
+                -- jika tidak ada keyword, tetap simpan sebagai fallback (score 0)
+                if score > bestScore then
+                    bestScore = score
+                    bestVal   = val
+                end
             end
         end
     end
-    for _, k in ipairs({"Progress","Charge","Repair","Power","Percent"}) do
-        local v = gen:GetAttribute(k)
-        if type(v) == "number" then return math.clamp(v, 0, 100) end
+
+    if bestVal ~= nil then return math.clamp(bestVal, 0, 100) end
+
+    -- Prioritas 2: Attribute apapun bernilai 0-100 atau 0-1
+    local ok, attrs = pcall(function() return gen:GetAttributes() end)
+    if ok and attrs then
+        for _, av in pairs(attrs) do
+            if type(av) == "number" then
+                local v = av
+                if v >= 0 and v <= 1 then v = v * 100 end
+                if v >= 0 and v <= 100 then return math.clamp(v, 0, 100) end
+            end
+        end
     end
+
     return nil
 end
 
