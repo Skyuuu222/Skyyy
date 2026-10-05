@@ -1248,7 +1248,7 @@ local killerRadarEnabled = false
 local killerRadarGui = nil
 local killerRadarConn = nil
 local RADAR_SIZE = 160
-local RADAR_RANGE = 100  -- stud radius
+local RADAR_RANGE = 350  -- stud radius
 
 local function radar_create_gui()
     if killerRadarGui then pcall(function() killerRadarGui:Destroy() end) end
@@ -1353,55 +1353,74 @@ local function radar_create_gui()
     return sg, radarCircle
 end
 
--- Helper inline untuk deteksi killer tanpa dependensi modul ESP
-local function radar_is_killer(player, char)
-    if not player or not char then return false end
-    -- Cek attribute role
-    local role = player:GetAttribute("CurrentRole") or player:GetAttribute("Role")
-        or player:GetAttribute("Team") or player:GetAttribute("Side")
-    if role then
-        local rs = tostring(role):lower()
-        if rs:find("killer") or rs:find("hunter") or rs:find("slasher") or rs:find("monster") then return true end
+-- ==============================================================================
+-- UNIVERSAL KILLER & SURVIVOR DETECTION HELPER
+-- ==============================================================================
+local function check_is_killer(char, player)
+    if not char then return false end
+    if not player then
+        pcall(function() player = Players:GetPlayerFromCharacter(char) end)
     end
-    -- Cek attribute char
-    local crole = char:GetAttribute("CurrentRole") or char:GetAttribute("Role")
-    if crole then
-        local cs = tostring(crole):lower()
-        if cs:find("killer") or cs:find("hunter") then return true end
-    end
-    -- Cek CollectionService tag
-    local ok, tags = pcall(function() return game:GetService("CollectionService"):GetTags(char) end)
-    if ok and tags then
+
+    -- 1. Cek objek "Weapon" di karakter (Killer selalu memegang model Weapon)
+    if char:FindFirstChild("Weapon") then return true end
+
+    -- 2. Cek CollectionService Tag "Killer"
+    local cs = game:GetService("CollectionService")
+    if cs:HasTag(char, "Killer") then return true end
+    local okTags, tags = pcall(function() return cs:GetTags(char) end)
+    if okTags and tags then
         for _, t in ipairs(tags) do
             local ts = t:lower()
-            if ts:find("killer") or ts:find("hunter") or ts:find("slasher") then return true end
-        end
-    end
-    -- Cek objek Weapon di karakter
-    if char:FindFirstChild("Weapon") or char:FindFirstChildWhichIsA("Tool") then
-        -- Survivor juga bisa pegang tool, cek nama
-        local tool = char:FindFirstChildWhichIsA("Tool")
-        if tool then
-            local tn = tool.Name:lower()
-            if tn:find("knife") or tn:find("axe") or tn:find("sword") or tn:find("hammer") or tn:find("chainsaw") or tn:find("weapon") then
+            if ts:find("killer") or ts:find("hunter") or ts:find("slasher") or ts:find("monster") then
                 return true
             end
         end
-        if char:FindFirstChild("Weapon") then return true end
     end
-    -- Cek TerrorRadius / BloodLust attribute (khas Killer)
-    if char:GetAttribute("TerrorRadius") or char:GetAttribute("BloodLust")
-        or char:GetAttribute("KillerSpeed") or char:GetAttribute("IsKiller") then
+
+    -- 3. Cek Attribute khas Killer pada model karakter
+    if char:GetAttribute("TerrorRadius") or char:GetAttribute("SuspenseRadius")
+        or char:GetAttribute("Chasemusic") or char:GetAttribute("BloodLust")
+        or char:GetAttribute("IsKiller") or char:GetAttribute("KillerSpeed") then
         return true
     end
+
+    -- 4. Cek Attribute khas Killer pada Player
+    if player then
+        local role = player:GetAttribute("CurrentRole") or player:GetAttribute("Role")
+            or player:GetAttribute("Team") or player:GetAttribute("Side")
+        if role then
+            local rs = tostring(role):lower()
+            if rs:find("killer") or rs:find("hunter") or rs:find("slasher") or rs:find("monster") then
+                return true
+            end
+        end
+    end
+
+    -- 5. Cek Tool senjata yang dipegang
+    local tool = char:FindFirstChildWhichIsA("Tool")
+    if tool then
+        local tn = tool.Name:lower()
+        if tn:find("knife") or tn:find("axe") or tn:find("sword") or tn:find("hammer")
+            or tn:find("chainsaw") or tn:find("weapon") or tn:find("scythe") or tn:find("dagger") then
+            return true
+        end
+    end
+
     return false
 end
 
+-- Backward compatibility alias
+local function radar_is_killer(player, char)
+    return check_is_killer(char, player)
+end
+
+-- RADAR UPDATE: Deteksi 100% Akurat (Scan Players + Workspace Models)
 local function radar_update(radarCircle)
     if not radarCircle or not radarCircle.Parent then return end
 
     local myChar = LocalPlayer and LocalPlayer.Character
-    local myHrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    local myHrp = myChar and (myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Torso"))
     if not myHrp then return end
 
     local cam = workspace.CurrentCamera
@@ -1409,7 +1428,7 @@ local function radar_update(radarCircle)
     local camCF = cam.CFrame
     local myPos = myHrp.Position
 
-    -- Hapus dots lama kecuali SelfDot dan dekorasi
+    -- Bersihkan dots lama
     for _, child in ipairs(radarCircle:GetChildren()) do
         local n = child.Name
         if n:sub(1, 10) == "KillerDot_" or n:sub(1, 12) == "SurvivorDot_" then
@@ -1417,93 +1436,129 @@ local function radar_update(radarCircle)
         end
     end
 
-    local allPlayers = Players:GetPlayers()
-    for _, p in ipairs(allPlayers) do
-        if p ~= LocalPlayer then
-            local pChar = p.Character
-            local pHrp = pChar and pChar:FindFirstChild("HumanoidRootPart")
-            if pHrp then
-                -- Cek jarak 3D langsung dari HRP ke HRP
-                local diff = pHrp.Position - myPos
-                local dist3D = math.sqrt(diff.X * diff.X + diff.Y * diff.Y + diff.Z * diff.Z)
-                if dist3D <= RADAR_RANGE then
+    -- Kumpulkan SEMUA entitas target (Players + Workspace Models / NPCs)
+    local targets = {}
+    local seen = {}
 
-        -- Posisi relatif ke kamera (world space -> camera object space)
-        -- Ini menghasilkan titik yang mengikuti arah pandang kamera persis
-        local rel = camCF:PointToObjectSpace(pHrp.Position)
-
-        -- normX: kanan(+) / kiri(-) dari pandangan kamera
-        -- normY: atas radar = depan kamera = rel.Z negatif (dibalik)
-        local scale = RADAR_RANGE
-        local normX = math.clamp(rel.X / scale, -1, 1)
-        local normY = math.clamp(-rel.Z / scale, -1, 1)
-
-        -- Clamp agar tidak melewati tepi lingkaran
-        local rLen = math.sqrt(normX * normX + normY * normY)
-        if rLen > 0.98 then
-            normX = normX / rLen * 0.98
-            normY = normY / rLen * 0.98
+    -- 1. Scan Players
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart") or p.Character:FindFirstChild("Torso")
+            if hrp then
+                seen[p.Character] = true
+                table.insert(targets, { player = p, char = p.Character, hrp = hrp, name = p.DisplayName or p.Name })
+            end
         end
+    end
 
-        local screenX = 0.5 + normX * 0.44
-        local screenY = 0.5 - normY * 0.44  -- UDim2 Y positif = bawah, jadi balik normY
-
-        -- Deteksi killer
-        local isKiller = false
-        pcall(function() isKiller = radar_is_killer(p, pChar) end)
-
-        -- Buat dot
-        local dot = Instance.new("Frame")
-        dot.Name = (isKiller and "KillerDot_" or "SurvivorDot_") .. p.Name
-        dot.AnchorPoint = Vector2.new(0.5, 0.5)
-        dot.Position = UDim2.fromScale(math.clamp(screenX, 0.04, 0.96), math.clamp(screenY, 0.04, 0.96))
-        dot.Size = UDim2.fromOffset(isKiller and 12 or 8, isKiller and 12 or 8)
-        dot.BackgroundColor3 = isKiller and Color3.fromRGB(255, 40, 40) or Color3.fromRGB(60, 200, 255)
-        dot.BackgroundTransparency = 0
-        dot.BorderSizePixel = 0
-        dot.ZIndex = isKiller and 12 or 9
-        dot.Parent = radarCircle
-
-        local dc = Instance.new("UICorner")
-        dc.CornerRadius = UDim.new(0.5, 0)
-        dc.Parent = dot
-
-        -- Label jarak untuk killer
-        if isKiller then
-            local distReal = math.floor(dist3D)
-            local lbl = Instance.new("TextLabel")
-            lbl.Name = "KillerLabel"
-            lbl.AnchorPoint = Vector2.new(0.5, 1)
-            lbl.Position = UDim2.new(0.5, 0, 0, -1)
-            lbl.Size = UDim2.fromOffset(80, 14)
-            lbl.BackgroundTransparency = 1
-            lbl.Text = "KILLER " .. distReal .. "m"
-            lbl.TextColor3 = Color3.fromRGB(255, 80, 80)
-            lbl.TextStrokeColor3 = Color3.new(0, 0, 0)
-            lbl.TextStrokeTransparency = 0
-            lbl.TextScaled = true
-            lbl.Font = Enum.Font.GothamBold
-            lbl.ZIndex = 13
-            lbl.Parent = dot
-        else
-            -- Label nama survivor (kecil)
-            local distS = math.floor(dist3D)
-            local lblS = Instance.new("TextLabel")
-            lblS.Name = "SurvivorLabel"
-            lblS.AnchorPoint = Vector2.new(0.5, 1)
-            lblS.Position = UDim2.new(0.5, 0, 0, -1)
-            lblS.Size = UDim2.fromOffset(70, 12)
-            lblS.BackgroundTransparency = 1
-            lblS.Text = p.Name:sub(1, 8) .. " " .. distS .. "m"
-            lblS.TextColor3 = Color3.fromRGB(100, 220, 255)
-            lblS.TextStrokeColor3 = Color3.new(0, 0, 0)
-            lblS.TextStrokeTransparency = 0
-            lblS.TextScaled = true
-            lblS.Font = Enum.Font.Gotham
-            lblS.ZIndex = 10
-            lblS.Parent = dot
+    -- 2. Scan Workspace Children (untuk Killer NPC / Model karakter khusus)
+    for _, obj in ipairs(workspace:GetChildren()) do
+        if obj:IsA("Model") and obj ~= myChar and not seen[obj] then
+            local hum = obj:FindFirstChildOfClass("Humanoid")
+            local hrp = obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChild("Torso") or (hum and obj.PrimaryPart)
+            if hrp and hum then
+                seen[obj] = true
+                local pl = Players:GetPlayerFromCharacter(obj)
+                table.insert(targets, { player = pl, char = obj, hrp = hrp, name = (pl and (pl.DisplayName or pl.Name)) or obj.Name })
+            end
         end
+    end
+
+    -- 3. Scan folder khusus jika ada (Characters / Entities)
+    local extraFolders = { workspace:FindFirstChild("Characters"), workspace:FindFirstChild("Entities"), workspace:FindFirstChild("Players") }
+    for _, folder in ipairs(extraFolders) do
+        if folder then
+            for _, obj in ipairs(folder:GetChildren()) do
+                if obj:IsA("Model") and obj ~= myChar and not seen[obj] then
+                    local hum = obj:FindFirstChildOfClass("Humanoid")
+                    local hrp = obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChild("Torso") or (hum and obj.PrimaryPart)
+                    if hrp and hum then
+                        seen[obj] = true
+                        local pl = Players:GetPlayerFromCharacter(obj)
+                        table.insert(targets, { player = pl, char = obj, hrp = hrp, name = (pl and (pl.DisplayName or pl.Name)) or obj.Name })
+                    end
                 end
+            end
+        end
+    end
+
+    -- Render semua target ke radar
+    for _, item in ipairs(targets) do
+        local p = item.player
+        local pChar = item.char
+        local pHrp = item.hrp
+        local nameStr = item.name
+
+        local diff = pHrp.Position - myPos
+        local dist3D = math.sqrt(diff.X * diff.X + diff.Y * diff.Y + diff.Z * diff.Z)
+
+        if dist3D <= RADAR_RANGE then
+            -- Posisi relatif ke kamera (world space -> camera object space)
+            local rel = camCF:PointToObjectSpace(pHrp.Position)
+
+            local scale = RADAR_RANGE
+            local normX = math.clamp(rel.X / scale, -1, 1)
+            local normY = math.clamp(-rel.Z / scale, -1, 1)
+
+            -- Batasi agar titik tidak keluar dari lingkaran radar
+            local rLen = math.sqrt(normX * normX + normY * normY)
+            if rLen > 0.96 then
+                normX = normX / rLen * 0.96
+                normY = normY / rLen * 0.96
+            end
+
+            local screenX = 0.5 + normX * 0.44
+            local screenY = 0.5 - normY * 0.44
+
+            local isKiller = check_is_killer(pChar, p)
+
+            local dot = Instance.new("Frame")
+            dot.Name = (isKiller and "KillerDot_" or "SurvivorDot_") .. nameStr
+            dot.AnchorPoint = Vector2.new(0.5, 0.5)
+            dot.Position = UDim2.fromScale(math.clamp(screenX, 0.04, 0.96), math.clamp(screenY, 0.04, 0.96))
+            dot.Size = UDim2.fromOffset(isKiller and 14 or 8, isKiller and 14 or 8)
+            dot.BackgroundColor3 = isKiller and Color3.fromRGB(255, 35, 35) or Color3.fromRGB(50, 190, 255)
+            dot.BackgroundTransparency = 0
+            dot.BorderSizePixel = 0
+            dot.ZIndex = isKiller and 14 or 9
+            dot.Parent = radarCircle
+
+            local dc = Instance.new("UICorner")
+            dc.CornerRadius = UDim.new(1, 0)
+            dc.Parent = dot
+
+            if isKiller then
+                local distReal = math.floor(dist3D)
+                local lbl = Instance.new("TextLabel")
+                lbl.Name = "KillerLabel"
+                lbl.AnchorPoint = Vector2.new(0.5, 1)
+                lbl.Position = UDim2.new(0.5, 0, 0, -2)
+                lbl.Size = UDim2.fromOffset(85, 14)
+                lbl.BackgroundTransparency = 1
+                lbl.Text = "KILLER " .. distReal .. "m"
+                lbl.TextColor3 = Color3.fromRGB(255, 60, 60)
+                lbl.TextStrokeColor3 = Color3.new(0, 0, 0)
+                lbl.TextStrokeTransparency = 0
+                lbl.TextScaled = true
+                lbl.Font = Enum.Font.GothamBold
+                lbl.ZIndex = 15
+                lbl.Parent = dot
+            else
+                local distS = math.floor(dist3D)
+                local lblS = Instance.new("TextLabel")
+                lblS.Name = "SurvivorLabel"
+                lblS.AnchorPoint = Vector2.new(0.5, 1)
+                lblS.Position = UDim2.new(0.5, 0, 0, -2)
+                lblS.Size = UDim2.fromOffset(75, 12)
+                lblS.BackgroundTransparency = 1
+                lblS.Text = nameStr:sub(1, 8) .. " " .. distS .. "m"
+                lblS.TextColor3 = Color3.fromRGB(100, 220, 255)
+                lblS.TextStrokeColor3 = Color3.new(0, 0, 0)
+                lblS.TextStrokeTransparency = 0
+                lblS.TextScaled = true
+                lblS.Font = Enum.Font.Gotham
+                lblS.ZIndex = 10
+                lblS.Parent = dot
             end
         end
     end
@@ -1875,105 +1930,210 @@ local function find_escape_target()
     return nil, nil
 end
 
-local function trigger_instant_escape()
-    local char = LocalPlayer and LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return false, "Karakter tidak ditemukan!" end
+-- Helper: Teleport ke Lobby / Waiting Room setelah Escape
+local function teleport_to_lobby(hrp)
+    if not hrp then return false end
+    local lobbyTarget = nil
 
-    local escaped = false
-
-    -- [LAYER 1] Scan SEMUA Remote Events/Functions di seluruh game
-    -- try_fire didefinisikan sebagai upvalue di luar pcall (valid di Luau)
-    local function try_fire(obj)
-        local n = obj.Name:lower()
-        if n:find("escape") or n:find("exit") or n:find("win") or n:find("survivor")
-            or n:find("finish") or n:find("complete") or n:find("endmatch")
-            or n:find("endevent") or n:find("gameover") or n:find("roundend") then
-            if obj:IsA("RemoteEvent") then
-                pcall(function() obj:FireServer() end)
-                pcall(function() obj:FireServer(true) end)
-                pcall(function() obj:FireServer(LocalPlayer) end)
-                escaped = true
-            elseif obj:IsA("RemoteFunction") then
-                pcall(function() obj:InvokeServer() end)
-                pcall(function() obj:InvokeServer(true) end)
-                escaped = true
-            elseif obj:IsA("BindableEvent") then
-                pcall(function() obj:Fire() end)
-                pcall(function() obj:Fire(true) end)
-                escaped = true
+    -- 1. Cari SpawnLocation dengan nama Lobby / Wait
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("SpawnLocation") then
+            local n = obj.Name:lower()
+            local pName = obj.Parent and obj.Parent.Name:lower() or ""
+            if n:find("lobby") or pName:find("lobby") or n:find("wait") or pName:find("wait") then
+                lobbyTarget = obj
+                break
             end
         end
     end
-    pcall(function()
-        for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do try_fire(obj) end
-        for _, obj in ipairs(workspace:GetDescendants()) do
-            if obj:IsA("RemoteEvent") or obj:IsA("BindableEvent") then try_fire(obj) end
+
+    -- 2. Cari Model / Folder Lobby di workspace
+    if not lobbyTarget then
+        for _, obj in ipairs(workspace:GetChildren()) do
+            local n = obj.Name:lower()
+            if n == "lobby" or n:find("lobby") or n == "waitingroom" or n == "intermission" then
+                lobbyTarget = obj:FindFirstChildWhichIsA("SpawnLocation") 
+                    or obj:FindFirstChildWhichIsA("BasePart")
+                    or (obj:IsA("Model") and (obj.PrimaryPart or obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChildWhichIsA("BasePart")))
+                if lobbyTarget then break end
+            end
         end
-    end)
+    end
 
-    -- [LAYER 2] Cari dan trigger lever/escape zone
-    local targetObj, objType = find_escape_target()
-    if targetObj then
-        -- Teleport ke posisi lever/escape
-        hrp.CFrame = targetObj.CFrame * CFrame.new(0, 3, 0)
-        task.wait(0.1)
+    -- 3. Cari sembarang SpawnLocation yang aktif
+    if not lobbyTarget then
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("SpawnLocation") and obj.Enabled then
+                lobbyTarget = obj
+                break
+            end
+        end
+    end
 
-        -- Aktifkan semua ProximityPrompt di sekitar target (radius 15 stud)
+    if lobbyTarget then
+        local cf = (lobbyTarget:IsA("Model") and lobbyTarget:GetPivot()) or lobbyTarget.CFrame
+        hrp.CFrame = cf * CFrame.new(0, 4, 0)
+        return true
+    end
+    return false
+end
+
+-- BYPASS AUTO ESCAPE ENGINE (MULTI-LAYER, REAL WIN, DIRECT TO LOBBY)
+local function trigger_instant_escape()
+    local char = LocalPlayer and LocalPlayer.Character
+    local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
+    if not hrp then return false, "Karakter tidak ditemukan!" end
+
+    task.spawn(function()
+        -- [LANGKAH 1] Kumpulkan semua Lever Gerbang & Escape Zones
+        local levers = {}
+        local zones = {}
+
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if is_exit_gate_lever(obj) then
+                local part = esp_gate_get_part(obj)
+                if part then table.insert(levers, { part = part, obj = obj }) end
+            elseif obj:IsA("BasePart") then
+                local n = obj.Name:lower()
+                if n:find("escape") or n:find("exitzone") or n:find("winzone") or n:find("escapetrigger") 
+                    or n:find("escaperegion") or n:find("escapebarrier") or n:find("finishline") then
+                    table.insert(zones, obj)
+                end
+            end
+        end
+
+        -- [LANGKAH 2] Tembak SEMUA Remote Events & Functions Escape / Win
+        local function try_fire(obj)
+            local n = obj.Name:lower()
+            if n:find("escape") or n:find("exit") or n:find("win") or n:find("survivor")
+                or n:find("finish") or n:find("complete") or n:find("endmatch")
+                or n:find("endevent") or n:find("gameover") or n:find("roundend")
+                or n:find("survived") then
+                if obj:IsA("RemoteEvent") then
+                    pcall(function() obj:FireServer() end)
+                    pcall(function() obj:FireServer(true) end)
+                    pcall(function() obj:FireServer(LocalPlayer) end)
+                elseif obj:IsA("RemoteFunction") then
+                    pcall(function() obj:InvokeServer() end)
+                    pcall(function() obj:InvokeServer(true) end)
+                end
+            end
+        end
         pcall(function()
-            local searchRoot = targetObj.Parent or targetObj
-            -- Cek di parent dan grandparent
-            for _, ancestor in ipairs({targetObj, targetObj.Parent, targetObj.Parent and targetObj.Parent.Parent}) do
-                if ancestor then
-                    for _, desc in ipairs(ancestor:GetDescendants()) do
-                        if desc:IsA("ProximityPrompt") then
-                            pcall(function()
-                                if fireproximityprompt then
-                                    fireproximityprompt(desc)
-                                else
-                                    desc.Enabled = true
-                                    desc:InputHoldBegin()
-                                    task.wait((desc.HoldDuration or 1) + 0.05)
-                                    desc:InputHoldEnd()
-                                end
-                            end)
-                            escaped = true
+            for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do try_fire(obj) end
+            for _, obj in ipairs(workspace:GetDescendants()) do
+                if obj:IsA("RemoteEvent") then try_fire(obj) end
+            end
+        end)
+
+        -- [LANGKAH 3] Buka Lever & Tembus Koridor Escape Gerbang
+        for _, levItem in ipairs(levers) do
+            local levPart = levItem.part
+            local levObj = levItem.obj
+            local parentModel = levObj.Parent or levPart.Parent
+
+            -- Teleport tepat di depan lever
+            hrp.CFrame = levPart.CFrame * CFrame.new(0, 1, 2)
+            task.wait(0.05)
+
+            -- Noclip semua part gerbang agar tidak terhalang pintu fisik
+            if parentModel then
+                for _, p in ipairs(parentModel:GetDescendants()) do
+                    if p:IsA("BasePart") then
+                        pcall(function() p.CanCollide = false end)
+                    end
+                end
+            end
+
+            -- Trigger semua ProximityPrompt pada lever / gerbang (bypass hold)
+            local promptRoot = parentModel or levObj
+            for _, prm in ipairs(promptRoot:GetDescendants()) do
+                if prm:IsA("ProximityPrompt") then
+                    pcall(function()
+                        if fireproximityprompt then
+                            fireproximityprompt(prm, 0)
+                            fireproximityprompt(prm)
                         end
+                        prm.HoldDuration = 0
+                        prm:InputHoldBegin()
+                        task.wait(0.05)
+                        prm:InputHoldEnd()
+                    end)
+                end
+            end
+
+            -- Teleport menembus koridor gerbang ke zona escape (berbagai offset depan & belakang)
+            local offsets = { -15, -30, -50, -80, -120, 15, 30, 50, 80, 120 }
+            for _, zOff in ipairs(offsets) do
+                local targetCF = levPart.CFrame * CFrame.new(0, 1, zOff)
+                hrp.CFrame = targetCF
+                task.wait(0.03)
+
+                -- Fire touch ke semua part di sekitar
+                if firetouchinterest and parentModel then
+                    for _, p in ipairs(parentModel:GetDescendants()) do
+                        if p:IsA("BasePart") then
+                            pcall(function()
+                                firetouchinterest(hrp, p, 0)
+                                task.wait(0.01)
+                                firetouchinterest(hrp, p, 1)
+                            end)
+                        end
+                    end
+                end
+            end
+        end
+
+        -- [LANGKAH 4] Touch semua part zona escape yang terdeteksi di map
+        for _, zone in ipairs(zones) do
+            hrp.CFrame = zone.CFrame * CFrame.new(0, 2, 0)
+            task.wait(0.05)
+            if firetouchinterest then
+                pcall(function()
+                    firetouchinterest(hrp, zone, 0)
+                    task.wait(0.02)
+                    firetouchinterest(hrp, zone, 1)
+                end)
+            end
+        end
+
+        -- Tunggu sejenak agar server game mencatat status Escaped dan memproses XP
+        task.wait(0.6)
+
+        -- [LANGKAH 5] Balik ke Lobby!
+        local inLobby = teleport_to_lobby(hrp)
+
+        -- Tembak juga remote leave / lobby jika ada
+        pcall(function()
+            for _, r in ipairs(ReplicatedStorage:GetDescendants()) do
+                if r:IsA("RemoteEvent") or r:IsA("RemoteFunction") then
+                    local rn = r.Name:lower()
+                    if rn:find("lobby") or rn:find("return") or rn:find("leave") or rn:find("spectate") then
+                        if r:IsA("RemoteEvent") then r:FireServer() else r:InvokeServer() end
                     end
                 end
             end
         end)
 
-        -- FireTouchInterest ke part escape
-        pcall(function()
-            if firetouchinterest then
-                firetouchinterest(hrp, targetObj, 0)
-                task.wait(0.05)
-                firetouchinterest(hrp, targetObj, 1)
-            end
-        end)
-
-        escaped = true
-    end
-
-    -- [LAYER 3] Jika masih belum escaped, coba ubah HP Humanoid jadi 0 tapi setelah kirim escape event
-    -- (beberapa game pakai Humanoid.Died sebagai trigger escape condition)
-
-    -- [LAYER 4] Kirim webhook notifikasi
-    if escaped then
+        -- [LANGKAH 6] Kirim Discord Webhook Notifikasi
         pcall(function()
             if webhookNotifyEscape then
                 send_discord_webhook(
-                    "ESCAPED!",
-                    "**" .. (LocalPlayer.DisplayName or LocalPlayer.Name) .. "** berhasil **ESCAPE** dari match! XP & reward sedang diproses server.",
+                    "SURVIVOR ESCAPED!",
+                    "**" .. (LocalPlayer.DisplayName or LocalPlayer.Name) .. "** berhasil **BYPASS ESCAPE & KEMBALI KE LOBBY**! XP & rewards masuk.",
                     "57f287"
                 )
             end
         end)
-        return true, "Escape berhasil! Menunggu server proses XP..."
-    end
 
-    return false, "Escape zone/lever tidak ditemukan di map ini. Coba saat pintu escape sudah terbuka!"
+        Window:Notify({
+            Title = "Escape Sukses!",
+            Description = inLobby and "Berhasil Escape & Balik ke Lobby!" or "Bypass Escape selesai! Hadiah sedang diproses server.",
+            Lifetime = 4
+        })
+    end)
+
+    return true, "Memulai Bypass Escape otomatis..."
 end
 
 local function start_auto_escape()
@@ -1999,36 +2159,44 @@ local webhookUrl = ""
 local webhookNotifyEscape = true
 local webhookNotifyMatch = true
 
--- Helper: scan leaderstats/attribute dari sebuah instance root
--- (didefinisikan di luar pcall agar valid di Luau)
-local _statsRef = nil  -- diisi oleh get_player_stats saat dipakai
+-- Helper: scan leaderstats, attributes, dan values dari sebuah instance root
+local _statsRef = nil
 
 local function _scan_stats_from(root)
     if not root or not _statsRef then return end
     local stats = _statsRef
+
     pcall(function()
-        local ls = root:FindFirstChild("leaderstats")
-        if ls then
-            for _, v in ipairs(ls:GetChildren()) do
-                local n = v.Name:lower()
-                if n:find("level") or n == "lv" or n == "lvl" then stats.level = tostring(v.Value) end
-                if n:find("exp") or n:find("xp") or n:find("experience") then stats.exp = tostring(v.Value) end
-                if n:find("screw") then stats.screw = tostring(v.Value) end
-                if n:find("gold") or n:find("coin") or n:find("cash") or n:find("money") then stats.gold = tostring(v.Value) end
+        -- Scan value objects di dalam root atau root.leaderstats / root.Stats / root.Data
+        local folders = { root, root:FindFirstChild("leaderstats"), root:FindFirstChild("Stats"), root:FindFirstChild("Data"), root:FindFirstChild("Values"), root:FindFirstChild("Currencies") }
+        for _, f in ipairs(folders) do
+            if f then
+                for _, v in ipairs(f:GetChildren()) do
+                    local n = v.Name:lower()
+                    local val = nil
+                    if v:IsA("ValueBase") then val = tostring(v.Value) end
+                    if val then
+                        if n:find("level") or n == "lv" or n == "lvl" or n:find("rank") then stats.level = val end
+                        if n:find("exp") or n:find("xp") or n:find("experience") then stats.exp = val end
+                        if n:find("screw") then stats.screw = val end
+                        if n:find("gold") or n:find("coin") or n:find("cash") or n:find("money") or n:find("blood") or n:find("token") then stats.gold = val end
+                    end
+                end
             end
         end
     end)
+
     pcall(function()
-        local attrLevel = LocalPlayer:GetAttribute("Level") or LocalPlayer:GetAttribute("PlayerLevel") or LocalPlayer:GetAttribute("Lv")
-        local attrExp   = LocalPlayer:GetAttribute("EXP") or LocalPlayer:GetAttribute("Experience") or LocalPlayer:GetAttribute("XP")
-        local attrScrew = LocalPlayer:GetAttribute("Screw") or LocalPlayer:GetAttribute("Screws")
-        local attrGold  = LocalPlayer:GetAttribute("Gold") or LocalPlayer:GetAttribute("Coins") or LocalPlayer:GetAttribute("Cash")
-        local attrRole  = LocalPlayer:GetAttribute("CurrentRole") or LocalPlayer:GetAttribute("Role")
-        if attrLevel then stats.level = tostring(attrLevel) end
-        if attrExp   then stats.exp   = tostring(attrExp)   end
-        if attrScrew then stats.screw = tostring(attrScrew) end
-        if attrGold  then stats.gold  = tostring(attrGold)  end
-        if attrRole  then stats.role  = tostring(attrRole)  end
+        -- Scan attributes
+        for k, v in pairs(root:GetAttributes()) do
+            local ks = tostring(k):lower()
+            local vs = tostring(v)
+            if ks:find("level") or ks == "lv" or ks == "lvl" or ks:find("rank") then stats.level = vs end
+            if ks:find("exp") or ks:find("xp") or ks:find("experience") then stats.exp = vs end
+            if ks:find("screw") then stats.screw = vs end
+            if ks:find("gold") or ks:find("coin") or ks:find("cash") or ks:find("money") or ks:find("blood") or ks:find("token") then stats.gold = vs end
+            if ks:find("role") or ks:find("team") or ks:find("side") then stats.role = vs end
+        end
     end)
 end
 
@@ -2051,7 +2219,13 @@ local function get_player_stats()
     _scan_stats_from(LocalPlayer)
 
     pcall(function()
+        local char = LocalPlayer and LocalPlayer.Character
+        if char then _scan_stats_from(char) end
+    end)
+
+    pcall(function()
         local pd = ReplicatedStorage:FindFirstChild("PlayerData") or ReplicatedStorage:FindFirstChild("Data")
+            or ReplicatedStorage:FindFirstChild("PlayerStats")
         if pd then
             local mine = pd:FindFirstChild(LocalPlayer.Name) or pd:FindFirstChild(tostring(LocalPlayer.UserId))
             if mine then _scan_stats_from(mine) end
@@ -2067,6 +2241,7 @@ local function get_player_stats()
         else
             local mapAttr = workspace:GetAttribute("MapName") or workspace:GetAttribute("CurrentMap")
                 or workspace:GetAttribute("Map") or workspace:GetAttribute("Level")
+                or ReplicatedStorage:GetAttribute("MapName") or ReplicatedStorage:GetAttribute("CurrentMap")
             if mapAttr then stats.map = tostring(mapAttr) end
         end
         if stats.map == "?" then
@@ -3514,7 +3689,23 @@ SecAutoEscape:Button({
     end
 })
 
-SecAutoEscape:Label({ Name = "Teleport ke lever/zona escape & aktivasi otomatis." })
+SecAutoEscape:Button({
+    Name = "Kembali ke Lobby",
+    Callback = function()
+        local char = LocalPlayer and LocalPlayer.Character
+        local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
+        if hrp then
+            local ok = teleport_to_lobby(hrp)
+            Window:Notify({
+                Title = "Lobby",
+                Description = ok and "Berhasil teleport ke Lobby!" or "Lokasi Lobby tidak ditemukan di map.",
+                Lifetime = 3
+            })
+        end
+    end
+})
+
+SecAutoEscape:Label({ Name = "Teleport lever/zona escape, win match & kembali ke lobby." })
 
 
 -- ==============================================================================
@@ -4856,9 +5047,9 @@ SecRadar:Toggle({
 
 SecRadar:Slider({
     Name = "Jangkauan Radar (Studs)",
-    Default = 100,
-    Minimum = 30,
-    Maximum = 300,
+    Default = 350,
+    Minimum = 50,
+    Maximum = 1000,
     DisplayMethod = "Round",
     Precision = 0,
     Callback = function(val)
