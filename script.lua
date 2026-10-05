@@ -1355,20 +1355,21 @@ end
 
 local function radar_update(radarCircle)
     if not radarCircle or not radarCircle.Parent then return end
-    -- Hapus dots lama (kecuali SelfDot)
-    for _, c in ipairs(radarCircle:GetChildren()) do
-        if c.Name:find("KillerDot_") or c.Name:find("SurvivorDot_") or c.Name:find("ItemDot_") then
-            c:Destroy()
-        end
-    end
 
     local myChar = LocalPlayer and LocalPlayer.Character
     local myHrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
     if not myHrp then return end
 
-    local myCam = workspace.CurrentCamera
-    local camCF = myCam and myCam.CFrame
-    local camYaw = camCF and math.atan2(-camCF.LookVector.X, -camCF.LookVector.Z) or 0
+    local cam = workspace.CurrentCamera
+    if not cam then return end
+    local camCF = cam.CFrame
+
+    -- Hapus dots lama
+    for _, c in ipairs(radarCircle:GetChildren()) do
+        if c.Name:find("KillerDot_") or c.Name:find("SurvivorDot_") then
+            c:Destroy()
+        end
+    end
 
     for _, p in ipairs(Players:GetPlayers()) do
         if p == LocalPlayer then continue end
@@ -1376,46 +1377,68 @@ local function radar_update(radarCircle)
         local pHrp = pChar and pChar:FindFirstChild("HumanoidRootPart")
         if not pHrp then continue end
 
-        local diff = pHrp.Position - myHrp.Position
-        local dist = Vector2.new(diff.X, diff.Z).Magnitude
-        if dist > RADAR_RANGE then continue end
+        -- Posisi target relatif terhadap CFrame Kamera (Akurat 100% mengikuti orientasi pandangan)
+        local rel = camCF:PointToObjectSpace(pHrp.Position)
+        local distXZ = math.sqrt(rel.X * rel.X + rel.Z * rel.Z)
+        if distXZ > RADAR_RANGE then continue end
 
-        local angle = math.atan2(diff.X, diff.Z) - camYaw
-        local nx = math.sin(angle) * (dist / RADAR_RANGE)
-        local ny = -math.cos(angle) * (dist / RADAR_RANGE)
+        -- Normalisasi posisi di layar radar (-1 hingga +1)
+        -- Di camera object space: rel.X > 0 = Kanan, rel.X < 0 = Kiri
+        -- rel.Z < 0 = Depan kamera (Atas di radar = negatif Y di UDim2)
+        -- rel.Z > 0 = Belakang kamera (Bawah di radar)
+        -- Negasi normY agar depan kamera = atas layar radar
+        local normX = math.clamp(rel.X / RADAR_RANGE, -1, 1)
+        local normY = math.clamp(-rel.Z / RADAR_RANGE, -1, 1)
+
+        -- Batasi agar titik tidak tembus keluar lingkaran (radius max 0.44)
+        local rLen = math.sqrt(normX * normX + normY * normY)
+        if rLen > 1 then
+            normX = normX / rLen
+            normY = normY / rLen
+        end
+
+        local screenX = 0.5 + normX * 0.44
+        local screenY = 0.5 + normY * 0.44
 
         local isKiller = false
         pcall(function()
-            local role = p:GetAttribute("CurrentRole") or p:GetAttribute("Role")
-            if role and tostring(role):lower() == "killer" then isKiller = true end
-            if pChar and pChar:FindFirstChild("Weapon") then isKiller = true end
+            if esp_is_killer and esp_is_killer(pChar) then
+                isKiller = true
+            else
+                local role = p:GetAttribute("CurrentRole") or p:GetAttribute("Role") or p:GetAttribute("Team")
+                if role and (tostring(role):lower():find("killer") or tostring(role):lower():find("hunter")) then isKiller = true end
+                if pChar and pChar:FindFirstChild("Weapon") then isKiller = true end
+            end
         end)
 
         local dot = Instance.new("Frame")
         dot.Name = (isKiller and "KillerDot_" or "SurvivorDot_") .. p.Name
         dot.AnchorPoint = Vector2.new(0.5, 0.5)
-        dot.Position = UDim2.fromScale(0.5 + nx * 0.5, 0.5 + ny * 0.5)
-        dot.Size = UDim2.fromOffset(isKiller and 10 or 7, isKiller and 10 or 7)
-        dot.BackgroundColor3 = isKiller and Color3.fromRGB(255, 60, 60) or Color3.fromRGB(80, 180, 255)
+        dot.Position = UDim2.fromScale(screenX, screenY)
+        dot.Size = UDim2.fromOffset(isKiller and 11 or 7, isKiller and 11 or 7)
+        dot.BackgroundColor3 = isKiller and Color3.fromRGB(255, 45, 45) or Color3.fromRGB(60, 200, 255)
         dot.BorderSizePixel = 0
-        dot.ZIndex = 9
+        dot.ZIndex = isKiller and 10 or 8
         dot.Parent = radarCircle
         local dc = Instance.new("UICorner")
         dc.CornerRadius = UDim.new(0.5, 0)
         dc.Parent = dot
 
-        -- Label nama killer
+        -- Label nama dan jarak killer secara real-time
         if isKiller then
+            local distReal = math.floor((pHrp.Position - myHrp.Position).Magnitude)
             local lbl = Instance.new("TextLabel")
             lbl.AnchorPoint = Vector2.new(0.5, 1)
             lbl.Position = UDim2.new(0.5, 0, 0, -2)
-            lbl.Size = UDim2.fromOffset(60, 14)
+            lbl.Size = UDim2.fromOffset(75, 14)
             lbl.BackgroundTransparency = 1
-            lbl.Text = p.DisplayName:sub(1, 8)
-            lbl.TextColor3 = Color3.fromRGB(255, 120, 120)
+            lbl.Text = "[KILLER] " .. distReal .. "m"
+            lbl.TextColor3 = Color3.fromRGB(255, 90, 90)
+            lbl.TextStrokeColor3 = Color3.new(0, 0, 0)
+            lbl.TextStrokeTransparency = 0
             lbl.TextScaled = true
             lbl.Font = Enum.Font.GothamBold
-            lbl.ZIndex = 10
+            lbl.ZIndex = 11
             lbl.Parent = dot
         end
     end
@@ -1424,18 +1447,13 @@ end
 local killerRadarCircle = nil
 
 local function killerradar_start()
-    if killerRadarEnabled and killerRadarGui then return end
+    if killerRadarGui then pcall(function() killerRadarGui:Destroy() end) end
     local sg, rc = radar_create_gui()
     killerRadarCircle = rc
     if killerRadarConn then killerRadarConn:Disconnect() end
-    local t = 0
-    killerRadarConn = RunService.Heartbeat:Connect(function(dt)
+    killerRadarConn = RunService.RenderStepped:Connect(function()
         if not killerRadarEnabled then return end
-        t = t + dt
-        if t >= 0.1 then
-            t = 0
-            pcall(radar_update, killerRadarCircle)
-        end
+        pcall(radar_update, killerRadarCircle)
     end)
 end
 
@@ -1763,6 +1781,164 @@ local function stop_esp_gate()
         if data.bbg then pcall(function() data.bbg:Destroy() end) end
     end
     espGateObjects = {}
+end
+
+-- ==============================================================================
+-- MODUL 12: AUTO ESCAPE & BYPASS (SURVIVOR WIN)
+-- ==============================================================================
+local autoEscapeEnabled = false
+local autoEscapeConn = nil
+
+local function find_escape_target()
+    -- 1. Cari Zone Escape / Trigger
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            local n = obj.Name:lower()
+            if n == "escapezone" or n == "exitzone" or n == "winzone" or n == "endzone" 
+                or n == "escapetrigger" or n == "escaperegion" or n == "escape" then
+                return obj, "zone"
+            end
+        end
+    end
+    -- 2. Cari Lever Pintu Keluar
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if is_exit_gate_lever(obj) then
+            local part = esp_gate_get_part(obj)
+            if part then return part, "lever" end
+        end
+    end
+    return nil, nil
+end
+
+local function trigger_instant_escape()
+    local char = LocalPlayer and LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false, "Karakter tidak ditemukan!" end
+
+    -- Trigger Remote Events Escape di ReplicatedStorage jika ada
+    pcall(function()
+        local remotes = ReplicatedStorage:FindFirstChild("Remotes") or ReplicatedStorage:FindFirstChild("Events")
+        if remotes then
+            for _, r in ipairs(remotes:GetDescendants()) do
+                if r:IsA("RemoteEvent") or r:IsA("RemoteFunction") then
+                    local rn = r.Name:lower()
+                    if rn:find("escape") or rn:find("exit") or rn:find("win") or rn:find("survivorescape") then
+                        if r:IsA("RemoteEvent") then r:FireServer(true)
+                        else r:InvokeServer(true) end
+                    end
+                end
+            end
+        end
+    end)
+
+    local targetObj, objType = find_escape_target()
+    if targetObj then
+        -- Teleport langsung ke lokasi Escape / Lever
+        hrp.CFrame = targetObj.CFrame * CFrame.new(0, 3, 0)
+
+        -- Jika ada ProximityPrompt di lever, aktifkan seketika
+        local prompt = targetObj.Parent and targetObj.Parent:FindFirstChildOfClass("ProximityPrompt") 
+            or targetObj:FindFirstChildOfClass("ProximityPrompt")
+        if prompt then
+            pcall(function()
+                if fireproximityprompt then
+                    fireproximityprompt(prompt)
+                else
+                    prompt:InputHoldBegin()
+                    task.wait(prompt.HoldDuration or 0.1)
+                    prompt:InputHoldEnd()
+                end
+            end)
+        end
+
+        -- Trigger touch interest jika ada
+        pcall(function()
+            if firetouchinterest then
+                firetouchinterest(hrp, targetObj, 0)
+                task.wait(0.05)
+                firetouchinterest(hrp, targetObj, 1)
+            end
+        end)
+        -- Auto notif webhook jika aktif
+        if webhookNotifyEscape then
+            pcall(function()
+                send_discord_webhook(
+                    "ESCAPED!",
+                    "**" .. (LocalPlayer.DisplayName or LocalPlayer.Name) .. "** berhasil **ESCAPE** dari match! XP sudah dihitung.",
+                    "57f287"
+                )
+            end)
+        end
+        return true, "Berhasil teleport & trigger escape!"
+    end
+
+    return false, "Pintu keluar / Zona Escape belum ditemukan di map!"
+end
+
+local function start_auto_escape()
+    if autoEscapeConn then autoEscapeConn:Disconnect() end
+    autoEscapeConn = RunService.Heartbeat:Connect(function()
+        if not autoEscapeEnabled then return end
+        -- Cek jika ada gate yang terbuka atau zona escape muncul
+        local targetObj = find_escape_target()
+        if targetObj then
+            trigger_instant_escape()
+        end
+    end)
+end
+
+local function stop_auto_escape()
+    if autoEscapeConn then autoEscapeConn:Disconnect(); autoEscapeConn = nil end
+end
+
+-- ==============================================================================
+-- MODUL 13: DISCORD WEBHOOK NOTIFIER
+-- ==============================================================================
+local webhookUrl = ""
+local webhookNotifyEscape = true
+local webhookNotifyMatch = true
+
+local function send_discord_webhook(embedTitle, embedDesc, colorHex)
+    if not webhookUrl or webhookUrl == "" or not webhookUrl:find("discord.com/api/webhooks") then
+        return false, "Webhook URL belum diisi atau tidak valid!"
+    end
+
+    local req = (syn and syn.request) or (http and http.request) or http_request or request or (fluxus and fluxus.request)
+    if not req then
+        return false, "Executor tidak mendukung fungsi HTTP request!"
+    end
+
+    local char = LocalPlayer and LocalPlayer.Character
+    local hp = char and char:FindFirstChildOfClass("Humanoid") and math.floor(char:FindFirstChildOfClass("Humanoid").Health) or 100
+
+    local payload = {
+        username = "Sky Hub • Violence District",
+        avatar_url = "https://cdn-icons-png.flaticon.com/512/3135/3135715.png",
+        embeds = {
+            {
+                title = embedTitle or "📢 Notifikasi Match",
+                description = embedDesc or "",
+                color = tonumber(colorHex or "5865F2", 16) or 5793266,
+                fields = {
+                    { name = "👤 Player", value = LocalPlayer.DisplayName .. " (@" .. LocalPlayer.Name .. ")", inline = true },
+                    { name = "🎮 Game", value = "Violence District", inline = true },
+                    { name = "❤️ HP", value = tostring(hp) .. "%", inline = true },
+                    { name = "⏰ Waktu", value = os.date("%Y-%m-%d %H:%M:%S"), inline = false }
+                },
+                footer = { text = "Sky Hub Notifier System • Violence District Ultimate" }
+            }
+        }
+    }
+
+    local ok, res = pcall(function()
+        return req({
+            Url = webhookUrl,
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body = HttpService:JSONEncode(payload)
+        })
+    end)
+    return ok, res
 end
 
 
@@ -3069,6 +3245,47 @@ SecAutoHealMain:Slider({
     end
 })
 
+-- SEKSI: AUTO ESCAPE (BYPASS SURVIVOR WIN)
+local SecAutoEscape = TabMain:Section({})
+SecAutoEscape:Header({ Name = WMacLib:Gradient("Auto Escape (Bypass Win)", Color3.fromRGB(100, 255, 200), Color3.fromRGB(60, 200, 255)) })
+
+SecAutoEscape:Toggle({
+    Name = "Aktifkan Auto Escape",
+    Default = false,
+    Callback = function(enabled)
+        autoEscapeEnabled = enabled
+        if enabled then
+            start_auto_escape()
+            Window:Notify({
+                Title = "Auto Escape",
+                Description = "Aktif! Otomatis kabur saat pintu terbuka.",
+                Lifetime = 3
+            })
+        else
+            stop_auto_escape()
+            Window:Notify({
+                Title = "Auto Escape",
+                Description = "Auto Escape dimatikan.",
+                Lifetime = 2
+            })
+        end
+    end
+})
+
+SecAutoEscape:Button({
+    Name = "Escape Sekarang!",
+    Callback = function()
+        local ok, msg = trigger_instant_escape()
+        Window:Notify({
+            Title = ok and "Escape!" or "Gagal",
+            Description = msg or "Tidak ada zona escape di map ini.",
+            Lifetime = 3
+        })
+    end
+})
+
+SecAutoEscape:Label({ Name = "Teleport ke lever/zona escape & aktivasi otomatis." })
+
 
 -- ==============================================================================
 -- MODUL CROSSHAIR
@@ -4312,6 +4529,200 @@ SecESPGate:Toggle({
 
 end -- [End TabESP]
 
+
+
+-- ==============================================================================
+-- TAB: VIEW (FULLBRIGHT + CUSTOM FOV)
+-- ==============================================================================
+do
+local TabView = tabGroup:Tab({ Name = "View", Image = "lucide/sun" })
+
+-- SEKSI 1: FULLBRIGHT + NO FOG
+local SecFB = TabView:Section({})
+SecFB:Header({ Name = WMacLib:Gradient("Fullbright & No Fog", Color3.fromRGB(255, 220, 60), Color3.fromRGB(255, 140, 40)) })
+
+SecFB:Toggle({
+    Name = "Aktifkan Fullbright + No Fog",
+    Default = false,
+    Callback = function(enabled)
+        fullbrightEnabled = enabled
+        if enabled then
+            fullbright_start()
+            Window:Notify({ Title = "Fullbright", Description = "Map terang sempurna! Semua fog dihapus.", Lifetime = 3 })
+        else
+            fullbright_stop()
+            Window:Notify({ Title = "Fullbright", Description = "Fullbright dimatikan. Lighting normal.", Lifetime = 2 })
+        end
+    end
+})
+
+-- SEKSI 2: CUSTOM FOV
+local SecFov = TabView:Section({})
+SecFov:Header({ Name = WMacLib:Gradient("Custom FOV (Field of View)", Color3.fromRGB(100, 200, 255), Color3.fromRGB(60, 120, 255)) })
+
+SecFov:Toggle({
+    Name = "Aktifkan Custom FOV",
+    Default = false,
+    Callback = function(enabled)
+        customFovEnabled = enabled
+        if enabled then
+            fov_start(customFovValue)
+            Window:Notify({ Title = "Custom FOV", Description = "FOV diubah ke " .. tostring(customFovValue) .. "!", Lifetime = 3 })
+        else
+            fov_stop()
+            Window:Notify({ Title = "Custom FOV", Description = "FOV dikembalikan normal (70).", Lifetime = 2 })
+        end
+    end
+})
+
+SecFov:Slider({
+    Name = "FOV Value (derajat)",
+    Default = 70,
+    Minimum = 40,
+    Maximum = 120,
+    DisplayMethod = "Round",
+    Precision = 0,
+    Callback = function(val)
+        customFovValue = val
+        if customFovEnabled then
+            fov_apply(val)
+        end
+    end
+})
+
+SecFov:Button({
+    Name = "Reset FOV ke Default (70)",
+    Callback = function()
+        customFovValue = 70
+        if customFovEnabled then fov_apply(70) end
+        Window:Notify({ Title = "FOV", Description = "FOV direset ke 70.", Lifetime = 2 })
+    end
+})
+end -- [End TabView]
+
+-- ==============================================================================
+-- TAB: KILLER RADAR
+-- ==============================================================================
+do
+local TabRadar = tabGroup:Tab({ Name = "Radar", Image = "lucide/radio" })
+
+local SecRadar = TabRadar:Section({})
+SecRadar:Header({ Name = WMacLib:Gradient("Killer Radar (Mini-Map)", Color3.fromRGB(255, 60, 60), Color3.fromRGB(255, 160, 60)) })
+
+SecRadar:Toggle({
+    Name = "Aktifkan Killer Radar",
+    Default = false,
+    Callback = function(enabled)
+        killerRadarEnabled = enabled
+        if enabled then
+            killerradar_start()
+            Window:Notify({ Title = "Killer Radar", Description = "Merah=Killer | Biru=Survivor. Radar aktif!", Lifetime = 3 })
+        else
+            killerradar_stop()
+            Window:Notify({ Title = "Killer Radar", Description = "Radar dimatikan.", Lifetime = 2 })
+        end
+    end
+})
+
+SecRadar:Slider({
+    Name = "Jangkauan Radar (Studs)",
+    Default = 100,
+    Minimum = 30,
+    Maximum = 300,
+    DisplayMethod = "Round",
+    Precision = 0,
+    Callback = function(val)
+        RADAR_RANGE = val
+    end
+})
+
+local SecRadarInfo = TabRadar:Section({})
+SecRadarInfo:Header({ Name = WMacLib:Gradient("Cara Baca Radar", Color3.fromRGB(150, 150, 255), Color3.fromRGB(100, 200, 255)) })
+SecRadarInfo:Label({ Name = "🟢 Titik Hijau = Kamu sendiri" })
+SecRadarInfo:Label({ Name = "🔴 Titik Merah = Killer (besar)" })
+SecRadarInfo:Label({ Name = "🔵 Titik Biru = Survivor (kecil)" })
+SecRadarInfo:Label({ Name = "Radar mengikuti arah kamera kamu!" })
+
+end -- [End TabRadar]
+
+-- ==============================================================================
+-- TAB: DISCORD WEBHOOK NOTIFIER
+-- ==============================================================================
+do
+local TabWebhook = tabGroup:Tab({ Name = "Webhook", Image = "lucide/bell" })
+
+local SecWHUrl = TabWebhook:Section({})
+SecWHUrl:Header({ Name = WMacLib:Gradient("Discord Webhook Notifier", Color3.fromRGB(88, 101, 242), Color3.fromRGB(57, 197, 187)) })
+
+SecWHUrl:Input({
+    Name = "URL Webhook Discord",
+    Placeholder = "https://discord.com/api/webhooks/...",
+    Default = "",
+    Callback = function(val)
+        webhookUrl = val or ""
+    end
+})
+
+SecWHUrl:Toggle({
+    Name = "Notifikasi saat Escape",
+    Default = true,
+    Callback = function(enabled)
+        webhookNotifyEscape = enabled
+    end
+})
+
+SecWHUrl:Toggle({
+    Name = "Notifikasi saat Match Mulai",
+    Default = true,
+    Callback = function(enabled)
+        webhookNotifyMatch = enabled
+    end
+})
+
+SecWHUrl:Button({
+    Name = "Kirim Test Webhook",
+    Callback = function()
+        local ok, res = send_discord_webhook(
+            "Test Webhook",
+            "**Sky Hub** terhubung ke Discord kamu! Webhook berfungsi dengan baik.",
+            "00b0f4"
+        )
+        Window:Notify({
+            Title = ok and "Webhook Terkirim!" or "Gagal",
+            Description = ok and "Pesan test berhasil dikirim ke Discord." or tostring(res),
+            Lifetime = 4
+        })
+    end
+})
+
+SecWHUrl:Button({
+    Name = "Kirim: Match Dimulai",
+    Callback = function()
+        if not webhookNotifyMatch then
+            Window:Notify({ Title = "Webhook", Description = "Notifikasi match dimatikan.", Lifetime = 2 })
+            return
+        end
+        local ok, res = send_discord_webhook(
+            "Match Dimulai!",
+            "**" .. (LocalPlayer.DisplayName or LocalPlayer.Name) .. "** bergabung match baru di Violence District.",
+            "57f287"
+        )
+        Window:Notify({
+            Title = ok and "Notifikasi Terkirim!" or "Gagal",
+            Description = ok and "Notifikasi match dikirim ke Discord." or tostring(res),
+            Lifetime = 3
+        })
+    end
+})
+
+local SecWHInfo = TabWebhook:Section({})
+SecWHInfo:Header({ Name = WMacLib:Gradient("Cara Pakai Webhook", Color3.fromRGB(150, 150, 255), Color3.fromRGB(100, 200, 255)) })
+SecWHInfo:Label({ Name = "Salin URL dari: Server Discord > Edit Channel > Integrations > Webhooks" })
+SecWHInfo:Label({ Name = "Notifikasi berisi: Nama Player, HP, Game, dan Waktu." })
+SecWHInfo:Label({ Name = "Pastikan Executor mendukung HTTP Request (Synapse X, Fluxus, dll)." })
+
+end -- [End TabWebhook]
+
 -- ==============================================================================
 -- TAB 4: MODIFIKASI (VERTIKAL SCROLL KE BAWAH)
 -- ==============================================================================
@@ -4611,120 +5022,6 @@ SecBody:Button({
     end,
 })
 end -- [End TabMod]
-
--- ==============================================================================
--- TAB: VIEW (FULLBRIGHT + CUSTOM FOV)
--- ==============================================================================
-do
-local TabView = tabGroup:Tab({ Name = "View", Image = "lucide/sun" })
-
--- SEKSI 1: FULLBRIGHT + NO FOG
-local SecFB = TabView:Section({})
-SecFB:Header({ Name = WMacLib:Gradient("Fullbright & No Fog", Color3.fromRGB(255, 220, 60), Color3.fromRGB(255, 140, 40)) })
-
-SecFB:Toggle({
-    Name = "Aktifkan Fullbright + No Fog",
-    Default = false,
-    Callback = function(enabled)
-        fullbrightEnabled = enabled
-        if enabled then
-            fullbright_start()
-            Window:Notify({ Title = "Fullbright", Description = "Map terang sempurna! Semua fog dihapus.", Lifetime = 3 })
-        else
-            fullbright_stop()
-            Window:Notify({ Title = "Fullbright", Description = "Fullbright dimatikan. Lighting normal.", Lifetime = 2 })
-        end
-    end
-})
-
--- SEKSI 2: CUSTOM FOV
-local SecFov = TabView:Section({})
-SecFov:Header({ Name = WMacLib:Gradient("Custom FOV (Field of View)", Color3.fromRGB(100, 200, 255), Color3.fromRGB(60, 120, 255)) })
-
-SecFov:Toggle({
-    Name = "Aktifkan Custom FOV",
-    Default = false,
-    Callback = function(enabled)
-        customFovEnabled = enabled
-        if enabled then
-            fov_start(customFovValue)
-            Window:Notify({ Title = "Custom FOV", Description = "FOV diubah ke " .. tostring(customFovValue) .. "!", Lifetime = 3 })
-        else
-            fov_stop()
-            Window:Notify({ Title = "Custom FOV", Description = "FOV dikembalikan normal (70).", Lifetime = 2 })
-        end
-    end
-})
-
-SecFov:Slider({
-    Name = "FOV Value (derajat)",
-    Default = 70,
-    Minimum = 40,
-    Maximum = 120,
-    DisplayMethod = "Round",
-    Precision = 0,
-    Callback = function(val)
-        customFovValue = val
-        if customFovEnabled then
-            fov_apply(val)
-        end
-    end
-})
-
-SecFov:Button({
-    Name = "Reset FOV ke Default (70)",
-    Callback = function()
-        customFovValue = 70
-        if customFovEnabled then fov_apply(70) end
-        Window:Notify({ Title = "FOV", Description = "FOV direset ke 70.", Lifetime = 2 })
-    end
-})
-end -- [End TabView]
-
--- ==============================================================================
--- TAB: KILLER RADAR
--- ==============================================================================
-do
-local TabRadar = tabGroup:Tab({ Name = "Radar", Image = "lucide/radio" })
-
-local SecRadar = TabRadar:Section({})
-SecRadar:Header({ Name = WMacLib:Gradient("Killer Radar (Mini-Map)", Color3.fromRGB(255, 60, 60), Color3.fromRGB(255, 160, 60)) })
-
-SecRadar:Toggle({
-    Name = "Aktifkan Killer Radar",
-    Default = false,
-    Callback = function(enabled)
-        killerRadarEnabled = enabled
-        if enabled then
-            killerradar_start()
-            Window:Notify({ Title = "Killer Radar", Description = "Merah=Killer | Biru=Survivor. Radar aktif!", Lifetime = 3 })
-        else
-            killerradar_stop()
-            Window:Notify({ Title = "Killer Radar", Description = "Radar dimatikan.", Lifetime = 2 })
-        end
-    end
-})
-
-SecRadar:Slider({
-    Name = "Jangkauan Radar (Studs)",
-    Default = 100,
-    Minimum = 30,
-    Maximum = 300,
-    DisplayMethod = "Round",
-    Precision = 0,
-    Callback = function(val)
-        RADAR_RANGE = val
-    end
-})
-
-local SecRadarInfo = TabRadar:Section({})
-SecRadarInfo:Header({ Name = WMacLib:Gradient("Cara Baca Radar", Color3.fromRGB(150, 150, 255), Color3.fromRGB(100, 200, 255)) })
-SecRadarInfo:Label({ Name = "🟢 Titik Hijau = Kamu sendiri" })
-SecRadarInfo:Label({ Name = "🔴 Titik Merah = Killer (besar)" })
-SecRadarInfo:Label({ Name = "🔵 Titik Biru = Survivor (kecil)" })
-SecRadarInfo:Label({ Name = "Radar mengikuti arah kamera kamu!" })
-
-end -- [End TabRadar]
 
 -- ==============================================================================
 -- TAB 3: PENGATURAN & TEMA
