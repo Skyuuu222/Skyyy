@@ -140,30 +140,10 @@ do
         end
     end)
 
-    -- [2] Hookup: intercept namecall untuk melindungi perubahan property dari anti-cheat scan
-    pcall(function()
-        if hookmetamethod and getnamecallmethod then
-            local _origNC = hookmetamethod(game, "__namecall", newcclosure and newcclosure(function(self, ...)
-                local method = getnamecallmethod()
-                return _origNC(self, ...)
-            end) or function(self, ...)
-                local method = getnamecallmethod()
-                return _origNC(self, ...)
-            end)
-        end
-    end)
-
-    -- [3] Anti memory scan: Isolasi environment agar tidak muncul di getgc() sweep
-    pcall(function()
-        if getgc then
-            -- Script berjalan di isolated env, tidak perlu action tambahan
-        end
-    end)
-
-    -- [4] Proteksi WalkSpeed: Monitor jika server reset kecepatan dan kembalikan
-    -- (Non-invasif: hanya jika speed lock aktif)
+    -- [2] Proteksi WalkSpeed: Monitor jika server reset kecepatan dan kembalikan
+    -- (Non-invasif: hanya aktif jika speed lock dinyalakan)
     task.spawn(function()
-        task.wait(5)
+        task.wait(2)
         local _speedLockActive = false
         local _lockedSpeed = 16
         RunService.Heartbeat:Connect(function()
@@ -2136,14 +2116,11 @@ local function find_escape_target()
             end
         end
     end
-    -- 2. Cari Lever Pintu Keluar (hanya jika prompt enabled atau tidak ada prompt pembatas)
+    -- 2. Cari Lever / Gerbang Pintu Keluar (langsung terdeteksi dari awal game)
     for _, obj in ipairs(workspace:GetDescendants()) do
         if is_exit_gate_lever(obj) then
-            local prm = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
-            if not prm or prm.Enabled then
-                local part = esp_gate_get_part(obj)
-                if part then return part, "lever" end
-            end
+            local part = esp_gate_get_part(obj)
+            if part then return part, "lever" end
         end
     end
     return nil, nil
@@ -2279,16 +2256,18 @@ function trigger_instant_escape()
                 end
             end
 
-            -- Trigger semua ProximityPrompt pada lever / gerbang (bypass hold)
+            -- Trigger semua ProximityPrompt pada lever / gerbang (bypass hold & distance)
             local promptRoot = parentModel or levObj
             for _, prm in ipairs(promptRoot:GetDescendants()) do
                 if prm:IsA("ProximityPrompt") then
                     pcall(function()
-                        if fireproximityprompt then
-                            fireproximityprompt(prm, 0)
-                            fireproximityprompt(prm)
-                        end
+                        prm.Enabled = true
                         prm.HoldDuration = 0
+                        prm.MaxActivationDistance = 999
+                        if fireproximityprompt then
+                            pcall(function() fireproximityprompt(prm, 0) end)
+                            pcall(function() fireproximityprompt(prm) end)
+                        end
                         prm:InputHoldBegin()
                         task.wait(0.05)
                         prm:InputHoldEnd()
@@ -2296,12 +2275,15 @@ function trigger_instant_escape()
                 end
             end
 
-            -- Teleport menembus koridor gerbang ke zona escape (berbagai offset)
-            local offsets = { -15, -30, -50, -80, -120, 15, 30, 50, 80, 120 }
+            -- Teleport tepat di depan lever lalu menembus ke dalam lorong escape
+            hrp.CFrame = levPart.CFrame * CFrame.new(0, 1, 2)
+            task.wait(0.08)
+
+            local offsets = { -20, -50, -90, -130, 20, 50, 90, 130 }
             for _, zOff in ipairs(offsets) do
                 local targetCF = levPart.CFrame * CFrame.new(0, 1, zOff)
                 hrp.CFrame = targetCF
-                task.wait(0.03)
+                task.wait(0.05)
 
                 -- Fire touch ke semua part di sekitar
                 if firetouchinterest and parentModel then
@@ -2331,34 +2313,35 @@ function trigger_instant_escape()
             end
         end
 
-        -- [LANGKAH 5] Jika tidak ada zone/lever ditemukan, langsung fire exit remotes & set attribute
-        if #levers == 0 and #zones == 0 then
-            -- Set attribute Escaped pada character/player (berbagai nama field game)
-            pcall(function()
-                if char then
-                    char:SetAttribute("Escaped", true)
-                    char:SetAttribute("WinState", true)
-                    char:SetAttribute("Survived", true)
+        -- [LANGKAH 5] Set attribute Escaped pada character/player & fire remotes
+        pcall(function()
+            if char then
+                char:SetAttribute("Escaped", true)
+                char:SetAttribute("WinState", true)
+                char:SetAttribute("Survived", true)
+            end
+            LocalPlayer:SetAttribute("Escaped", true)
+            LocalPlayer:SetAttribute("WinState", true)
+        end)
+        -- Fire semua binding event survivor/escape lagi
+        pcall(function()
+            for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
+                if obj:IsA("RemoteEvent") then
+                    pcall(function() obj:FireServer("Escaped") end)
+                    pcall(function() obj:FireServer(true, "Escaped") end)
                 end
-                LocalPlayer:SetAttribute("Escaped", true)
-                LocalPlayer:SetAttribute("WinState", true)
-            end)
-            -- Fire semua binding event survivor/escape lagi
-            pcall(function()
-                for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
-                    if obj:IsA("RemoteEvent") then
-                        pcall(function() obj:FireServer("Escaped") end)
-                        pcall(function() obj:FireServer(true, "Escaped") end)
-                    end
-                end
-            end)
-        end
+            end
+        end)
 
         -- Tunggu agar server game mencatat status Escaped dan memproses XP/reward
         task.wait(1.0)
 
         -- [LANGKAH 6] Balik ke Lobby!
         local inLobby = teleport_to_lobby(hrp)
+        if not inLobby then
+            -- Fallback: pindahkan ke tempat aman di atas map agar tidak diserang killer
+            pcall(function() hrp.CFrame = CFrame.new(hrp.Position.X, 450, hrp.Position.Z) end)
+        end
 
         -- Tembak juga remote leave / lobby jika ada
         pcall(function()
@@ -2383,11 +2366,10 @@ function trigger_instant_escape()
             end
         end)
 
+        -- Selalu reset state dan matikan loop agar tidak muter-muter
         _isEscaping = false
-        if inLobby then
-            autoEscapeEnabled = false
-            stop_auto_escape()
-        end
+        autoEscapeEnabled = false
+        stop_auto_escape()
 
         Window:Notify({
             Title = "Escape Sukses!",
@@ -2401,15 +2383,13 @@ end
 
 function start_auto_escape()
     if autoEscapeConn then autoEscapeConn:Disconnect() end
-    local _lastEscapeTick = 0
     autoEscapeConn = RunService.Heartbeat:Connect(function()
         if not autoEscapeEnabled or _isEscaping then return end
-        -- Cooldown 6 detik antar escape attempt agar tidak spam
-        if tick() - _lastEscapeTick < 6 then return end
-        -- Cek jika ada gate yang terbuka atau zona escape muncul
         local targetObj = find_escape_target()
         if targetObj then
-            _lastEscapeTick = tick()
+            -- Langsung trigger dan matikan loop agar tidak muter-muter
+            autoEscapeEnabled = false
+            stop_auto_escape()
             trigger_instant_escape()
         end
     end)
@@ -3221,7 +3201,7 @@ local function agen_tick()
     if hasHitCurrentMinigame then
         -- Deteksi jarum melewati zona hit sebelumnya (>= 1 frame pergerakan)
         local distPast = (currentRot - (goalRot + 108.3)) % 360
-        if distPast > 20 and distPast < 340 then
+        if distPast > 15 and distPast < 345 then
             -- Jarum sudah jauh dari titik hit sebelumnya = siap untuk hit berikutnya
             hasHitCurrentMinigame = false
             lastHitTick = 0
@@ -3280,14 +3260,17 @@ local function agen_tick()
     local signedDist = (centerTarget - lineRot) % 360
     if signedDist > 180 then signedDist = signedDist - 360 end
 
-    -- Trigger optimal saat jarum berada tepat di tengah (memperhitungkan latency input 0.5 frame)
+    -- Jendela hit dinamis: anti-skip saat jarum berkecepatan tinggi (King's Scourge)
+    local hitWindowAhead = math.max(4.5, speed * 0.85)
+    local hitWindowBehind = math.max(3.5, speed * 0.65)
+
     local shouldHit = false
     if rawSpeed >= 0 then
-        -- Searah jarum jam (Normal CW): tembak saat signedDist <= speed * 0.65 dan belum melewati tengah
-        shouldHit = (signedDist <= (speed * 0.65) and signedDist >= - (speed * 0.35))
+        -- Searah jarum jam (Normal CW): tembak saat berada dalam jendela hit presisi
+        shouldHit = (signedDist <= hitWindowAhead and signedDist >= -hitWindowBehind)
     else
         -- Berlawanan jarum jam (Kutukan/Hex CCW)
-        shouldHit = (signedDist >= - (speed * 0.65) and signedDist <= (speed * 0.35))
+        shouldHit = (signedDist >= -hitWindowAhead and signedDist <= hitWindowBehind)
     end
 
     if shouldHit then
@@ -4311,7 +4294,8 @@ local function tof_hook_namecall()
     if not hookmetamethod then return end
 
     pcall(function()
-        tofOrigNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+        local _orig
+        _orig = hookmetamethod(game, "__namecall", function(self, ...)
             local method = getnamecallmethod and getnamecallmethod() or ""
             local args   = {...}
 
@@ -4323,7 +4307,7 @@ local function tof_hook_namecall()
             -- Intercept BindableEvent Result:Fire(...) -> ubah miss menjadi hit!
             if tofAntiMissEnabled and isResult and (method == "Fire" or method == "fire") then
                 if #args == 0 then
-                    return tofOrigNamecall(self, true)
+                    return _orig and _orig(self, true)
                 end
                 for i = 1, #args do
                     if tof_is_miss_arg(args[i]) then
@@ -4345,7 +4329,7 @@ local function tof_hook_namecall()
                         end
                     end
                 end
-                return tofOrigNamecall(self, table.unpack(args))
+                return _orig and _orig(self, table.unpack(args))
             end
 
             -- Intercept RemoteEvent Fire:FireServer(...) -> pastikan tidak ada flag miss
@@ -4360,11 +4344,14 @@ local function tof_hook_namecall()
                         end
                     end
                 end
-                return tofOrigNamecall(self, table.unpack(args))
+                return _orig and _orig(self, table.unpack(args))
             end
 
-            return tofOrigNamecall(self, ...)
+            if _orig then
+                return _orig(self, ...)
+            end
         end)
+        tofOrigNamecall = _orig
         tofMetaHooked = true
     end)
 end
