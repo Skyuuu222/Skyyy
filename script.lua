@@ -1708,19 +1708,19 @@ end
 -- ==============================================================================
 -- WMACLIB UI INITIALIZATION
 -- ==============================================================================
--- Snapshot ScreenGui yang ada sebelum WMacLib dibuat
 local _preExistingGuis = {}
 pcall(function()
-    local targetCore = CoreGui or (gethui and gethui())
-    if targetCore then
-        for _, sg in ipairs(targetCore:GetChildren()) do
-            if sg:IsA("ScreenGui") then _preExistingGuis[sg] = true end
-        end
-    end
-    if gethui and gethui() ~= targetCore then
-        for _, sg in ipairs(gethui():GetChildren()) do
-            if sg:IsA("ScreenGui") then _preExistingGuis[sg] = true end
-        end
+    local cList = {}
+    pcall(function() if gethui then table.insert(cList, gethui()) end end)
+    pcall(function() if CoreGui then table.insert(cList, CoreGui) end end)
+    for _, c in ipairs(cList) do
+        pcall(function()
+            if c and typeof(c) == "Instance" then
+                for _, sg in ipairs(c:GetChildren()) do
+                    if sg and sg:IsA("ScreenGui") then _preExistingGuis[sg] = true end
+                end
+            end
+        end)
     end
 end)
 
