@@ -4868,11 +4868,11 @@ SecWin:Keybind({
 })
 
 Window:Notify({
-    Title = "Sky Hub",
-    Description = "Player, Modifikasi & Pengaturan siap digunakan!",
+    Title = "Sky Hub • Violence District",
+    Description = "Semua 8 Tab & Fitur Ultimate Berhasil Dimuat!",
     Lifetime = 5
 })
 
-print("[OK] Sky Hub berhasil dijalankan!")
+print("[OK] Sky Hub (Violence District - 8 Tabs) berhasil dijalankan!")
 end -- [End TabConfig]
 
