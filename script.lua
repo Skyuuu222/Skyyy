@@ -2285,6 +2285,252 @@ local function safe_notify(opts)
     end)
 end
 
+-- ==============================================================================
+-- MODUL DETEKSI TRIGGER (REKAM JEJAK REAL-TIME)
+-- ==============================================================================
+-- TUJUAN: Temukan trigger keluar yang ASLI tanpa perlu menebak.
+-- Metode: hook FireServer semua RemoteEvent, __index pada part ExitLever,
+--         dan GetAttribute pada LocalPlayer. Semua yang dipanggil script
+--         game saat karakter keluar akan tercatat di sini.
+--
+-- CARA PAKAI:
+--   1. Klik "Mulai Rekam Trigger"
+--   2. LAKUKAN escape secara manual di game (tarik tuas, masuk gerbang)
+--   3. Klik "Stop & Lihat Hasil"
+-- ==============================================================================
+-- MODUL DETEKSI TRIGGER (REKAM JEJAK REAL-TIME)
+-- ==============================================================================
+-- TUJUAN: Temukan trigger keluar yang ASLI tanpa perlu menebak.
+-- Cara kerja:
+--   1. Hook FireServer pada semua RemoteEvent di ReplicatedStorage
+--   2. Hook Touched/Triggered pada part2 gerbang exit
+--   3. Pantau perubahan attribute status escaped di LocalPlayer
+-- Semua yang dipanggil script game SAAT KARAKTER KELUAR akan tercatat.
+--
+-- CARA PAKAI:
+--   1. Klik "Mulai Rekam Trigger"
+--   2. LAKUKAN escape secara MANUAL di game (tarik tuas, masuk gerbang)
+--   3. Klik "Stop & Lihat Hasil" -> baca output F9
+-- ==============================================================================
+
+local _triggerTrace = nil          -- rekaman aktif (nil = tidak merekam)
+local _traceRemotes = {}           -- remote yang sudah di-hook
+local _traceConns = {}             -- koneksi signal yang harus diputus saat stop
+local _originalFireServer = nil    -- simpan FireServer asli (dipakai hookRemote)
+
+-- Format argumen FireServer menjadi string yang mudah dibaca
+local function _fmtArgs(...)
+    local n = select("#", ...)
+    if n == 0 then return "  (no args)" end
+    local out = {}
+    for i = 1, n do
+        local a = select(i, ...)
+        if type(a) == "Instance" then
+            out[#out + 1] = string.format("#%d=%s", i, a:GetFullName())
+        else
+            out[#out + 1] = string.format("#%d=%s", i, tostring(a))
+        end
+    end
+    return "  " .. table.concat(out, " ")
+end
+
+local function _traceLog(kind, detail)
+    if not _triggerTrace then return end
+    _triggerTrace[#_triggerTrace + 1] = {
+        kind = kind,
+        detail = detail,
+        time = os.date("%H:%M:%S"),
+    }
+end
+
+-- Hook FireServer pada satu RemoteEvent.
+-- CATATAN: menyetel r.__index langsung TIDAK bekerja pada Roblox karena
+-- __index dibaca dari metatable internal userdata. hookmetamethod adalah
+-- cara yang benar dan didukung executor modern.
+local function _hookRemote(r)
+    if _traceRemotes[r] then return end
+    if type(hookmetamethod) ~= "function" then return end
+
+    local ok = pcall(function()
+        local realFire = hookmetamethod.get(r, "FireServer")
+        hookmetamethod(r, "__index", function(self, key)
+            if key == "FireServer" then
+                return function(...)
+                    _traceLog("REMOTE", r:GetFullName() .. _fmtArgs(...))
+                    if realFire then
+                        return realFire(self, ...)
+                    end
+                    return nil
+                end
+            end
+            return hookmetamethod.get(self, key)
+        end)
+    end)
+    if ok then _traceRemotes[r] = true end
+end
+
+function start_trigger_trace()
+    -- Stop rekaman sebelumnya bila ada (bersihkan hook lama)
+    if _triggerTrace then stop_trigger_trace(true) end
+
+    _triggerTrace = {}
+    _traceRemotes = {}
+    _traceConns = {}
+
+    -- 1. Hook semua RemoteEvent & RemoteFunction
+    local remoteCount = 0
+    for _, r in ipairs(ReplicatedStorage:GetDescendants()) do
+        if r:IsA("RemoteEvent") or r:IsA("RemoteFunction") then
+            if _hookRemote(r) or _traceRemotes[r] then
+                remoteCount = remoteCount + 1
+            end
+        end
+    end
+
+    -- 2. Hook Touched pada part2 di sekitar gerbang exit
+    --    Part2 = invisible trigger yang benar-benar menjalankan script server.
+    local char = LocalPlayer and LocalPlayer.Character
+    local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
+    local touchCount = 0
+
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("Model") and obj:FindFirstChild("ExitLever") then
+            for _, p in ipairs(obj:GetDescendants()) do
+                if p:IsA("BasePart") and hrp then
+                    local ok, conn = pcall(function()
+                        return p.Touched:Connect(function(hit)
+                            if hit == hrp then
+                                _traceLog("TOUCH", p:GetFullName() .. "  <-  HIT HumanoidRootPart")
+                            end
+                        end)
+                    end)
+                    if ok and conn then
+                        _traceConns[#_traceConns + 1] = conn
+                        touchCount = touchCount + 1
+                    end
+                end
+            end
+        end
+    end
+
+    -- 3. Pantau attribute status escaped / reward di LocalPlayer
+    local watched = {
+        "Escaped", "IsEscaped", "WinState", "Survived", "Died", "Dead",
+        "RoundResult", "Result", "Outcome", "Status",
+        "EXP", "ExpinRound", "Screws", "screw", "Sin", "Gears",
+    }
+    local attrCount = 0
+    for _, attr in ipairs(watched) do
+        local ok, conn = pcall(function()
+            return LocalPlayer:GetAttributeChangedSignal(attr):Connect(function()
+                _traceLog("ATTR", string.format("LocalPlayer.%s = %s", attr,
+                    tostring(LocalPlayer:GetAttribute(attr))))
+            end)
+        end)
+        if ok and conn then
+            _traceConns[#_traceConns + 1] = conn
+            attrCount = attrCount + 1
+        end
+    end
+
+    -- 4. Pantau pergantian nama karakter (tanda round selesai)
+    pcall(function()
+        _traceConns[#_traceConns + 1] = LocalPlayer.CharacterRemoving:Connect(function()
+            _traceLog("EVENT", "CharacterRemoving  <- karakter dihapus (round selesai / escape)")
+        end)
+        _traceConns[#_traceConns + 1] = LocalPlayer.CharacterAdded:Connect(function()
+            _traceLog("EVENT", "CharacterAdded  <- karakter baru muncul")
+        end)
+    end)
+
+    -- 5. Hook touched pada SELURUH part di workspace memakai ukuran & nama indikatif.
+    --    Ini menangkap trigger yang nama/letaknya tidak kita duga.
+    local wideCount = 0
+    if hrp then
+        for _, p in ipairs(workspace:GetDescendants()) do
+            if p:IsA("BasePart") and p.CanTouch and p.CanCollide == false then
+                local nm = p.Name:lower()
+                if nm:find("zone") or nm:find("trigger") or nm:find("exit")
+                    or nm:find("escape") or nm:find("goal") or nm:find("win")
+                    or nm:find("box") or nm:find("tp") or nm:find("area") then
+                    local ok, conn = pcall(function()
+                        return p.Touched:Connect(function(hit)
+                            if hit == hrp then
+                                _traceLog("WIDE", p:GetFullName() .. "  <-  HIT HumanoidRootPart")
+                            end
+                        end)
+                    end)
+                    if ok and conn then
+                        _traceConns[#_traceConns + 1] = conn
+                        wideCount = wideCount + 1
+                    end
+                end
+            end
+        end
+    end
+
+    safe_notify({
+        Title = "Rekam Trigger",
+        Description = ("Hook %d remote | %d part gerbang | %d part-wide | %d atribut")
+            :format(remoteCount, touchCount, wideCount, attrCount),
+        Lifetime = 6,
+    })
+    print(("[TRACE] Rekam aktif: %d remote, %d part gerbang, %d part-wide, %d atribut")
+        :format(remoteCount, touchCount, wideCount, attrCount))
+    print("[TRACE] >>> SEKARANG LAKUKAN ESCAPE MANUAL DI GAME <<<")
+end
+
+function stop_trigger_trace(silent)
+    -- Putuskan semua koneksi
+    for _, conn in ipairs(_traceConns) do
+        pcall(function() conn:Disconnect() end)
+    end
+    _traceConns = {}
+    _traceRemotes = {}
+
+    local entries = _triggerTrace or {}
+    _triggerTrace = nil
+
+    print("========== [TRACE HASIL RECAM] ==========")
+    if #entries == 0 then
+        print("  (tidak ada aktivitas tercatat)")
+        print("  >> Ulangi: Mulai Rekam -> escape MANUAL -> Stop Rekam")
+    else
+        for i, e in ipairs(entries) do
+            local icon = ({ REMOTE = "[R]", TOUCH = "[T]", WIDE = "[W]",
+                            ATTR = "[A]", EVENT = "[E]" })[e.kind] or "[?]"
+            print(string.format("  %3d  %s  %s  %s", i, e.time, icon, e.detail))
+        end
+    end
+    print("========== [TRACE SELESAI] ==========")
+
+    -- Ringkasan remote terkait keluar (kandidat paling kuat)
+    local relevant = {}
+    for _, e in ipairs(entries) do
+        if e.kind == "REMOTE" then
+            local rn = e.detail:lower()
+            if rn:find("escape") or rn:find("exit") or rn:find("lever")
+                or rn:find("gate") or rn:find("round") or rn:find("win")
+                or rn:find("surviv") or rn:find("moriend") or rn:find("reward")
+                or rn:find("end") then
+                relevant[#relevant + 1] = e.detail
+            end
+        end
+    end
+    if #relevant > 0 then
+        print("--- Kandidat trigger keluar (urutan saat dipanggil) ---")
+        for i, d in ipairs(relevant) do print(string.format("  %d. %s", i, d)) end
+    end
+
+    if not silent then
+        safe_notify({
+            Title = "Rekam Selesai",
+            Description = #entries .. " aktivitas tercatat. Baca output F9.",
+            Lifetime = 6,
+        })
+    end
+end
+
 -- Diagnosa: ringkas per-gerbang (tidak lagi men Enterprises semua part dekorasi)
 function scan_exit_triggers()
     print("========== [SCAN] TRIGGER / REMOTE EXIT ==========")
@@ -4594,6 +4840,24 @@ SecAutoEscape:Button({
     Callback = function()
         scan_exit_triggers()
     end
+})
+
+SecAutoEscape:Button({
+    Name = "1. Mulai Rekam Trigger",
+    Callback = function()
+        start_trigger_trace()
+    end
+})
+
+SecAutoEscape:Button({
+    Name = "2. Stop & Lihat Hasil Rekam",
+    Callback = function()
+        stop_trigger_trace()
+    end
+})
+
+SecAutoEscape:Label({
+    Name = "Cara pakai: Mulai Rekam -> tarik tuas & masuk gerbang MANUAL -> Stop Rekam -> baca F9.",
 })
 
 SecAutoEscape:Button({
