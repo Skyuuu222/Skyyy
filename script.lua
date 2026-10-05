@@ -1521,6 +1521,16 @@ local PARRY_COOLDOWN   = 3.5  -- Mengikuti cooldown resmi game (minimal 3.5 deti
 local lastParryTick    = 0
 local isParrying       = false
 local gameParryCooldownEnd = 0
+local trackedAnimators = {}
+
+local function cleanup_animator_tracks()
+    for anim, conn in pairs(trackedAnimators) do
+        if typeof(conn) == "RBXScriptConnection" then
+            pcall(function() conn:Disconnect() end)
+        end
+    end
+    trackedAnimators = {}
+end
 
 local KNOWN_ATTACK_ANIM_IDS = {
     -- Abysswalker
@@ -1587,8 +1597,7 @@ LocalPlayer.CharacterAdded:Connect(function()
     isParrying = false
     lastParryTick = 0
     gameParryCooldownEnd = 0
-    -- Reset tracker agar listener lama tidak menumpuk setelah respawn
-    trackedAnimators = {}
+    cleanup_animator_tracks()
 end)
 
 local function execute_perfect_parry(killerModel, killerName, reason, dist)
@@ -1668,8 +1677,6 @@ local function execute_perfect_parry(killerModel, killerName, reason, dist)
     end)
 end
 
-local trackedAnimators = {}
-
 local function is_killer_entity(model)
     if not model or not model:IsA("Model") then return false end
     -- 1. Cek Model "Weapon" di karakter (Killer selalu memegang child Model "Weapon")
@@ -1700,9 +1707,8 @@ end
 
 local function monitorAnimator(animator, ownerModel, ownerName)
     if trackedAnimators[animator] then return end
-    trackedAnimators[animator] = true
 
-    animator.AnimationPlayed:Connect(function(track)
+    local conn = animator.AnimationPlayed:Connect(function(track)
         if not autoParryEnabled then return end
         -- [FIX] Cek SEMUA kondisi cooldown sebelum parry
         local now2 = tick()
@@ -1781,6 +1787,7 @@ local function monitorAnimator(animator, ownerModel, ownerName)
             end
         end
     end)
+    trackedAnimators[animator] = conn
 end
 
 local function scanAllEntities()
@@ -1846,8 +1853,7 @@ local function autoparry_stop()
         autoParryDescConn = nil
     end
     isParrying = false
-    -- Bersihkan tracker agar tidak ada listener lama saat diaktifkan kembali
-    trackedAnimators = {}
+    cleanup_animator_tracks()
 end
 
 -- ==============================================================================
@@ -2839,8 +2845,26 @@ local ESP_PURPLE = Color3.fromRGB(200, 100, 255)
 local ESP_GREY   = Color3.fromRGB(150, 150, 150)
 
 local function esp_is_killer(char)
-    if not char then return false end
-    return char:FindFirstChild("Weapon") ~= nil
+    if not char or not char:IsA("Model") then return false end
+    if char:FindFirstChild("Weapon") then return true end
+    local cs = CollectionService_ESP
+    if cs:HasTag(char, "Killer") then return true end
+    local ok, tags = pcall(function() return cs:GetTags(char) end)
+    if ok and tags then
+        for _, t in ipairs(tags) do
+            if t:lower():find("killer") then return true end
+        end
+    end
+    if char:GetAttribute("TerrorRadius") or char:GetAttribute("SuspenseRadius")
+        or char:GetAttribute("Chasemusic") or char:GetAttribute("BloodLust") then
+        return true
+    end
+    local p = Players:GetPlayerFromCharacter(char)
+    if p then
+        local role = p:GetAttribute("CurrentRole") or p:GetAttribute("Role")
+        if role and tostring(role):lower() == "killer" then return true end
+    end
+    return false
 end
 
 local CollectionService_ESP = game:GetService("CollectionService")
@@ -3025,7 +3049,8 @@ local function esp_update_player(player)
     if not root then esp_hide_player(player); return end
 
     local cam = workspace.CurrentCamera
-    local dist = (cam.CFrame.Position - root.Position).Magnitude
+    local camPos = cam and cam.CFrame and cam.CFrame.Position or Vector3.new(0, 0, 0)
+    local dist = (camPos - root.Position).Magnitude
 
     local tagData = esp_get_or_create_tag(player, char)
     if not tagData then esp_hide_player(player); return end
@@ -3268,7 +3293,6 @@ end
 local function start_esp_gen()
     if espConn then return end
     esp_scan()
-    local cam = workspace.CurrentCamera
     local scanTimer = 0
     espConn = RunService.RenderStepped:Connect(function(dt)
         scanTimer = scanTimer + dt
@@ -3276,6 +3300,9 @@ local function start_esp_gen()
             scanTimer = 0
             esp_scan()
         end
+
+        local cam = workspace.CurrentCamera
+        local camPos = cam and cam.CFrame and cam.CFrame.Position or Vector3.new(0, 0, 0)
 
         for gen, e in pairs(genData_esp) do
             if not gen.Parent or not espGenEnabled then
@@ -3286,7 +3313,7 @@ local function start_esp_gen()
                 if not pos then
                     if e.bbg then e.bbg.Enabled = false end
                 else
-                    local dist = (cam.CFrame.Position - pos).Magnitude
+                    local dist = (camPos - pos).Magnitude
                     if espMaxDist > 0 and dist > espMaxDist then
                         if e.bbg then e.bbg.Enabled = false end
                     else
