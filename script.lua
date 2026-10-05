@@ -3830,15 +3830,6 @@ task.spawn(function()
         sheen.ZIndex = 11
         sheen.Parent = card
 
-        -- Strip gradien tipis di atas card sebagai aksen.
-        local strip = Instance.new("Frame")
-        strip.Size = UDim2.new(1, 0, 0, 2)
-        strip.BackgroundColor3 = Color3.new(1, 1, 1)
-        strip.BorderSizePixel = 0
-        strip.ZIndex = 12
-        strip.Parent = card
-        grad(strip, P.accentA, P.accentC)
-
         -- Logo: kotak membulat dengan gradien dan simbol bintang.
         local logo = Instance.new("Frame")
         logo.AnchorPoint = Vector2.new(0.5, 0)
@@ -3924,7 +3915,8 @@ task.spawn(function()
 
         for _, name in ipairs(chips) do
             local chip = Instance.new("Frame")
-            chip.Size = UDim2.fromOffset(86, 30)
+            -- Semua chip lebarnya sama supaya teks ikut rata dan rapi.
+            chip.Size = UDim2.fromOffset(92, 30)
             chip.BackgroundColor3 = P.bgChip
             chip.BackgroundTransparency = 0.15
             chip.BorderSizePixel = 0
@@ -3938,7 +3930,10 @@ task.spawn(function()
             chipText.Text = name
             chipText.TextColor3 = P.textMain
             chipText.TextTransparency = 0.18
-            chipText.TextScaled = true
+            -- Pakai ukuran font tetap supaya semua chip benar-benar
+            -- sama besar, bukan hanya sama lebarnya.
+            chipText.TextSize = 12
+            chipText.TextWrapped = false
             chipText.Font = Enum.Font.GothamMedium
             chipText.ZIndex = 14
             chipText.Parent = chip
@@ -4075,6 +4070,33 @@ lastGenTick = 0
 
 -- Flag mode kalibrasi. Kalau true, generator hanya mengamati, tidak menekan.
 agenCalibrating = false
+
+-- Zona putih direpresentasikan sebagai LEBAR plus POSISI (titik tengah).
+-- Ini jauh lebih enak diubah manual daripada min/max yang bisa saling
+-- bertabrakan kalau keduanya digeser.
+agenZoneWidth  = 76.0
+agenZoneCenter = 0.0
+
+-- Terapkan lebar + posisi menjadi interval min/max yang dipakai logika hit.
+-- Dipakai oleh kedua slider dan oleh Mode Kalibrasi, supaya hanya ada
+-- satu jalur penulisan zona.
+local function apply_zone_center(center)
+    local half = agenZoneWidth / 2
+    local lo = (center - half) % 360
+    local hi = (center + half) % 360
+    if lo < 0 then lo = lo + 360 end
+    if hi < 0 then hi = hi + 360 end
+    agenZoneMin = lo
+    agenZoneMax = hi
+    return lo, hi
+end
+
+-- Set langsung dari lebar + posisi. Dipanggil Mode Kalibrasi.
+function set_zone(width, center)
+    agenZoneWidth = width
+    agenZoneCenter = center
+    return apply_zone_center(center)
+end
 
 -- Uji apakah sebuah offset berada di dalam zona putih.
 -- Aman terhadap kasus di mana zona melintasi batas 0 derajat.
@@ -4306,17 +4328,19 @@ local function agen_tick()
         return
     end
 
-    -- Kecepatan sudut jarum (derajat per detik, bertanda).
-    -- PENTING: memakai kecepatan per detik, bukan per frame, supaya
-    -- prediksi tetap akurat walaupun frame rate game sedang turun.
-    -- Nilai positif = searah jarum jam, negatif = berlawanan arah.
+    -- Tracking perubahan posisi jarum antar frame.
+    -- Ini dipakai untuk (a) mendeteksi jarum standby dan
+    -- (b) mengukur apakah jarum sedang bergerak.
+    --
+    -- Kecepatan sudut sendiri TIDAK dipakai lagi untuk memutuskan
+    -- hit. Logika jarak-ke-zona jauh lebih andal dan tidak
+    -- terpengaruh frame drop.
     local nowTick = tick()
     local rawDelta = 0
     if lastLineRotation ~= nil then
         rawDelta = (currentRot - lastLineRotation) % 360
         if rawDelta > 180 then rawDelta = rawDelta - 360 end
     end
-    local angularVel = rawDelta / math.max(nowTick - lastGenTick, 1 / 240)
     lastLineRotation = currentRot
     lastGenTick = nowTick
 
@@ -4351,39 +4375,42 @@ local function agen_tick()
     -- ======================================================================
     -- MODE KALIBRASI (GEOMETRI)
     --
-    -- Kalau aktif, kita HANYA mengukur dari elemen "Goal" lalu menyimpan
-    -- hasilnya. Tidak ada yang ditekan, dan selesai dalam satu frame
-    -- supaya tidak jadi spam log.
+    -- Kalau aktif, kita HANYA mengukur dari elemen "Goal" lalu
+    -- MENYIMPAN hasilnya, lalu LANGSUNG MATI SENDIRI.
+    -- Dulu ini berjalan tiap frame sehingga log jadi spam.
+    --
+    -- Goal yang berupa arc punya properti Rotation yang menunjuk
+    -- ke tengah zonanya. Jadi titik tengah zona bukan lagi tebakan,
+    -- tapi dibaca langsung dari Rotation milik Goal.
     -- ======================================================================
     if agenCalibrating then
         local deg, radius, arcLen = measure_zone_degrees(goalObj)
 
         if deg then
+            -- Titik tengah zona diambil dari Rotation milik Goal.
+            -- Rotation itu arah busur, jadi hasilnya sudah benar
+            -- tanpa perlu menebak.
+            local center = goalObj.Rotation % 360
+            if center < 0 then center = center + 360 end
+
+            -- Pakai set_zone supaya lebar, posisi, dan min/max
+            -- semuanya tersimpan konsisten.
+            local lo, hi = set_zone(deg, center)
             calibZoneWidth = deg
 
-            -- Zona dibangun di sekitar titik tengah rentang saat ini,
-            -- supaya lebar barunya mengikuti hasil pengukuran.
-            local center = (agenZoneMin + agenZoneMax) / 2
-            local lo = center - deg / 2
-            local hi = center + deg / 2
+            -- Matikan mode kalibrasi supaya tidak mengukur berulang.
+            agenCalibrating = false
 
-            -- Bungkus ke rentang 0-360.
-            if lo < 0 then
-                lo = lo + 360
-                hi = hi + 360
-            end
-
-            agenZoneMin = lo
-            agenZoneMax = hi
-
-            log("[AutoGen] Kalibrasi selesai: lebar zona %.1f derajat "
-                .. "(busur %.1f piksel, radius %.1f piksel)", deg, arcLen, radius)
-            log("[AutoGen] Zona sekarang: %.1f sampai %.1f derajat", lo, hi)
+            log("[AutoGen] Kalibrasi selesai: lebar %.1f derajat, "
+                .. "pusat %.1f (dari Rotation Goal)",
+                deg, center)
+            log("[AutoGen] Zona: %.1f sampai %.1f derajat", lo, hi)
+            log("[AutoGen] Ukuran: busur %.1f piksel, radius %.1f piksel",
+                arcLen, radius)
         else
-            -- Pengukuran gagal. Jangan spam log, cukup satu kali.
-            if not calibZoneWidth then
-                log("[AutoGen] Kalibrasi gagal: ukuran Goal tidak terbaca.")
-            end
+            -- Pengukuran gagal. Matikan supaya tidak spam.
+            agenCalibrating = false
+            log("[AutoGen] Kalibrasi gagal: ukuran Goal tidak terbaca.")
         end
         return
     end
@@ -4394,25 +4421,49 @@ local function agen_tick()
     local zoneMin = agenZoneMin
     local zoneMax = agenZoneMax
 
-    -- Prediksi lintasan jarum dalam LOOKAHEAD detik ke depan.
+    -- ======================================================================
+    -- KEPUTUSAN HIT
     --
-    -- PERBAIKAN: sebelumnya hanya mengecek satu titik (offset saat ini
-    -- ditambah kecepatan kali 1.2). Pada King's Scourge jarum bergerak
-    -- sangat cepat sehingga bisa MELOMPAT melewati seluruh zona dalam
-    -- satu frame, sehingga tidak pernah terdeteksi.
-    -- Sekarang diambil beberapa sampel sepanjang lintasan, jadi zona
-    -- yang terlewat di antara dua frame tetap terdeteksi.
-    local LOOKAHEAD = 1 / 30
-    local SAMPLES  = 5
-    local shouldHit = false
-    for k = 0, SAMPLES do
-        local t = LOOKAHEAD * (k / SAMPLES)
-        local probe = (offset + angularVel * t) % 360
-        if in_gen_zone(probe, zoneMin, zoneMax) then
-            shouldHit = true
-            break
+    -- MASALAH YANG PERNAH TERJADI:
+    -- Versi lama hanya menebak "ke depan 33ms". Itu terlalu pendek.
+    -- Setelah kalibrasi, zona putih ternyata 76 derajat lebar. Jarum
+    -- yang masih 80 derajat di belakang zona tidak akan pernah
+    -- terdeteksi, jadi tidak pernah ditekan sama sekali.
+    --
+    -- CARA YANG BENAR:
+    -- Hitung JARAK TERDEKAT jarum ke zona (dalam derajat, melingkar).
+    -- Kalau jarum sudah di dalam zona, atau sudah sangat dekat, tekan.
+    -- Cara ini tidak bergantung pada kecepatan sama sekali, jadi
+    -- tahan frame drop dan cocok untuk King's Scourge maupun Hex.
+    -- ======================================================================
+
+    -- Jarak sudut terdekat dari offset ke interval [zoneMin, zoneMax].
+    -- Zona bisa melintasi batas 0 derajat, jadi ada dua kasus.
+    local distToZone, insideZone
+    if zoneMin <= zoneMax then
+        if offset >= zoneMin and offset <= zoneMax then
+            distToZone, insideZone = 0, true
+        elseif offset < zoneMin then
+            distToZone, insideZone = zoneMin - offset, false
+        else
+            distToZone, insideZone = offset - zoneMax, false
+        end
+    else
+        -- Zona melintasi 0 derajat: [zoneMax..360] gabung [0..zoneMin]
+        if offset >= zoneMax or offset <= zoneMin then
+            distToZone, insideZone = 0, true
+        else
+            distToZone = math.min(zoneMax - offset, offset - zoneMin)
+            insideZone = false
         end
     end
+
+    -- Toleransi: seberapa dekat jarum harus sebelum ditekan.
+    -- 18 derajat cukup menutup frame drop tanpa membuat hit terlalu
+    -- longgar (yang biasanya jadi meleset).
+    local HIT_TOLERANCE = 18
+
+    local shouldHit = insideZone or distToZone <= HIT_TOLERANCE
 
     -- Tekan dengan jeda pendek antar percobaan supaya tidak spam.
     if shouldHit and (nowTick - lastHitTick) >= AGEN_PRESS_COOLDOWN then
@@ -4423,8 +4474,8 @@ local function agen_tick()
         agen_press(spaceObj)
 
         -- Detail hanya tampil kalau SKY_DEBUG = true.
-        log("[AutoGen] PERFECT HIT! Jarum: %.1f | Goal: %.1f | Offset: %.1f | Vel: %.0f | Percobaan %d",
-            lineRot, goalRot, offset, angularVel, hitAttempts)
+        log("[AutoGen] PERFECT HIT! Jarum %.1f | Goal %.1f | Offset %.1f | Jarak %.1f | Percobaan %d",
+            lineRot, goalRot, offset, distToZone, hitAttempts)
     end
 end
 
@@ -4437,6 +4488,12 @@ function agen_start()
     lastGoalRotation      = nil
     lastHitTick           = 0
     lineMoveCount         = 0
+    -- Reset penghitung percobaan dan kalibrasi supaya sesi baru
+    -- tidak mewarisi state dari sesi sebelumnya.
+    hitAttempts           = 0
+    lastGenTick           = tick()
+    calibZoneWidth        = nil
+    agenCalibrating       = false
     autoGenConn = RunService.RenderStepped:Connect(agen_tick)
 end
 
@@ -4448,7 +4505,11 @@ function agen_stop()
     isMinigameActive = false
     hasHitCurrentMinigame = false
     lastLineRotation = nil
+    lastGoalRotation = nil
+    lastHitTick = 0
+    lastGenTick = 0
     lineMoveCount = 0
+    hitAttempts = 0
 end
 
 
@@ -5234,41 +5295,42 @@ SecAutoGen:Toggle({
     end
 })
 
--- Slider untuk penyesuaian manual kalau zona masih meleset.
+-- Slider Lebar Zona.
+-- Ini yang paling penting. Setelah kalibrasi, lebar terisi otomatis
+-- dengan angka asli dari game (misal 76 derajat), bukan lagi tebakan.
 SecAutoGen:Slider({
-    Name = "Zona Min (derajat)",
-    Default = 103,
-    Minimum = 80,
-    Maximum = 130,
+    Name = "Lebar Zona (derajat)",
+    Default = 76,
+    Minimum = 5,
+    Maximum = 180,
     Increment = 0.5,
     DisplayMethod = "Decimal",
     Precision = 1,
     Callback = function(val)
-        -- Jaga zonaMin tetap di bawah zonaMax supaya tidak terbalik.
-        if val >= agenZoneMax then
-            agenZoneMax = val + 0.5
-        end
-        agenZoneMin = val
+        -- Simpan sebagai lebar, lalu terapkan ke min/max di bawah.
+        agenZoneWidth = val
+        apply_zone_center(agenZoneCenter)
     end
 })
 
+-- Slider Posisi Zona.
+-- Titik tengah zona relatif terhadap Goal. Kalau jarum meleset tapi
+-- lebarnya sudah benar, geser slider ini sampai waktunya pas.
 SecAutoGen:Slider({
-    Name = "Zona Max (derajat)",
-    Default = 114,
-    Minimum = 90,
-    Maximum = 140,
+    Name = "Posisi Zona (derajat)",
+    Default = 0,
+    Minimum = -180,
+    Maximum = 180,
     Increment = 0.5,
     DisplayMethod = "Decimal",
     Precision = 1,
     Callback = function(val)
-        if val <= agenZoneMin then
-            agenZoneMin = val - 0.5
-        end
-        agenZoneMax = val
+        agenZoneCenter = val
+        apply_zone_center(val)
     end
 })
 
-SecAutoGen:Label({ Name = "Kalau masih sering meleset, pakai Mode Kalibrasi lebih dulu." })
+SecAutoGen:Label({ Name = "Lebar zona diisi otomatis oleh Mode Kalibrasi." })
 
 local SecAutoParry = TabMain:Section({})
 SecAutoParry:Header({ Name = WMacLib:Gradient("Auto Parry", Color3.fromRGB(232,120,140), Color3.fromRGB(168,120,255)) })
