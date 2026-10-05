@@ -1172,6 +1172,533 @@ end
 
 
 
+
+-- ==============================================================================
+-- MODUL 6: AUTO HEAL
+-- ==============================================================================
+local autoHealEnabled = false
+local autoHealConn = nil
+local autoHealCooldown = 0
+local HEAL_COOLDOWN = 1.5  -- detik antara heal
+
+local function autoheal_start()
+    if autoHealConn then return end
+    autoHealConn = RunService.Heartbeat:Connect(function(dt)
+        if not autoHealEnabled then return end
+        autoHealCooldown = autoHealCooldown - dt
+        if autoHealCooldown > 0 then return end
+        pcall(function()
+            local char = LocalPlayer.Character
+            if not char then return end
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if not hum then return end
+            -- Hanya heal jika HP berkurang
+            if hum.Health >= hum.MaxHealth then return end
+            autoHealCooldown = HEAL_COOLDOWN
+            -- Metode 1: Tembak remote heal jika ada
+            local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+            if remotes then
+                local healRemote = remotes:FindFirstChild("Heal")
+                    or remotes:FindFirstChild("heal")
+                    or remotes:FindFirstChild("HealPlayer")
+                if healRemote and healRemote:IsA("RemoteEvent") then
+                    pcall(function() healRemote:FireServer() end)
+                end
+            end
+            -- Metode 2: Langsung set HP (client-side display)
+            pcall(function() hum.Health = hum.MaxHealth end)
+            -- Metode 3: Cari tool obat di karakter
+            for _, tool in ipairs(char:GetChildren()) do
+                if tool:IsA("Tool") then
+                    local toolName = tool.Name:lower()
+                    if toolName:find("medkit") or toolName:find("heal") or toolName:find("bandage") 
+                        or toolName:find("kit") or toolName:find("aid") then
+                        -- Aktifkan tool secara otomatis
+                        pcall(function()
+                            local ts = tool:FindFirstChild("Tool Script") or tool:FindFirstChild("LocalScript")
+                            if ts then return end
+                            tool:Activate()
+                        end)
+                        break
+                    end
+                end
+            end
+        end)
+    end)
+end
+
+local function autoheal_stop()
+    if autoHealConn then
+        autoHealConn:Disconnect()
+        autoHealConn = nil
+    end
+    autoHealCooldown = 0
+end
+
+-- ==============================================================================
+-- MODUL 7: KILLER RADAR (HUD Mini-Map)
+-- ==============================================================================
+local killerRadarEnabled = false
+local killerRadarGui = nil
+local killerRadarConn = nil
+local RADAR_SIZE = 160
+local RADAR_RANGE = 100  -- stud radius
+
+local function radar_create_gui()
+    if killerRadarGui then pcall(function() killerRadarGui:Destroy() end) end
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "SkyHubKillerRadar"
+    sg.ResetOnSpawn = false
+    sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    sg.IgnoreGuiInset = true
+    pcall(function()
+        if gethui then sg.Parent = gethui()
+        else sg.Parent = CoreGui end
+    end)
+    if not sg.Parent then sg.Parent = CoreGui end
+    killerRadarGui = sg
+
+    -- Background radar
+    local radarBg = Instance.new("Frame")
+    radarBg.Name = "RadarBg"
+    radarBg.AnchorPoint = Vector2.new(1, 1)
+    radarBg.Position = UDim2.new(1, -15, 1, -15)
+    radarBg.Size = UDim2.fromOffset(RADAR_SIZE + 20, RADAR_SIZE + 40)
+    radarBg.BackgroundColor3 = Color3.fromRGB(8, 10, 18)
+    radarBg.BackgroundTransparency = 0.15
+    radarBg.BorderSizePixel = 0
+    radarBg.Parent = sg
+    local bgCorner = Instance.new("UICorner")
+    bgCorner.CornerRadius = UDim.new(0, 14)
+    bgCorner.Parent = radarBg
+
+    -- Header label
+    local hdr = Instance.new("TextLabel")
+    hdr.Size = UDim2.new(1, 0, 0, 22)
+    hdr.BackgroundTransparency = 1
+    hdr.Text = "💀 KILLER RADAR"
+    hdr.TextColor3 = Color3.fromRGB(255, 80, 80)
+    hdr.TextScaled = true
+    hdr.Font = Enum.Font.GothamBold
+    hdr.ZIndex = 2
+    hdr.Parent = radarBg
+
+    -- Radar circle
+    local radarCircle = Instance.new("Frame")
+    radarCircle.Name = "RadarCircle"
+    radarCircle.AnchorPoint = Vector2.new(0.5, 0)
+    radarCircle.Position = UDim2.new(0.5, 0, 0, 24)
+    radarCircle.Size = UDim2.fromOffset(RADAR_SIZE, RADAR_SIZE)
+    radarCircle.BackgroundColor3 = Color3.fromRGB(10, 18, 12)
+    radarCircle.BackgroundTransparency = 0.1
+    radarCircle.BorderSizePixel = 0
+    radarCircle.ZIndex = 2
+    radarCircle.Parent = radarBg
+    local circleCorner = Instance.new("UICorner")
+    circleCorner.CornerRadius = UDim.new(0.5, 0)
+    circleCorner.Parent = radarCircle
+
+    -- Lingkaran grid dekoratif
+    for _, r in ipairs({0.33, 0.66}) do
+        local ring = Instance.new("Frame")
+        ring.AnchorPoint = Vector2.new(0.5, 0.5)
+        ring.Position = UDim2.fromScale(0.5, 0.5)
+        ring.Size = UDim2.fromScale(r, r)
+        ring.BackgroundTransparency = 1
+        ring.BorderColor3 = Color3.fromRGB(0, 80, 20)
+        ring.BorderSizePixel = 1
+        ring.ZIndex = 3
+        ring.Parent = radarCircle
+        local ringCorner = Instance.new("UICorner")
+        ringCorner.CornerRadius = UDim.new(0.5, 0)
+        ringCorner.Parent = ring
+    end
+
+    -- Cross hair lines
+    for _, axis in ipairs({"H", "V"}) do
+        local line = Instance.new("Frame")
+        line.AnchorPoint = Vector2.new(0.5, 0.5)
+        line.Position = UDim2.fromScale(0.5, 0.5)
+        line.BackgroundColor3 = Color3.fromRGB(0, 80, 20)
+        line.BorderSizePixel = 0
+        line.ZIndex = 3
+        if axis == "H" then
+            line.Size = UDim2.new(1, 0, 0, 1)
+        else
+            line.Size = UDim2.new(0, 1, 1, 0)
+        end
+        line.Parent = radarCircle
+    end
+
+    -- Titik pemain (hijau di tengah)
+    local selfDot = Instance.new("Frame")
+    selfDot.Name = "SelfDot"
+    selfDot.AnchorPoint = Vector2.new(0.5, 0.5)
+    selfDot.Position = UDim2.fromScale(0.5, 0.5)
+    selfDot.Size = UDim2.fromOffset(8, 8)
+    selfDot.BackgroundColor3 = Color3.fromRGB(80, 255, 120)
+    selfDot.BorderSizePixel = 0
+    selfDot.ZIndex = 10
+    selfDot.Parent = radarCircle
+    local selfCorner = Instance.new("UICorner")
+    selfCorner.CornerRadius = UDim.new(0.5, 0)
+    selfCorner.Parent = selfDot
+
+    return sg, radarCircle
+end
+
+local function radar_update(radarCircle)
+    if not radarCircle or not radarCircle.Parent then return end
+    -- Hapus dots lama (kecuali SelfDot)
+    for _, c in ipairs(radarCircle:GetChildren()) do
+        if c.Name:find("KillerDot_") or c.Name:find("SurvivorDot_") or c.Name:find("ItemDot_") then
+            c:Destroy()
+        end
+    end
+
+    local myChar = LocalPlayer and LocalPlayer.Character
+    local myHrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    if not myHrp then return end
+
+    local myCam = workspace.CurrentCamera
+    local camCF = myCam and myCam.CFrame
+    local camYaw = camCF and math.atan2(-camCF.LookVector.X, -camCF.LookVector.Z) or 0
+
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p == LocalPlayer then continue end
+        local pChar = p.Character
+        local pHrp = pChar and pChar:FindFirstChild("HumanoidRootPart")
+        if not pHrp then continue end
+
+        local diff = pHrp.Position - myHrp.Position
+        local dist = Vector2.new(diff.X, diff.Z).Magnitude
+        if dist > RADAR_RANGE then continue end
+
+        local angle = math.atan2(diff.X, diff.Z) - camYaw
+        local nx = math.sin(angle) * (dist / RADAR_RANGE)
+        local ny = -math.cos(angle) * (dist / RADAR_RANGE)
+
+        local isKiller = false
+        pcall(function()
+            local role = p:GetAttribute("CurrentRole") or p:GetAttribute("Role")
+            if role and tostring(role):lower() == "killer" then isKiller = true end
+            if pChar and pChar:FindFirstChild("Weapon") then isKiller = true end
+        end)
+
+        local dot = Instance.new("Frame")
+        dot.Name = (isKiller and "KillerDot_" or "SurvivorDot_") .. p.Name
+        dot.AnchorPoint = Vector2.new(0.5, 0.5)
+        dot.Position = UDim2.fromScale(0.5 + nx * 0.5, 0.5 + ny * 0.5)
+        dot.Size = UDim2.fromOffset(isKiller and 10 or 7, isKiller and 10 or 7)
+        dot.BackgroundColor3 = isKiller and Color3.fromRGB(255, 60, 60) or Color3.fromRGB(80, 180, 255)
+        dot.BorderSizePixel = 0
+        dot.ZIndex = 9
+        dot.Parent = radarCircle
+        local dc = Instance.new("UICorner")
+        dc.CornerRadius = UDim.new(0.5, 0)
+        dc.Parent = dot
+
+        -- Label nama killer
+        if isKiller then
+            local lbl = Instance.new("TextLabel")
+            lbl.AnchorPoint = Vector2.new(0.5, 1)
+            lbl.Position = UDim2.new(0.5, 0, 0, -2)
+            lbl.Size = UDim2.fromOffset(60, 14)
+            lbl.BackgroundTransparency = 1
+            lbl.Text = p.DisplayName:sub(1, 8)
+            lbl.TextColor3 = Color3.fromRGB(255, 120, 120)
+            lbl.TextScaled = true
+            lbl.Font = Enum.Font.GothamBold
+            lbl.ZIndex = 10
+            lbl.Parent = dot
+        end
+    end
+end
+
+local killerRadarCircle = nil
+
+local function killerradar_start()
+    if killerRadarEnabled and killerRadarGui then return end
+    local sg, rc = radar_create_gui()
+    killerRadarCircle = rc
+    if killerRadarConn then killerRadarConn:Disconnect() end
+    local t = 0
+    killerRadarConn = RunService.Heartbeat:Connect(function(dt)
+        if not killerRadarEnabled then return end
+        t = t + dt
+        if t >= 0.1 then
+            t = 0
+            pcall(radar_update, killerRadarCircle)
+        end
+    end)
+end
+
+local function killerradar_stop()
+    if killerRadarConn then killerRadarConn:Disconnect(); killerRadarConn = nil end
+    if killerRadarGui then pcall(function() killerRadarGui:Destroy() end); killerRadarGui = nil end
+    killerRadarCircle = nil
+end
+
+-- ==============================================================================
+-- MODUL 8: FULLBRIGHT + NO FOG
+-- ==============================================================================
+local fullbrightEnabled = false
+local fullbrightConn = nil
+local origAmbient = nil
+local origOutdoor = nil
+local origBrightness = nil
+local origFogEnd = nil
+local origFogStart = nil
+
+local function fullbright_apply()
+    pcall(function()
+        local lighting = game:GetService("Lighting")
+        lighting.Ambient = Color3.fromRGB(178, 178, 178)
+        lighting.OutdoorAmbient = Color3.fromRGB(178, 178, 178)
+        lighting.Brightness = 2
+        lighting.FogEnd = 100000
+        lighting.FogStart = 100000
+        -- Hapus/disable efek dark
+        for _, child in ipairs(lighting:GetChildren()) do
+            if child:IsA("BloomEffect") or child:IsA("SunRaysEffect") 
+               or child:IsA("ColorCorrectionEffect") then
+                pcall(function() child.Enabled = false end)
+            end
+        end
+    end)
+end
+
+local function fullbright_restore()
+    pcall(function()
+        local lighting = game:GetService("Lighting")
+        if origAmbient then lighting.Ambient = origAmbient end
+        if origOutdoor then lighting.OutdoorAmbient = origOutdoor end
+        if origBrightness then lighting.Brightness = origBrightness end
+        if origFogEnd then lighting.FogEnd = origFogEnd end
+        if origFogStart then lighting.FogStart = origFogStart end
+        -- Kembalikan efek
+        for _, child in ipairs(lighting:GetChildren()) do
+            if child:IsA("BloomEffect") or child:IsA("SunRaysEffect")
+               or child:IsA("ColorCorrectionEffect") then
+                pcall(function() child.Enabled = true end)
+            end
+        end
+    end)
+end
+
+local function fullbright_start()
+    pcall(function()
+        local lighting = game:GetService("Lighting")
+        origAmbient = lighting.Ambient
+        origOutdoor = lighting.OutdoorAmbient
+        origBrightness = lighting.Brightness
+        origFogEnd = lighting.FogEnd
+        origFogStart = lighting.FogStart
+    end)
+    fullbright_apply()
+    if fullbrightConn then fullbrightConn:Disconnect() end
+    fullbrightConn = RunService.Heartbeat:Connect(function()
+        if not fullbrightEnabled then return end
+        fullbright_apply()
+    end)
+end
+
+local function fullbright_stop()
+    if fullbrightConn then fullbrightConn:Disconnect(); fullbrightConn = nil end
+    fullbright_restore()
+end
+
+-- ==============================================================================
+-- MODUL 9: CUSTOM FOV (Field of View)
+-- ==============================================================================
+local customFovEnabled = false
+local customFovValue = 70
+local origFov = nil
+local fovConn = nil
+
+local function fov_apply(val)
+    pcall(function()
+        workspace.CurrentCamera.FieldOfView = val
+    end)
+end
+
+local function fov_start(val)
+    customFovValue = val or customFovValue
+    pcall(function() origFov = workspace.CurrentCamera.FieldOfView end)
+    fov_apply(customFovValue)
+    if fovConn then fovConn:Disconnect() end
+    fovConn = RunService.RenderStepped:Connect(function()
+        if not customFovEnabled then return end
+        pcall(function()
+            if workspace.CurrentCamera.FieldOfView ~= customFovValue then
+                workspace.CurrentCamera.FieldOfView = customFovValue
+            end
+        end)
+    end)
+end
+
+local function fov_stop()
+    if fovConn then fovConn:Disconnect(); fovConn = nil end
+    pcall(function()
+        if origFov then workspace.CurrentCamera.FieldOfView = origFov end
+    end)
+end
+
+-- ==============================================================================
+-- MODUL 10: INFINITE ITEM CHARGES
+-- ==============================================================================
+local infiniteChargesEnabled = false
+local infiniteChargesConn = nil
+
+local function infinite_charges_apply()
+    pcall(function()
+        local char = LocalPlayer and LocalPlayer.Character
+        if not char then return end
+        -- Patch semua tool di karakter
+        for _, obj in ipairs(char:GetChildren()) do
+            if obj:IsA("Tool") then
+                -- Set charges/uses ke max via attributes
+                local chargeKeys = {"Charges","charges","Uses","uses","MaxCharges","maxCharges",
+                                    "Ammo","ammo","CurrentUses","currentUses"}
+                for _, k in ipairs(chargeKeys) do
+                    local v = obj:GetAttribute(k)
+                    if type(v) == "number" and v >= 0 then
+                        obj:SetAttribute(k, math.max(v, 999))
+                    end
+                end
+                -- Patch via getgc scan table
+                if getgc then
+                    pcall(function()
+                        for _, t in pairs(getgc(true)) do
+                            if type(t) == "table" then
+                                local hasCharges = rawget(t,"charges") or rawget(t,"Charges")
+                                    or rawget(t,"uses") or rawget(t,"Uses")
+                                if hasCharges and type(hasCharges) == "number" and hasCharges >= 0 then
+                                    for _, k in ipairs(chargeKeys) do
+                                        if rawget(t, k) and type(rawget(t,k)) == "number" then
+                                            t[k] = math.max(rawget(t,k), 999)
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end)
+                end
+            end
+        end
+    end)
+end
+
+local function infinite_charges_start()
+    infinite_charges_apply()
+    if infiniteChargesConn then infiniteChargesConn:Disconnect() end
+    local t = 0
+    infiniteChargesConn = RunService.Heartbeat:Connect(function(dt)
+        if not infiniteChargesEnabled then return end
+        t = t + dt
+        if t >= 0.5 then
+            t = 0
+            infinite_charges_apply()
+        end
+    end)
+end
+
+local function infinite_charges_stop()
+    if infiniteChargesConn then infiniteChargesConn:Disconnect(); infiniteChargesConn = nil end
+end
+
+-- ==============================================================================
+-- MODUL 11: ESP EXIT GATE
+-- ==============================================================================
+local espGateEnabled = false
+local espGateConns = {}
+local espGateHighlights = {}
+
+local GATE_NAMES = {
+    "ExitGate", "Exit Gate", "Gate", "exit_gate", "ExitDoor", "Exit",
+    "EscapeGate", "EscapeDoor", "EndGate",
+}
+
+local function gate_name_match(name)
+    local ln = name:lower()
+    for _, n in ipairs(GATE_NAMES) do
+        if ln:find(n:lower()) then return true end
+    end
+    return false
+end
+
+local function esp_gate_make_highlight(obj)
+    local existing = espGateHighlights[obj]
+    if existing and existing.Parent then return end
+    local hl = Instance.new("SelectionBox")
+    hl.Color3 = Color3.fromRGB(255, 220, 0)
+    hl.LineThickness = 0.08
+    hl.SurfaceTransparency = 0.7
+    hl.SurfaceColor3 = Color3.fromRGB(255, 220, 0)
+    hl.Adornee = obj
+    hl.Parent = CoreGui
+    -- Label jarak
+    local billBg = Instance.new("BillboardGui")
+    billBg.Name = "GateESPLabel_" .. obj.Name
+    billBg.AlwaysOnTop = true
+    billBg.Size = UDim2.fromOffset(140, 38)
+    billBg.StudsOffset = Vector3.new(0, 6, 0)
+    billBg.Adornee = obj:IsA("Model") and (obj:FindFirstChild("PrimaryPart") or obj:FindFirstChildWhichIsA("BasePart")) or obj
+    billBg.Parent = CoreGui
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.fromScale(1, 1)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = "🚪 EXIT GATE"
+    lbl.TextColor3 = Color3.fromRGB(255, 220, 0)
+    lbl.TextScaled = true
+    lbl.Font = Enum.Font.GothamBold
+    lbl.Parent = billBg
+    espGateHighlights[obj] = hl
+    table.insert(espGateConns, billBg)
+end
+
+local function esp_gate_scan()
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if gate_name_match(obj.Name) then
+            pcall(esp_gate_make_highlight, obj)
+        end
+    end
+end
+
+local function start_esp_gate()
+    for _, c in ipairs(espGateConns) do pcall(function() c:Destroy() end) end
+    espGateConns = {}
+    for obj, hl in pairs(espGateHighlights) do
+        pcall(function() hl:Destroy() end)
+    end
+    espGateHighlights = {}
+    esp_gate_scan()
+    -- Re-scan saat object baru ditambah
+    local scanConn = workspace.DescendantAdded:Connect(function(desc)
+        if not espGateEnabled then return end
+        if gate_name_match(desc.Name) then
+            pcall(esp_gate_make_highlight, desc)
+        end
+    end)
+    table.insert(espGateConns, scanConn)
+end
+
+local function stop_esp_gate()
+    for _, c in ipairs(espGateConns) do
+        if typeof(c) == "RBXScriptConnection" then
+            pcall(function() c:Disconnect() end)
+        elseif typeof(c) == "Instance" then
+            pcall(function() c:Destroy() end)
+        end
+    end
+    espGateConns = {}
+    for _, hl in pairs(espGateHighlights) do
+        pcall(function() hl:Destroy() end)
+    end
+    espGateHighlights = {}
+end
+
+
 -- ==============================================================================
 -- WMACLIB UI INITIALIZATION
 -- ==============================================================================
@@ -1216,6 +1743,248 @@ local Window = WMacLib:Window({
 })
 
 local tabGroup = Window:TabGroup()
+
+-- ==============================================================================
+-- WELCOME SCREEN KEREN & MODERN
+-- ==============================================================================
+task.spawn(function()
+    task.wait(0.5)
+    pcall(function()
+        local SG = Instance.new("ScreenGui")
+        SG.Name = "SkyHubWelcome"
+        SG.ResetOnSpawn = false
+        SG.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+        SG.IgnoreGuiInset = true
+        pcall(function()
+            if gethui then SG.Parent = gethui()
+            else SG.Parent = CoreGui end
+        end)
+        if not SG.Parent then SG.Parent = CoreGui end
+
+        -- Backdrop blur
+        local blur = Instance.new("BlurEffect")
+        blur.Size = 24
+        blur.Parent = workspace.CurrentCamera
+
+        -- Overlay gelap
+        local overlay = Instance.new("Frame")
+        overlay.Size = UDim2.fromScale(1, 1)
+        overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        overlay.BackgroundTransparency = 0.35
+        overlay.BorderSizePixel = 0
+        overlay.ZIndex = 1
+        overlay.Parent = SG
+
+        -- Card container
+        local card = Instance.new("Frame")
+        card.AnchorPoint = Vector2.new(0.5, 0.5)
+        card.Position = UDim2.fromScale(0.5, 0.5)
+        card.Size = UDim2.fromOffset(520, 300)
+        card.BackgroundColor3 = Color3.fromRGB(13, 13, 20)
+        card.BackgroundTransparency = 0.05
+        card.BorderSizePixel = 0
+        card.ZIndex = 10
+        card.Parent = SG
+
+        local cardCorner = Instance.new("UICorner")
+        cardCorner.CornerRadius = UDim.new(0, 20)
+        cardCorner.Parent = card
+
+        -- Garis dekorasi atas (gradient strip)
+        local topStrip = Instance.new("Frame")
+        topStrip.Size = UDim2.new(1, 0, 0, 3)
+        topStrip.BackgroundColor3 = Color3.fromRGB(100, 180, 255)
+        topStrip.BorderSizePixel = 0
+        topStrip.ZIndex = 11
+        topStrip.Parent = card
+        local topCorner = Instance.new("UICorner")
+        topCorner.CornerRadius = UDim.new(0, 20)
+        topCorner.Parent = topStrip
+        local topGrad = Instance.new("UIGradient")
+        topGrad.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(80, 120, 255)),
+            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(180, 80, 255)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 80, 160)),
+        })
+        topGrad.Parent = topStrip
+
+        -- Logo / Icon area
+        local logoFrame = Instance.new("Frame")
+        logoFrame.AnchorPoint = Vector2.new(0.5, 0)
+        logoFrame.Position = UDim2.new(0.5, 0, 0, 28)
+        logoFrame.Size = UDim2.fromOffset(64, 64)
+        logoFrame.BackgroundColor3 = Color3.fromRGB(20, 25, 40)
+        logoFrame.BorderSizePixel = 0
+        logoFrame.ZIndex = 12
+        logoFrame.Parent = card
+        local lgCorner = Instance.new("UICorner")
+        lgCorner.CornerRadius = UDim.new(0, 16)
+        lgCorner.Parent = logoFrame
+        local lgGrad = Instance.new("UIGradient")
+        lgGrad.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(60, 130, 255)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(180, 60, 255)),
+        })
+        lgGrad.Rotation = 135
+        lgGrad.Parent = logoFrame
+
+        local logoLabel = Instance.new("TextLabel")
+        logoLabel.Size = UDim2.fromScale(1, 1)
+        logoLabel.BackgroundTransparency = 1
+        logoLabel.Text = "✦"
+        logoLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        logoLabel.TextScaled = true
+        logoLabel.Font = Enum.Font.GothamBold
+        logoLabel.ZIndex = 13
+        logoLabel.Parent = logoFrame
+
+        -- Title
+        local title = Instance.new("TextLabel")
+        title.AnchorPoint = Vector2.new(0.5, 0)
+        title.Position = UDim2.new(0.5, 0, 0, 105)
+        title.Size = UDim2.new(1, -40, 0, 42)
+        title.BackgroundTransparency = 1
+        title.Text = "Sky Hub"
+        title.TextColor3 = Color3.fromRGB(255, 255, 255)
+        title.TextScaled = true
+        title.Font = Enum.Font.GothamBold
+        title.ZIndex = 12
+        title.Parent = card
+        local titleGrad = Instance.new("UIGradient")
+        titleGrad.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(100, 180, 255)),
+            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(200, 100, 255)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 100, 160)),
+        })
+        titleGrad.Parent = title
+
+        -- Subtitle
+        local sub = Instance.new("TextLabel")
+        sub.AnchorPoint = Vector2.new(0.5, 0)
+        sub.Position = UDim2.new(0.5, 0, 0, 150)
+        sub.Size = UDim2.new(1, -60, 0, 22)
+        sub.BackgroundTransparency = 1
+        sub.Text = "Violence District Ultimate Script  •  v2.0"
+        sub.TextColor3 = Color3.fromRGB(160, 160, 200)
+        sub.TextScaled = true
+        sub.Font = Enum.Font.Gotham
+        sub.ZIndex = 12
+        sub.Parent = card
+
+        -- Divider
+        local div = Instance.new("Frame")
+        div.AnchorPoint = Vector2.new(0.5, 0)
+        div.Position = UDim2.new(0.5, 0, 0, 183)
+        div.Size = UDim2.new(0.7, 0, 0, 1)
+        div.BackgroundColor3 = Color3.fromRGB(60, 60, 90)
+        div.BorderSizePixel = 0
+        div.ZIndex = 12
+        div.Parent = card
+
+        -- Info stats row
+        local features = {
+            { icon = "⚡", label = "Auto Gen" },
+            { icon = "🛡️", label = "Auto Parry" },
+            { icon = "👁️", label = "ESP" },
+            { icon = "💀", label = "Killer Radar" },
+            { icon = "✨", label = "More+" },
+        }
+        local rowFrame = Instance.new("Frame")
+        rowFrame.AnchorPoint = Vector2.new(0.5, 0)
+        rowFrame.Position = UDim2.new(0.5, 0, 0, 196)
+        rowFrame.Size = UDim2.new(1, -40, 0, 50)
+        rowFrame.BackgroundTransparency = 1
+        rowFrame.ZIndex = 12
+        rowFrame.Parent = card
+        local rowLayout = Instance.new("UIListLayout")
+        rowLayout.FillDirection = Enum.FillDirection.Horizontal
+        rowLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+        rowLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+        rowLayout.Padding = UDim.new(0, 10)
+        rowLayout.Parent = rowFrame
+        for _, f in ipairs(features) do
+            local chip = Instance.new("Frame")
+            chip.Size = UDim2.fromOffset(80, 36)
+            chip.BackgroundColor3 = Color3.fromRGB(25, 30, 50)
+            chip.BorderSizePixel = 0
+            chip.ZIndex = 13
+            chip.Parent = rowFrame
+            local chipCorner = Instance.new("UICorner")
+            chipCorner.CornerRadius = UDim.new(0, 10)
+            chipCorner.Parent = chip
+            local chipLabel = Instance.new("TextLabel")
+            chipLabel.Size = UDim2.fromScale(1, 1)
+            chipLabel.BackgroundTransparency = 1
+            chipLabel.Text = f.icon .. "  " .. f.label
+            chipLabel.TextColor3 = Color3.fromRGB(200, 210, 255)
+            chipLabel.TextScaled = true
+            chipLabel.Font = Enum.Font.Gotham
+            chipLabel.ZIndex = 14
+            chipLabel.Parent = chip
+        end
+
+        -- Footer loading bar
+        local barBg = Instance.new("Frame")
+        barBg.AnchorPoint = Vector2.new(0.5, 1)
+        barBg.Position = UDim2.new(0.5, 0, 1, -18)
+        barBg.Size = UDim2.new(0.8, 0, 0, 6)
+        barBg.BackgroundColor3 = Color3.fromRGB(30, 30, 50)
+        barBg.BorderSizePixel = 0
+        barBg.ZIndex = 12
+        barBg.Parent = card
+        local barBgCorner = Instance.new("UICorner")
+        barBgCorner.CornerRadius = UDim.new(0, 4)
+        barBgCorner.Parent = barBg
+
+        local bar = Instance.new("Frame")
+        bar.Size = UDim2.fromScale(0, 1)
+        bar.BackgroundColor3 = Color3.fromRGB(100, 180, 255)
+        bar.BorderSizePixel = 0
+        bar.ZIndex = 13
+        bar.Parent = barBg
+        local barCorner = Instance.new("UICorner")
+        barCorner.CornerRadius = UDim.new(0, 4)
+        barCorner.Parent = bar
+        local barGrad2 = Instance.new("UIGradient")
+        barGrad2.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(80, 120, 255)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 80, 200)),
+        })
+        barGrad2.Parent = bar
+
+        -- Animate bar fill
+        local TweenService = game:GetService("TweenService")
+        local fillTween = TweenService:Create(bar, TweenInfo.new(2.5, Enum.EasingStyle.Sine), {
+            Size = UDim2.fromScale(1, 1)
+        })
+        fillTween:Play()
+
+        -- Fade in card
+        card.Position = UDim2.new(0.5, 0, 0.55, 0)
+        card.BackgroundTransparency = 1
+        local fadeIn = TweenService:Create(card, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Position = UDim2.fromScale(0.5, 0.5),
+            BackgroundTransparency = 0.05,
+        })
+        fadeIn:Play()
+
+        -- Wait then fade out
+        task.wait(3.2)
+        local fadeOut = TweenService:Create(card, TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+            Position = UDim2.new(0.5, 0, 0.45, 0),
+            BackgroundTransparency = 1,
+        })
+        local overlayOut = TweenService:Create(overlay, TweenInfo.new(0.6), {
+            BackgroundTransparency = 1,
+        })
+        fadeOut:Play()
+        overlayOut:Play()
+        fadeOut.Completed:Wait()
+        pcall(function() blur:Destroy() end)
+        pcall(function() SG:Destroy() end)
+    end)
+end)
+
 
 -- Cari ScreenGui yang dibuat oleh WMacLib (yang tidak ada di snapshot sebelumnya)
 local wmacGui = nil
@@ -1491,8 +2260,8 @@ local function agen_tick()
         -- Feedback console (F9) saja tanpa popup notifikasi di layar
         pcall(function()
             print(string.format(
-                "[AutoGen] PERFECT HIT! Jarum: %.1f° | Goal: %.1f° | Selisih: %.1f° | Prediksi: %.1f° | Speed: %.2f°/f",
-                lineRot, goalRot, (lineRot - goalRot) % 360, predictedRot, speed
+                "[AutoGen] PERFECT HIT! Jarum: %.1f° | Goal: %.1f° | Selisih: %.1f° | Target: %.1f° | Speed: %.2f°/f",
+                lineRot, goalRot, (lineRot - goalRot) % 360, centerTarget, speed
             ))
         end)
     end
@@ -2149,6 +2918,38 @@ SecUtil:Toggle({
         })
     end
 })
+
+-- SEKSI 4: AUTO HEAL
+local SecAutoHealPlayer = TabPlayer:Section({})
+SecAutoHealPlayer:Header({ Name = WMacLib:Gradient("Auto Heal (Pemulihan Otomatis)", Color3.fromRGB(80, 255, 120), Color3.fromRGB(60, 200, 80)) })
+
+SecAutoHealPlayer:Toggle({
+    Name = "Aktifkan Auto Heal",
+    Default = false,
+    Callback = function(enabled)
+        autoHealEnabled = enabled
+        if enabled then
+            autoheal_start()
+            Window:Notify({ Title = "Auto Heal", Description = "Otomatis memulihkan HP!", Lifetime = 3 })
+        else
+            autoheal_stop()
+            Window:Notify({ Title = "Auto Heal", Description = "Auto Heal dimatikan.", Lifetime = 2 })
+        end
+    end
+})
+
+SecAutoHealPlayer:Slider({
+    Name = "Interval Heal (x10 = detik)",
+    Default = 15,
+    Minimum = 5,
+    Maximum = 60,
+    DisplayMethod = "Round",
+    Precision = 0,
+    Callback = function(val)
+        HEAL_COOLDOWN = val / 10
+    end
+})
+
 end -- [End TabPlayer]
 
 -- ==============================================================================
@@ -2792,6 +3593,48 @@ SecTOF:Toggle({
         end
     end
 })
+
+-- ==============================================================================
+-- SEKSI: INFINITE ITEM CHARGES (UNLIMITED USES)
+-- ==============================================================================
+local SecInfCharge = TabCombat:Section({})
+SecInfCharge:Header({ Name = WMacLib:Gradient("Infinite Item Charges", Color3.fromRGB(80, 220, 255), Color3.fromRGB(150, 100, 255)) })
+
+SecInfCharge:Toggle({
+    Name = "Aktifkan Infinite Charges",
+    Default = false,
+    Callback = function(enabled)
+        infiniteChargesEnabled = enabled
+        if enabled then
+            infinite_charges_start()
+            Window:Notify({
+                Title = "Infinite Charges",
+                Description = "Semua item / tool charges tidak akan pernah habis (999+ uses)!",
+                Lifetime = 3
+            })
+        else
+            infinite_charges_stop()
+            Window:Notify({
+                Title = "Infinite Charges",
+                Description = "Infinite Charges dinonaktifkan.",
+                Lifetime = 2
+            })
+        end
+    end
+})
+
+SecInfCharge:Button({
+    Name = "⚡ Refill / Lock Charges Sekarang",
+    Callback = function()
+        infinite_charges_apply()
+        Window:Notify({
+            Title = "Refill Selesai",
+            Description = "Semua item di inventory telah di-refill ke charges maksimal!",
+            Lifetime = 2
+        })
+    end
+})
+
 end -- [End TabCombat]
 
 -- ==============================================================================
@@ -2806,6 +3649,8 @@ local ESP_YELLOW = Color3.fromRGB(255, 200,  50)
 local ESP_ORANGE = Color3.fromRGB(255, 120,  30)
 local ESP_PURPLE = Color3.fromRGB(200, 100, 255)
 local ESP_GREY   = Color3.fromRGB(150, 150, 150)
+
+local CollectionService_ESP = game:GetService("CollectionService")
 
 local function esp_is_killer(char)
     if not char or not char:IsA("Model") then return false end
@@ -2829,8 +3674,6 @@ local function esp_is_killer(char)
     end
     return false
 end
-
-local CollectionService_ESP = game:GetService("CollectionService")
 
 local function esp_get_status(char)
     local ok, hum = pcall(function() return char:FindFirstChildOfClass("Humanoid") end)
@@ -2869,24 +3712,32 @@ local function esp_get_status(char)
 end
 
 local function esp_get_item(char)
-    -- Prioritas utama: EquippedItem dari Attribute Player (paling akurat)
+    -- Prioritas 1: Attributes pada Player
     local player = Players:GetPlayerFromCharacter(char)
     if player then
-        local equippedItem = player:GetAttribute("EquippedItem")
-        if equippedItem and equippedItem ~= "" then
-            return tostring(equippedItem)
+        local pAttr = player:GetAttribute("EquippedItem") or player:GetAttribute("Item") 
+            or player:GetAttribute("HoldingItem") or player:GetAttribute("CurrentItem") 
+            or player:GetAttribute("SelectedTool") or player:GetAttribute("Tool")
+        if pAttr and tostring(pAttr) ~= "" and tostring(pAttr) ~= "None" and tostring(pAttr) ~= "nil" then
+            return tostring(pAttr)
         end
         -- Fallback: Cek Backpack
         local bp = player:FindFirstChildOfClass("Backpack")
         if bp then
             for _, v in ipairs(bp:GetChildren()) do
-                if v:IsA("Tool") then return v.Name end
+                if v:IsA("Tool") and v.Name ~= "" then return v.Name end
             end
         end
     end
-    -- Fallback: Cek Tool yang sedang dipegang di Character
+    -- Prioritas 2: Tool yang sedang dipegang di Character
     for _, v in ipairs(char:GetChildren()) do
-        if v:IsA("Tool") then return v.Name end
+        if v:IsA("Tool") and v.Name ~= "" then return v.Name end
+    end
+    -- Prioritas 3: Attribute pada Character itu sendiri
+    local cAttr = char:GetAttribute("Item") or char:GetAttribute("EquippedItem") 
+        or char:GetAttribute("Weapon") or char:GetAttribute("HoldingItem")
+    if cAttr and tostring(cAttr) ~= "" and tostring(cAttr) ~= "None" and tostring(cAttr) ~= "nil" then
+        return tostring(cAttr)
     end
     return nil
 end
@@ -2982,7 +3833,16 @@ local function esp_get_or_create_tag(player, char)
     infoLbl.Text = "[OK] Aman"
     infoLbl.Parent = bbg
 
-    bbg.Parent = head
+    -- Parent ke CoreGui agar label tidak ikut destroy saat karakter mati/respawn
+    -- dan AlwaysOnTop benar-benar berfungsi menembus dinding
+    pcall(function()
+        if gethui then
+            bbg.Parent = gethui()
+        else
+            bbg.Parent = game:GetService("CoreGui")
+        end
+    end)
+    if not bbg.Parent then bbg.Parent = game:GetService("CoreGui") end
 
     tagData = {
         bbg = bbg,
@@ -3019,6 +3879,13 @@ local function esp_update_player(player)
     if not tagData then esp_hide_player(player); return end
 
     tagData.bbg.Enabled = true
+    -- Keep adornee synced
+    pcall(function()
+        local currentHead = char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+        if currentHead and tagData.bbg.Adornee ~= currentHead then
+            tagData.bbg.Adornee = currentHead
+        end
+    end)
 
     if esp_is_killer(char) then
         esp_set_highlight_player(player, char, ESP_RED)
@@ -3215,7 +4082,7 @@ local function esp_setup_gen(gen)
         pctLbl.TextColor3 = ESP_GEN_COLOR
         pctLbl.TextStrokeColor3 = Color3.new(0, 0, 0)
         pctLbl.TextStrokeTransparency = 0
-        pctLbl.Text = "0%"
+        pctLbl.Text = gen.Name .. "\n0%"
         pctLbl.Parent = bbg
 
         bbg.Parent = part
@@ -3347,6 +4214,28 @@ SecESPGen:Toggle({
         end
     end
 })
+
+
+-- SEKSI ESP EXIT GATE (tambah ke TabESP)
+local SecESPGate = TabESP:Section({})
+SecESPGate:Header({ Name = WMacLib:Gradient("ESP Pintu Keluar (Exit Gate)", Color3.fromRGB(255, 220, 60), Color3.fromRGB(255, 120, 40)) })
+
+SecESPGate:Toggle({
+    Name = "Aktifkan ESP Exit Gate",
+    Default = false,
+    Callback = function(enabled)
+        espGateEnabled = enabled
+        if enabled then
+            start_esp_gate()
+            Window:Notify({ Title = "ESP Gate", Description = "Pintu keluar terlihat dari mana saja!", Lifetime = 3 })
+        else
+            stop_esp_gate()
+            Window:Notify({ Title = "ESP Gate", Description = "ESP Exit Gate dimatikan.", Lifetime = 2 })
+        end
+    end
+})
+
+
 end -- [End TabESP]
 
 -- ==============================================================================
@@ -3648,6 +4537,120 @@ SecBody:Button({
     end,
 })
 end -- [End TabMod]
+
+-- ==============================================================================
+-- TAB: VIEW (FULLBRIGHT + CUSTOM FOV)
+-- ==============================================================================
+do
+local TabView = tabGroup:Tab({ Name = "View", Image = "lucide/sun" })
+
+-- SEKSI 1: FULLBRIGHT + NO FOG
+local SecFB = TabView:Section({})
+SecFB:Header({ Name = WMacLib:Gradient("Fullbright & No Fog", Color3.fromRGB(255, 220, 60), Color3.fromRGB(255, 140, 40)) })
+
+SecFB:Toggle({
+    Name = "Aktifkan Fullbright + No Fog",
+    Default = false,
+    Callback = function(enabled)
+        fullbrightEnabled = enabled
+        if enabled then
+            fullbright_start()
+            Window:Notify({ Title = "Fullbright", Description = "Map terang sempurna! Semua fog dihapus.", Lifetime = 3 })
+        else
+            fullbright_stop()
+            Window:Notify({ Title = "Fullbright", Description = "Fullbright dimatikan. Lighting normal.", Lifetime = 2 })
+        end
+    end
+})
+
+-- SEKSI 2: CUSTOM FOV
+local SecFov = TabView:Section({})
+SecFov:Header({ Name = WMacLib:Gradient("Custom FOV (Field of View)", Color3.fromRGB(100, 200, 255), Color3.fromRGB(60, 120, 255)) })
+
+SecFov:Toggle({
+    Name = "Aktifkan Custom FOV",
+    Default = false,
+    Callback = function(enabled)
+        customFovEnabled = enabled
+        if enabled then
+            fov_start(customFovValue)
+            Window:Notify({ Title = "Custom FOV", Description = "FOV diubah ke " .. tostring(customFovValue) .. "\u00b0!", Lifetime = 3 })
+        else
+            fov_stop()
+            Window:Notify({ Title = "Custom FOV", Description = "FOV dikembalikan normal (70\u00b0).", Lifetime = 2 })
+        end
+    end
+})
+
+SecFov:Slider({
+    Name = "FOV Value (derajat)",
+    Default = 70,
+    Minimum = 40,
+    Maximum = 120,
+    DisplayMethod = "Round",
+    Precision = 0,
+    Callback = function(val)
+        customFovValue = val
+        if customFovEnabled then
+            fov_apply(val)
+        end
+    end
+})
+
+SecFov:Button({
+    Name = "Reset FOV ke Default (70\u00b0)",
+    Callback = function()
+        customFovValue = 70
+        if customFovEnabled then fov_apply(70) end
+        Window:Notify({ Title = "FOV", Description = "FOV direset ke 70\u00b0.", Lifetime = 2 })
+    end
+})
+end -- [End TabView]
+
+-- ==============================================================================
+-- TAB: KILLER RADAR
+-- ==============================================================================
+do
+local TabRadar = tabGroup:Tab({ Name = "Radar", Image = "lucide/radio" })
+
+local SecRadar = TabRadar:Section({})
+SecRadar:Header({ Name = WMacLib:Gradient("Killer Radar (Mini-Map)", Color3.fromRGB(255, 60, 60), Color3.fromRGB(255, 160, 60)) })
+
+SecRadar:Toggle({
+    Name = "Aktifkan Killer Radar",
+    Default = false,
+    Callback = function(enabled)
+        killerRadarEnabled = enabled
+        if enabled then
+            killerradar_start()
+            Window:Notify({ Title = "Killer Radar", Description = "\u2764\ufe0f Merah=Killer | \ud83d\udc99 Biru=Survivor. Radar aktif!", Lifetime = 3 })
+        else
+            killerradar_stop()
+            Window:Notify({ Title = "Killer Radar", Description = "Radar dimatikan.", Lifetime = 2 })
+        end
+    end
+})
+
+SecRadar:Slider({
+    Name = "Jangkauan Radar (Studs)",
+    Default = 100,
+    Minimum = 30,
+    Maximum = 300,
+    DisplayMethod = "Round",
+    Precision = 0,
+    Callback = function(val)
+        RADAR_RANGE = val
+    end
+})
+
+local SecRadarInfo = TabRadar:Section({})
+SecRadarInfo:Header({ Name = WMacLib:Gradient("Cara Baca Radar", Color3.fromRGB(150, 150, 255), Color3.fromRGB(100, 200, 255)) })
+SecRadarInfo:Label({ Name = "🟢 Titik Hijau = Kamu sendiri" })
+SecRadarInfo:Label({ Name = "🔴 Titik Merah = Killer (besar)" })
+SecRadarInfo:Label({ Name = "🔵 Titik Biru = Survivor (kecil)" })
+SecRadarInfo:Label({ Name = "Radar mengikuti arah kamera kamu!" })
+
+end -- [End TabRadar]
 
 -- ==============================================================================
 -- TAB 3: PENGATURAN & TEMA
