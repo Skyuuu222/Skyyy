@@ -1964,8 +1964,7 @@ local function trigger_instant_escape()
             if webhookNotifyEscape then
                 send_discord_webhook(
                     "ESCAPED!",
-                    "**" .. (LocalPlayer.DisplayName or LocalPlayer.Name) .. "** berhasil **ESCAPE** dari match!
-XP & reward sedang diproses server.",
+                    "**" .. (LocalPlayer.DisplayName or LocalPlayer.Name) .. "** berhasil **ESCAPE** dari match! XP & reward sedang diproses server.",
                     "57f287"
                 )
             end
