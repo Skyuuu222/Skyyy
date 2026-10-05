@@ -79,6 +79,42 @@ local espGenEnabled = false
 local start_esp_gen, stop_esp_gen, start_esp_generator, stop_esp_generator
 
 -- ==============================================================================
+-- KENDALI LOG
+-- ==============================================================================
+-- Semua output diagnostik yang terlalu panjang goes through log() dan
+-- DILETAKAN secara default, supaya console Roblox tidak dipenuhi
+-- baris yang tidak perlu.
+--
+-- Set SKY_DEBUG = true di konsol kalau mau melihat semua detail:
+--     SKY_DEBUG = true
+-- Kalau belum di-set ulang, ketik SKY_DEBUG = false untuk mematikan lagi.
+--
+-- Notifikasi lewat Window:Notify() TIDAK terpengaruh switch ini,
+-- jadi user tetap selalu melihat feedback utama dari setiap fitur.
+-- ==============================================================================
+-- Dua variabel ini sengaja dibuat global (tanpa local) supaya bisa diubah
+-- dari konsol kapan saja: SKY_DEBUG = true / SKY_LOG_BUFFER = ""
+SKY_DEBUG = false
+
+-- Buffer log, supaya bisa disalin dari UI tanpa harus buka console.
+-- Hanya 400 baris terakhir yang disimpan supaya tidak makan memory.
+SKY_LOG_BUFFER = ""
+
+local function log(msg, ...)
+    if not SKY_DEBUG then return end
+    local ok, text = pcall(string.format, tostring(msg), ...)
+    local line = ok and text or tostring(msg)
+    print("[Sky] " .. line)
+
+    SKY_LOG_BUFFER = SKY_LOG_BUFFER .. line .. "\n"
+    local _, count = SKY_LOG_BUFFER:gsub("\n", "")
+    if count > 400 then
+        local cut = SKY_LOG_BUFFER:find("\n", SKY_LOG_BUFFER:find("\n") + 1)
+        if cut then SKY_LOG_BUFFER = SKY_LOG_BUFFER:sub(cut + 1) end
+    end
+end
+
+-- ==============================================================================
 -- HELPER UTILITIES
 -- ==============================================================================
 local function find_player(name)
@@ -2404,13 +2440,12 @@ local function collect_exit_zones()
     local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
     local myPos = (hrp and hrp.Position) or origin
 
-    -- Diagnostik: arah mana yang dianggap "keluar" dan seberapa panjang lorongnya.
+    -- Diagnostik arah keluar. Hanya muncul kalau SKY_DEBUG = true.
     if dir then
-        print("[AutoEscape] Arah keluar  :",
-            math.floor(dir.X * 100) / 100 .. ", 0, " .. math.floor(dir.Z * 100) / 100,
-            "| lorong:", math.floor(corridorLen or 0), "stud")
+        log("[AutoEscape] arah keluar: %.2f, 0, %.2f | lorong: %d stud",
+            dir.X, dir.Z, math.floor(corridorLen or 0))
     else
-        print("[AutoEscape] PERINGATAN: arah keluar tidak bisa ditentukan dari gerbang!")
+        log("[AutoEscape] arah keluar tidak bisa ditentukan dari gerbang")
     end
 
     -- Kandidat TERAKHIR (paling kuat): bagian garis finish.
@@ -2835,9 +2870,9 @@ function trigger_instant_escape()
     local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
     if not hrp then return false, "Karakter tidak ditemukan!" end
 
-    -- Penanda versi. Kalau baris ini tidak muncul di console kamu,
-    -- berarti yang sedang dijalankan adalah file LAMA (copy lama).
-    print("[AutoEscape] ===== VERSI 3: DETEKSI GARIS FINISH (Fininshline) =====")
+    -- Penanda versi ini hanya muncul kalau SKY_DEBUG = true,
+    -- supaya tidak mengganggu console.
+    log("[AutoEscape] VERSI 3: deteksi garis finish (Fininshline)")
 
     _isEscaping = true
     task.spawn(function()
@@ -2906,19 +2941,20 @@ function trigger_instant_escape()
 
         if zone then
             local zp = zone.part and zone.part.Position or zone.point
-            print("[AutoEscape] Zona keluar :", zone.part and zone.part:GetFullName() or "(titik lorong)")
-            print("[AutoEscape] Alasan      :", zone.why)
+            log("[AutoEscape] zona keluar : %s",
+                zone.part and zone.part:GetFullName() or "(titik lorong)")
+            log("[AutoEscape] alasan      : %s", tostring(zone.why))
             if zp then
-                print("[AutoEscape] Pos zona    :",
-                    math.floor(zp.X) .. ", " .. math.floor(zp.Y) .. ", " .. math.floor(zp.Z))
+                log("[AutoEscape] pos zona    : %d, %d, %d",
+                    math.floor(zp.X), math.floor(zp.Y), math.floor(zp.Z))
             end
         else
-            print("[AutoEscape] PERINGATAN: zona keluar tidak ditemukan!")
+            log("[AutoEscape] zona keluar tidak ditemukan")
         end
         if anchorCF then
             local ap = anchorCF.Position
-            print("[AutoEscape] Anchor      :",
-                math.floor(ap.X) .. ", " .. math.floor(ap.Y) .. ", " .. math.floor(ap.Z))
+            log("[AutoEscape] anchor      : %d, %d, %d",
+                math.floor(ap.X), math.floor(ap.Y), math.floor(ap.Z))
         end
 
         -- ======================================================================
@@ -2987,10 +3023,10 @@ function trigger_instant_escape()
             end
             leverMain = bestLever
             if leverMain then
-                print("[AutoEscape] Lever     :", leverMain:GetFullName(),
-                    "| jarak dari zona:", math.floor(bestDist), "stud")
+                log("[AutoEscape] lever       : %s | jarak %d stud",
+                    leverMain:GetFullName(), math.floor(bestDist))
             else
-                print("[AutoEscape] PERINGATAN: tidak ada ExitLever ditemukan!")
+                log("[AutoEscape] ExitLever tidak ditemukan")
             end
         end
 
@@ -3004,7 +3040,7 @@ function trigger_instant_escape()
                 task.wait(0.08)
                 if escaped then break end
             end
-            print("[AutoEscape] Tuas ditekan, gerbang seharusnya terbuka.")
+            log("[AutoEscape] tuas ditekan, gerbang seharusnya terbuka")
         end
 
         -- ======================================================================
@@ -3124,9 +3160,8 @@ function trigger_instant_escape()
         end
         noclipOff()
 
-        print("[AutoEscape] Selesai. escaped =", escaped,
-            "| menyeberang =", crossed,
-            "| tunggu:", waited * 0.1, "detik")
+        log("[AutoEscape] selesai. escaped = %s | menyeberang = %s | tunggu %.1f detik",
+            tostring(escaped), tostring(crossed), waited * 0.1)
         task.wait(0.2)
 
         -- [LANGKAH 4] Fire semua remote reward EXP/Screw/etc
@@ -3201,15 +3236,17 @@ function trigger_instant_escape()
 
         local statusMsg
         if escaped then
-            statusMsg = "✅ ESCAPED! Karakter langsung dipindahkan ke lobby oleh game."
+            statusMsg = "ESCAPED! Karakter langsung dipindahkan ke lobby oleh game."
         elseif escapeProcessed then
-            statusMsg = "✅ Escape diproses! EXP & Screws bertambah."
+            statusMsg = "Escape diproses! EXP & Screws bertambah."
         else
-            statusMsg = "⚠️ Zona disentuh tapi server belum memproses. Coba ulangi."
+            statusMsg = "Zona disentuh tapi server belum memproses. Coba ulangi."
         end
-        print("[AutoEscape]", statusMsg)
+        -- Hasil akhir tetap dicetak karena ini yang paling penting.
+        -- Detail diagnostik lain sudah disembunyikan lewat SKY_DEBUG.
+        print("[Escape] " .. statusMsg)
         safe_notify({
-            Title = "Auto Escape",
+            Title = escaped and "Escape Berhasil" or "Auto Escape",
             Description = statusMsg,
             Lifetime = 6
         })
@@ -4186,13 +4223,9 @@ local function agen_tick()
         autoGenHitCount       = autoGenHitCount + 1
         agen_press(spaceObj)
 
-        -- Feedback console (F9)
-        pcall(function()
-            print(string.format(
-                "[AutoGen] PERFECT HIT! Jarum: %.1f° | Goal: %.1f° | Offset: %.1f° | Speed: %.2f°/f",
-                lineRot, goalRot, offset, speed
-            ))
-        end)
+        -- Feedback console, hanya kalau SKY_DEBUG = true
+        log("[AutoGen] PERFECT HIT! Jarum: %.1f | Goal: %.1f | Offset: %.1f | Speed: %.2f",
+            lineRot, goalRot, offset, speed)
     end
 end
 
@@ -4399,9 +4432,9 @@ local function execute_perfect_parry(killerModel, killerName, reason, dist)
         end)
     end
 
-    pcall(function()
-        print(string.format("[AutoParry] PERFECT PARRY! Killer: %s | Jarak: %.1f studs | %s", tostring(killerName), dist or 0, reason))
-    end)
+    -- Hanya tampil kalau SKY_DEBUG = true, karena ini bisa sangat sering.
+    log("[AutoParry] PERFECT PARRY! Killer: %s | Jarak: %.1f studs | %s",
+        tostring(killerName), dist or 0, reason)
 
     -- Fallback: reset isParrying setelah PARRY_COOLDOWN detik
     -- (event parryResult akan reset lebih cepat jika server merespons)
@@ -6967,6 +7000,49 @@ SecTheme:Dropdown({
 local SecWin = TabConfig:Section({})
 SecWin:Header({ Name = WMacLib:Gradient("Jendela & Kontrol", Color3.fromRGB(255, 160, 60), Color3.fromRGB(255, 80, 120)) })
 
+-- Toggle log diagnostik.
+-- Matikan = console bersih. Nyalakan = semua detail fitur tampil lagi,
+-- berguna kalau ada fitur yang tidak bekerja dan perlu diperiksa.
+SecWin:Toggle({
+    Name = "Log Detail (Debug)",
+    Default = false,
+    Callback = function(enabled)
+        SKY_DEBUG = enabled
+        Window:Notify({
+            Title = "Log Detail",
+            Description = enabled
+                and "Log detail ON. Semua output diagnostik akan muncul di console (F9)."
+                or "Log detail OFF. Console hanya menampilkan hasil akhir.",
+            Lifetime = 3
+        })
+    end
+})
+
+-- Salin log ke clipboard.
+-- Kalau ada fitur yang bermasalah, user bisa nyalakan Log Detail,
+-- pakai fitur, lalu tekan tombol ini dan paste hasilnya ke chat.
+SecWin:Button({
+    Name = "Salin Log Terakhir",
+    Callback = function()
+        if not SKY_DEBUG then
+            Window:Notify({
+                Title = "Log Kosong",
+                Description = "Nyalakan Log Detail (Debug) dulu supaya ada yang bisa disalin.",
+                Lifetime = 3
+            })
+            return
+        end
+        pcall(function()
+            setclipboard(SKY_LOG_BUFFER)
+        end)
+        Window:Notify({
+            Title = "Log Disalin",
+            Description = "Log sudah masuk clipboard, siap di-paste.",
+            Lifetime = 3
+        })
+    end
+})
+
 -- Watermark & FPS
 local watermark
 pcall(function()
@@ -7027,13 +7103,16 @@ SecWin:Keybind({
     end
 })
 
+-- Welcome. Notifikasi dibuat singkat supaya tidak intrusive,
+-- karena user tinggal melihat UI-nya untuk tahu fitur apa saja.
 Window:Notify({
-    Title = "Sky Hub • Violence District",
-    Description = "Semua 8 Tab & Fitur Ultimate Berhasil Dimuat!",
-    Lifetime = 5
+    Title = "Sky Hub siap",
+    Description = "Tekan RightControl untuk buka / tutup menu.",
+    Lifetime = 4
 })
 
-print("[OK] Sky Hub (Violence District - 8 Tabs) berhasil dijalankan!")
+-- Hanya muncul kalau SKY_DEBUG = true
+log("Sky Hub (Violence District - 8 Tabs) berhasil dijalankan")
 end -- [End TabConfig]
 
 
@@ -7048,3 +7127,18 @@ start_esp_generator = start_esp_gen
 stop_esp_generator = stop_esp_gen
 infcharges_start = infinite_charges_start
 infcharges_stop = infinite_charges_stop
+
+-- Ekspor ke environment executor supaya bisa diakses dari konsol.
+-- Contoh: SKY_DEBUG = true   -> nyalakan log detail
+--         SKY_DEBUG = false  -> matikan lagi
+--         cetakLog()         -> tampilkan log yang tersimpan di clipboard
+pcall(function()
+    local env = (getgenv and getgenv()) or _G
+    env.SKY_DEBUG = SKY_DEBUG
+    env.SKY_LOG_BUFFER = SKY_LOG_BUFFER
+    env.SKY = {
+        setDebug = function(v) SKY_DEBUG = v end,
+        getLog   = function() return SKY_LOG_BUFFER end,
+        clearLog = function() SKY_LOG_BUFFER = "" end,
+    }
+end)
