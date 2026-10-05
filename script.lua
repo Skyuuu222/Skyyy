@@ -1614,94 +1614,155 @@ local function infinite_charges_stop()
 end
 
 -- ==============================================================================
--- MODUL 11: ESP EXIT GATE
+-- MODUL 11: ESP EXIT GATE (LEVER SAJA)
 -- ==============================================================================
 local espGateEnabled = false
 local espGateConns = {}
-local espGateHighlights = {}
+local espGateObjects = {}
 
-local GATE_NAMES = {
-    "ExitGate", "Exit Gate", "Gate", "exit_gate", "ExitDoor", "Exit",
-    "EscapeGate", "EscapeDoor", "EndGate",
-}
-
-local function gate_name_match(name)
-    local ln = name:lower()
-    for _, n in ipairs(GATE_NAMES) do
-        if ln:find(n:lower()) then return true end
+local function is_exit_gate_lever(obj)
+    if not obj then return false end
+    local name = obj.Name:lower()
+    
+    -- Cocokkan nama part / model lever
+    if name == "lever" or name:find("gatelever") or name:find("exitlever") 
+        or name:find("gate_lever") or name:find("exit_lever") 
+        or name == "gateswitch" or name == "exitswitch" then
+        return true
+    end
+    
+    -- Cek ProximityPrompt spesifik membuka gerbang / lever
+    local prompt = obj:FindFirstChildOfClass("ProximityPrompt")
+    if prompt then
+        local act = tostring(prompt.ActionText or ""):lower()
+        local objTxt = tostring(prompt.ObjectText or ""):lower()
+        if act:find("open") or act:find("escape") or act:find("lever") or objTxt:find("lever") or objTxt:find("gate") then
+            return true
+        end
     end
     return false
 end
 
-local function esp_gate_make_highlight(obj)
-    local existing = espGateHighlights[obj]
-    if existing and existing.Parent then return end
-    local hl = Instance.new("SelectionBox")
-    hl.Color3 = Color3.fromRGB(255, 220, 0)
-    hl.LineThickness = 0.08
-    hl.SurfaceTransparency = 0.7
-    hl.SurfaceColor3 = Color3.fromRGB(255, 220, 0)
+local function esp_gate_get_part(obj)
+    if obj:IsA("BasePart") then return obj end
+    if obj:IsA("Model") then
+        return obj:FindFirstChild("Lever") or obj:FindFirstChild("Switch") 
+            or obj:FindFirstChild("Handle") or obj.PrimaryPart 
+            or obj:FindFirstChildWhichIsA("BasePart")
+    end
+    return nil
+end
+
+local function esp_gate_add_tag(obj)
+    if espGateObjects[obj] then return end
+    local part = esp_gate_get_part(obj)
+    if not part then return end
+
+    local hl = Instance.new("Highlight")
+    hl.Name = "ESP_GateLeverHL"
     hl.Adornee = obj
-    hl.Parent = CoreGui
-    -- Label jarak
-    local billBg = Instance.new("BillboardGui")
-    billBg.Name = "GateESPLabel_" .. obj.Name
-    billBg.AlwaysOnTop = true
-    billBg.Size = UDim2.fromOffset(140, 38)
-    billBg.StudsOffset = Vector3.new(0, 6, 0)
-    billBg.Adornee = obj:IsA("Model") and (obj:FindFirstChild("PrimaryPart") or obj:FindFirstChildWhichIsA("BasePart")) or obj
-    billBg.Parent = CoreGui
+    hl.FillColor = Color3.fromRGB(255, 215, 0)
+    hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+    hl.FillTransparency = 0.55
+    hl.OutlineTransparency = 0
+    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    pcall(function()
+        if gethui then hl.Parent = gethui() else hl.Parent = CoreGui end
+    end)
+    if not hl.Parent then hl.Parent = CoreGui end
+
+    local bbg = Instance.new("BillboardGui")
+    bbg.Name = "ESP_GateLeverTag"
+    bbg.Adornee = part
+    bbg.AlwaysOnTop = true
+    bbg.Size = UDim2.fromOffset(190, 26)
+    bbg.StudsOffset = Vector3.new(0, 3.5, 0)
+    bbg.ResetOnSpawn = false
+
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.fromScale(1, 1)
     lbl.BackgroundTransparency = 1
-    lbl.Text = "🚪 EXIT GATE"
-    lbl.TextColor3 = Color3.fromRGB(255, 220, 0)
-    lbl.TextScaled = true
     lbl.Font = Enum.Font.GothamBold
-    lbl.Parent = billBg
-    espGateHighlights[obj] = hl
-    table.insert(espGateConns, billBg)
+    lbl.TextSize = 13
+    lbl.TextColor3 = Color3.fromRGB(255, 220, 50)
+    lbl.TextStrokeColor3 = Color3.new(0, 0, 0)
+    lbl.TextStrokeTransparency = 0
+    lbl.Text = "[🚪 LEVER EXIT GATE]"
+    lbl.Parent = bbg
+
+    pcall(function()
+        if gethui then bbg.Parent = gethui() else bbg.Parent = CoreGui end
+    end)
+    if not bbg.Parent then bbg.Parent = CoreGui end
+
+    espGateObjects[obj] = { hl = hl, bbg = bbg, lbl = lbl, part = part }
+end
+
+local function esp_gate_update()
+    local cam = workspace.CurrentCamera
+    local camPos = cam and cam.CFrame and cam.CFrame.Position or Vector3.new(0, 0, 0)
+
+    for obj, data in pairs(espGateObjects) do
+        if not obj.Parent or not data.part.Parent then
+            if data.hl then pcall(function() data.hl:Destroy() end) end
+            if data.bbg then pcall(function() data.bbg:Destroy() end) end
+            espGateObjects[obj] = nil
+        else
+            local dist = math.floor((camPos - data.part.Position).Magnitude)
+            data.lbl.Text = string.format("[🚪 LEVER GATE] (%dm)", dist)
+        end
+    end
 end
 
 local function esp_gate_scan()
     for _, obj in ipairs(workspace:GetDescendants()) do
-        if gate_name_match(obj.Name) then
-            pcall(esp_gate_make_highlight, obj)
+        if is_exit_gate_lever(obj) then
+            pcall(esp_gate_add_tag, obj)
         end
     end
 end
 
 local function start_esp_gate()
-    for _, c in ipairs(espGateConns) do pcall(function() c:Destroy() end) end
+    for _, c in ipairs(espGateConns) do pcall(function() c:Disconnect() end) end
     espGateConns = {}
-    for obj, hl in pairs(espGateHighlights) do
-        pcall(function() hl:Destroy() end)
+    for obj, data in pairs(espGateObjects) do
+        if data.hl then pcall(function() data.hl:Destroy() end) end
+        if data.bbg then pcall(function() data.bbg:Destroy() end) end
     end
-    espGateHighlights = {}
+    espGateObjects = {}
+
     esp_gate_scan()
-    -- Re-scan saat object baru ditambah
+
+    -- Listener saat map baru load
     local scanConn = workspace.DescendantAdded:Connect(function(desc)
         if not espGateEnabled then return end
-        if gate_name_match(desc.Name) then
-            pcall(esp_gate_make_highlight, desc)
+        if is_exit_gate_lever(desc) then
+            task.wait(0.1)
+            pcall(esp_gate_add_tag, desc)
         end
     end)
     table.insert(espGateConns, scanConn)
+
+    -- Loop update jarak real-time
+    local updateConn = RunService.RenderStepped:Connect(function()
+        if not espGateEnabled then return end
+        pcall(esp_gate_update)
+    end)
+    table.insert(espGateConns, updateConn)
 end
 
 local function stop_esp_gate()
     for _, c in ipairs(espGateConns) do
         if typeof(c) == "RBXScriptConnection" then
             pcall(function() c:Disconnect() end)
-        elseif typeof(c) == "Instance" then
-            pcall(function() c:Destroy() end)
         end
     end
     espGateConns = {}
-    for _, hl in pairs(espGateHighlights) do
-        pcall(function() hl:Destroy() end)
+    for obj, data in pairs(espGateObjects) do
+        if data.hl then pcall(function() data.hl:Destroy() end) end
+        if data.bbg then pcall(function() data.bbg:Destroy() end) end
     end
-    espGateHighlights = {}
+    espGateObjects = {}
 end
 
 
@@ -1759,11 +1820,35 @@ local Window = WMacLib:Window({
 
 local tabGroup = Window:TabGroup()
 
+-- Sembunyikan window WMacLib saat awal agar Welcome Screen tampil sendirian
+local wmacGui = nil
+local function findWmacGui()
+    pcall(function()
+        local containers = {}
+        if gethui then table.insert(containers, gethui()) end
+        if CoreGui then table.insert(containers, CoreGui) end
+        if LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui") then
+            table.insert(containers, LocalPlayer.PlayerGui)
+        end
+
+        for _, container in ipairs(containers) do
+            for _, sg in ipairs(container:GetChildren()) do
+                if sg:IsA("ScreenGui") and not _preExistingGuis[sg] and sg.Name ~= "SkyHubWelcome" then
+                    wmacGui = sg
+                    return
+                end
+            end
+        end
+    end)
+end
+findWmacGui()
+if wmacGui then wmacGui.Enabled = false end
+pcall(function() Window:SetState(false) end)
+
 -- ==============================================================================
--- WELCOME SCREEN KEREN & MODERN
+-- WELCOME SCREEN KEREN & MODERN (TAMPIL PERTAMA SEBELUM MENU UTAMA)
 -- ==============================================================================
 task.spawn(function()
-    task.wait(0.5)
     pcall(function()
         local SG = Instance.new("ScreenGui")
         SG.Name = "SkyHubWelcome"
@@ -1900,9 +1985,9 @@ task.spawn(function()
         local features = {
             { icon = "⚡", label = "Auto Gen" },
             { icon = "🛡️", label = "Auto Parry" },
+            { icon = "❤️", label = "Auto Heal" },
             { icon = "👁️", label = "ESP" },
             { icon = "💀", label = "Killer Radar" },
-            { icon = "✨", label = "More+" },
         }
         local rowFrame = Instance.new("Frame")
         rowFrame.AnchorPoint = Vector2.new(0.5, 0)
@@ -1969,7 +2054,7 @@ task.spawn(function()
 
         -- Animate bar fill
         local TweenService = game:GetService("TweenService")
-        local fillTween = TweenService:Create(bar, TweenInfo.new(2.5, Enum.EasingStyle.Sine), {
+        local fillTween = TweenService:Create(bar, TweenInfo.new(2.4, Enum.EasingStyle.Sine), {
             Size = UDim2.fromScale(1, 1)
         })
         fillTween:Play()
@@ -1983,13 +2068,13 @@ task.spawn(function()
         })
         fadeIn:Play()
 
-        -- Wait then fade out
-        task.wait(3.2)
-        local fadeOut = TweenService:Create(card, TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+        -- Wait loading to complete then fade out
+        task.wait(2.7)
+        local fadeOut = TweenService:Create(card, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
             Position = UDim2.new(0.5, 0, 0.45, 0),
             BackgroundTransparency = 1,
         })
-        local overlayOut = TweenService:Create(overlay, TweenInfo.new(0.6), {
+        local overlayOut = TweenService:Create(overlay, TweenInfo.new(0.5), {
             BackgroundTransparency = 1,
         })
         fadeOut:Play()
@@ -1997,36 +2082,13 @@ task.spawn(function()
         fadeOut.Completed:Wait()
         pcall(function() blur:Destroy() end)
         pcall(function() SG:Destroy() end)
+
+        -- SELESAI WELCOME -> TAMPILKAN MENU UTAMA WMACLIB DENGAN MULUS
+        findWmacGui()
+        if wmacGui then wmacGui.Enabled = true end
+        pcall(function() Window:SetState(true) end)
     end)
 end)
-
-
--- Cari ScreenGui yang dibuat oleh WMacLib (yang tidak ada di snapshot sebelumnya)
-local wmacGui = nil
-task.wait() -- tunggu satu frame agar WMacLib selesai setup GUI-nya
-local function findWmacGui()
-    pcall(function()
-        local containers = {}
-        if gethui then table.insert(containers, gethui()) end
-        if CoreGui then table.insert(containers, CoreGui) end
-        if LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui") then
-            table.insert(containers, LocalPlayer.PlayerGui)
-        end
-
-        for _, container in ipairs(containers) do
-            for _, sg in ipairs(container:GetChildren()) do
-                if sg:IsA("ScreenGui") and not _preExistingGuis[sg] then
-                    wmacGui = sg
-                    return
-                end
-            end
-        end
-    end)
-end
-findWmacGui()
-if not wmacGui then
-    task.delay(1, findWmacGui)
-end
 
 -- State Variabel Form
 local swap_target = ""
@@ -2933,42 +2995,10 @@ SecUtil:Toggle({
     end
 })
 
--- SEKSI 4: AUTO HEAL
-local SecAutoHealPlayer = TabPlayer:Section({})
-SecAutoHealPlayer:Header({ Name = WMacLib:Gradient("Auto Heal (Pemulihan Otomatis)", Color3.fromRGB(80, 255, 120), Color3.fromRGB(60, 200, 80)) })
-
-SecAutoHealPlayer:Toggle({
-    Name = "Aktifkan Auto Heal",
-    Default = false,
-    Callback = function(enabled)
-        autoHealEnabled = enabled
-        if enabled then
-            autoheal_start()
-            Window:Notify({ Title = "Auto Heal", Description = "Otomatis memulihkan HP!", Lifetime = 3 })
-        else
-            autoheal_stop()
-            Window:Notify({ Title = "Auto Heal", Description = "Auto Heal dimatikan.", Lifetime = 2 })
-        end
-    end
-})
-
-SecAutoHealPlayer:Slider({
-    Name = "Interval Heal (x10 = detik)",
-    Default = 15,
-    Minimum = 5,
-    Maximum = 60,
-    DisplayMethod = "Round",
-    Precision = 0,
-    Callback = function(val)
-        HEAL_COOLDOWN = val / 10
-    end
-})
-
 end -- [End TabPlayer]
 
 -- ==============================================================================
-
--- TAB 2: MAIN (AUTO PERFECT GENERATOR)
+-- TAB 2: MAIN (AUTO GENERATOR, AUTO PARRY, AUTO HEAL)
 -- ==============================================================================
 local TabMain = tabGroup:Tab({ Name = "Main", Image = "lucide/zap" })
 
@@ -3005,6 +3035,37 @@ SecAutoParry:Toggle({
             autoparry_stop()
             Window:Notify({ Title = "Auto Parry", Description = "Auto Parry dimatikan.", Lifetime = 2 })
         end
+    end
+})
+
+-- SEKSI 3: AUTO HEAL
+local SecAutoHealMain = TabMain:Section({})
+SecAutoHealMain:Header({ Name = WMacLib:Gradient("Auto Heal (Pemulihan Otomatis)", Color3.fromRGB(80, 255, 120), Color3.fromRGB(60, 200, 80)) })
+
+SecAutoHealMain:Toggle({
+    Name = "Aktifkan Auto Heal",
+    Default = false,
+    Callback = function(enabled)
+        autoHealEnabled = enabled
+        if enabled then
+            autoheal_start()
+            Window:Notify({ Title = "Auto Heal", Description = "Otomatis memulihkan HP!", Lifetime = 3 })
+        else
+            autoheal_stop()
+            Window:Notify({ Title = "Auto Heal", Description = "Auto Heal dimatikan.", Lifetime = 2 })
+        end
+    end
+})
+
+SecAutoHealMain:Slider({
+    Name = "Interval Heal (x10 = detik)",
+    Default = 15,
+    Minimum = 5,
+    Maximum = 60,
+    DisplayMethod = "Round",
+    Precision = 0,
+    Callback = function(val)
+        HEAL_COOLDOWN = val / 10
     end
 })
 
