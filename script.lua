@@ -1943,35 +1943,31 @@ function infinite_charges_apply()
         if is_local_player_killer and is_local_player_killer() then return end
         local char = LocalPlayer and LocalPlayer.Character
         if not char or char:FindFirstChild("Weapon") then return end
-        -- Patch semua tool di karakter
-        for _, obj in ipairs(char:GetChildren()) do
-            if obj:IsA("Tool") then
-                -- Set charges/uses ke max via attributes
-                local chargeKeys = {"Charges","charges","Uses","uses","MaxCharges","maxCharges",
-                                    "Ammo","ammo","CurrentUses","currentUses"}
-                for _, k in ipairs(chargeKeys) do
-                    local v = obj:GetAttribute(k)
-                    if type(v) == "number" and v >= 0 then
-                        obj:SetAttribute(k, math.max(v, 999))
-                    end
-                end
-                -- Patch via getgc scan table
-                if getgc then
-                    pcall(function()
-                        for _, t in pairs(getgc(true)) do
-                            if type(t) == "table" then
-                                local hasCharges = rawget(t,"charges") or rawget(t,"Charges")
-                                    or rawget(t,"uses") or rawget(t,"Uses")
-                                if hasCharges and type(hasCharges) == "number" and hasCharges >= 0 then
-                                    for _, k in ipairs(chargeKeys) do
-                                        if rawget(t, k) and type(rawget(t,k)) == "number" then
-                                            t[k] = math.max(rawget(t,k), 999)
-                                        end
-                                    end
-                                end
-                            end
+
+        local containers = { char }
+        local bp = LocalPlayer:FindFirstChildOfClass("Backpack")
+        if bp then table.insert(containers, bp) end
+
+        for _, container in ipairs(containers) do
+            for _, obj in ipairs(container:GetChildren()) do
+                if obj:IsA("Tool") then
+                    -- 1. Berikan Max Charges & Ammo (999) agar tidak pernah habis
+                    local maxChargeKeys = { "Charges", "charges", "MaxCharges", "maxCharges", "Ammo", "ammo", "RemainingCharges", "Durability" }
+                    for _, k in ipairs(maxChargeKeys) do
+                        local v = obj:GetAttribute(k)
+                        if type(v) == "number" and v >= 0 then
+                            obj:SetAttribute(k, math.max(v, 999))
                         end
-                    end)
+                    end
+
+                    -- 2. Kunci Uses / CurrentUses ke 0 (AGAR ITEM TIDAK DIHAPUS OLEH GAME KARENA OVER-USED!)
+                    local usedKeys = { "Uses", "uses", "CurrentUses", "currentUses", "UsedCount", "UseCount" }
+                    for _, k in ipairs(usedKeys) do
+                        local v = obj:GetAttribute(k)
+                        if type(v) == "number" then
+                            obj:SetAttribute(k, 0)
+                        end
+                    end
                 end
             end
         end
@@ -2451,39 +2447,92 @@ function trigger_instant_escape()
             end
         end
 
-        -- [LANGKAH 7] Fire reward remotes sekali lagi setelah teleport (double confirm)
-        task.wait(0.3)
-        fire_escape_reward_remotes()
+        -- [LANGKAH 7] Simulasi berjalan keluar gerbang agar trigger Touched game aktif normal
+        -- (Server butuh waktu beberapa detik untuk memproses escape & menambahkan EXP)
+        local escapeProcessed = false
+        local connList = {}
 
-        -- [LANGKAH 8] Balik ke Lobby
-        task.wait(0.5)
-        local inLobby = teleport_to_lobby(hrp)
-        if not inLobby then
-            -- Fallback: angkat ke udara agar aman dari killer
-            pcall(function() hrp.CFrame = CFrame.new(hrp.Position.X, 500, hrp.Position.Z) end)
+        -- Snapshot stat sebelum escape untuk deteksi perubahan
+        local expBefore   = tonumber(tostring(LocalPlayer:GetAttribute("ExpinRound") or LocalPlayer:GetAttribute("EXP") or LocalPlayer:GetAttribute("Exp") or 0)) or 0
+        local screwBefore = tonumber(tostring(LocalPlayer:GetAttribute("Screws") or LocalPlayer:GetAttribute("screw") or LocalPlayer:GetAttribute("Screw") or 0)) or 0
+
+        -- Listen ke berbagai nama attribute EXP/reward yang mungkin dipakai game
+        local attrNames = {
+            "ExpinRound", "EXP", "Exp", "XP", "experience",
+            "Screws", "screw", "Screw", "Sin", "Gears", "Reward"
+        }
+        for _, attrName in ipairs(attrNames) do
+            pcall(function()
+                local conn = LocalPlayer:GetAttributeChangedSignal(attrName):Connect(function()
+                    escapeProcessed = true
+                end)
+                table.insert(connList, conn)
+            end)
         end
-
-        -- Tembak remote leave / lobby jika ada
+        -- Listen di Character juga
         pcall(function()
-            for _, r in ipairs(ReplicatedStorage:GetDescendants()) do
-                if r:IsA("RemoteEvent") or r:IsA("RemoteFunction") then
-                    local rn = r.Name:lower()
-                    if rn:find("lobby") or rn:find("return") or rn:find("leave") or rn:find("spectate") then
-                        if r:IsA("RemoteEvent") then
-                            pcall(function() r:FireServer() end)
-                        else
-                            pcall(function() r:InvokeServer() end)
-                        end
-                    end
+            if char and char.Parent then
+                for _, attrName in ipairs(attrNames) do
+                    pcall(function()
+                        local conn = char:GetAttributeChangedSignal(attrName):Connect(function()
+                            escapeProcessed = true
+                        end)
+                        table.insert(connList, conn)
+                    end)
                 end
             end
         end)
 
-        -- [LANGKAH 9] Kirim Discord Webhook per-match summary
+        -- Dorong karakter menembus zona escape + poll perubahan stat selama 4 detik
+        for step = 1, 40 do
+            if escapeProcessed then break end
+            pcall(function()
+                if hrp and hrp.Parent then
+                    hrp.AssemblyLinearVelocity = hrp.CFrame.LookVector * 20
+                end
+            end)
+            -- Cek manual perubahan stat setiap 0.5 detik
+            if step % 5 == 0 then
+                pcall(function()
+                    local expNow   = tonumber(tostring(LocalPlayer:GetAttribute("ExpinRound") or LocalPlayer:GetAttribute("EXP") or LocalPlayer:GetAttribute("Exp") or 0)) or 0
+                    local screwNow = tonumber(tostring(LocalPlayer:GetAttribute("Screws") or LocalPlayer:GetAttribute("screw") or LocalPlayer:GetAttribute("Screw") or 0)) or 0
+                    if expNow ~= expBefore or screwNow ~= screwBefore then
+                        escapeProcessed = true
+                    end
+                end)
+            end
+            task.wait(0.1)
+        end
+
+        -- Bersihkan semua listener
+        for _, conn in ipairs(connList) do
+            pcall(function() conn:Disconnect() end)
+        end
+
+        -- [LANGKAH 8] Fire reward remotes sekali lagi untuk memastikan server mencatat hasil match
+        task.wait(0.5)
+        fire_escape_reward_remotes()
+
+        -- [LANGKAH 9] Tunggu server game memproses reward sebelum fallback ke Lobby
+        -- Tunggu 4 detik total agar server benar-benar mencatat EXP + Screws + Sin ke akun
+        task.wait(4.0)
+
+        -- Cek apakah player masih di map match atau sudah otomatis dipindahkan oleh game
+        local inLobby = false
         pcall(function()
-            if webhookNotifyEscape then
-                task.delay(2, function()  -- Delay 2s agar stat sudah diupdate
-                    send_match_summary_webhook("ESCAPED")
+            local currChar = LocalPlayer and LocalPlayer.Character
+            local currHrp = currChar and (currChar:FindFirstChild("HumanoidRootPart") or currChar:FindFirstChild("Torso"))
+            if currHrp then
+                inLobby = teleport_to_lobby(currHrp)
+            end
+        end)
+
+        -- [LANGKAH 10] Kirim Discord Webhook per-match summary setelah stat EXP & Screws bertambah
+        -- Webhook delay 2 detik lagi agar stat sudah terupdate sempurna
+        pcall(function()
+            if webhookNotifyEscape and webhookUrl and webhookUrl ~= "" then
+                task.delay(2.0, function()
+                    pcall(function() send_match_summary_webhook("ESCAPED") end)
                 end)
             end
         end)
@@ -2494,11 +2543,12 @@ function trigger_instant_escape()
         _autoEscapeStarted = false
         stop_auto_escape()
 
+        local statusMsg = escapeProcessed
+            and "Escape sukses! EXP & Screws berhasil diproses server."
+            or  "Escape selesai. Periksa F9 jika EXP belum bertambah."
         Window:Notify({
             Title = "✅ Escape Sukses!",
-            Description = inLobby
-                and "Berhasil Escape & kembali ke Lobby! EXP/Reward sedang diproses."
-                or "Bypass Escape selesai! Reward diproses oleh server.",
+            Description = statusMsg,
             Lifetime = 5
         })
     end)
@@ -2669,7 +2719,7 @@ local function start_match_tracking()
     _matchStartTime = tick()
 end
 
--- Kirim MATCH SUMMARY per-match (setelah escape/match end)
+-- Kirim MATCH SUMMARY per-match (setelah escape/match end) - Sky Hub Premium Style
 function send_match_summary_webhook(resultStatus)
     if not webhookUrl or webhookUrl == "" or not webhookUrl:find("discord.com/api/webhooks") then
         return false, "Webhook URL belum diisi!"
@@ -2678,77 +2728,123 @@ function send_match_summary_webhook(resultStatus)
     local req = (syn and syn.request) or (http and http.request) or http_request or request or (fluxus and fluxus.request)
     if not req then return false, "HTTP request tidak didukung!" end
 
+    -- Delay sedikit agar stat sempat terupdate sebelum snapshot diambil
+    task.wait(1.5)
+
     local currStats = get_player_stats()
     local baseStats = _matchStartStats or currStats
     _totalMatchCount = _totalMatchCount + 1
 
     -- Durasi match
-    local matchDuration = tick() - (_matchStartTime or tick())
-    local matchTimeStr = math.floor(matchDuration) .. "s"
+    local matchDuration = math.max(0, tick() - (_matchStartTime or tick()))
+    local mins = math.floor(matchDuration / 60)
+    local secs = math.floor(matchDuration % 60)
+    local matchTimeStr = mins > 0 and string.format("%dm %ds", mins, secs) or string.format("%ds", secs)
 
     -- Nama player (masked)
-    local pName = LocalPlayer.Name or "?"
-    local pDisplay = LocalPlayer.DisplayName or pName
+    local pName = tostring(LocalPlayer and LocalPlayer.Name or "?")
+    local pDisplay = tostring(LocalPlayer and LocalPlayer.DisplayName or pName)
     local maskedName = mask_username(pDisplay)
 
     -- Server ID (masked)
     local sId = tostring(game.JobId or "")
-    local maskedSId = sId ~= "" and (sId:sub(1, 4) .. "***") or "??"
-
-    -- Status icon
-    local statusStr = resultStatus == "ESCAPED" and "🟢 Escaped" or "🔵 " .. (resultStatus or "Auto Farm Mode")
+    local maskedSId = sId ~= "" and (sId:sub(1, 6) .. "...") or "Private"
 
     -- Delta fields
-    local levelField = fmt_delta(baseStats.level, currStats.level)
-    local sinField = fmt_delta(baseStats.sin, currStats.sin)
-    local expField = fmt_delta(baseStats.exp, currStats.exp)
-    local screwField = fmt_delta(baseStats.screw, currStats.screw)
-    local gearField = fmt_delta(baseStats.gold, currStats.gold)
+    local expDelta   = (tonumber(tostring(currStats.exp))   or 0) - (tonumber(tostring(baseStats.exp))   or 0)
+    local screwDelta = (tonumber(tostring(currStats.screw)) or 0) - (tonumber(tostring(baseStats.screw)) or 0)
+    local sinDelta   = (tonumber(tostring(currStats.sin))   or 0) - (tonumber(tostring(baseStats.sin))   or 0)
+    local gearDelta  = (tonumber(tostring(currStats.gold))  or 0) - (tonumber(tostring(baseStats.gold))  or 0)
+    local lvlDelta   = (tonumber(tostring(currStats.level)) or 0) - (tonumber(tostring(baseStats.level)) or 0)
 
-    -- Match total (apa yang didapat)
-    local sinDelta = (tonumber(tostring(currStats.sin)) or 0) - (tonumber(tostring(baseStats.sin)) or 0)
-    local matchTotalStr = "0 currency + " .. math.max(0, sinDelta) .. " Sin"
+    local function fmtStat(val, delta)
+        local s = tostring(val)
+        if delta > 0 then return s .. " **(+" .. delta .. ")**"
+        elseif delta < 0 then return s .. " **(" .. delta .. ")**"
+        else return s .. " *(±0)*" end
+    end
+
+    local expField   = fmtStat(tonumber(tostring(currStats.exp))   or 0, expDelta)
+    local screwField = fmtStat(tonumber(tostring(currStats.screw)) or 0, screwDelta)
+    local sinField   = fmtStat(tonumber(tostring(currStats.sin))   or 0, sinDelta)
+    local gearField  = fmtStat(tonumber(tostring(currStats.gold))  or 0, gearDelta)
+    local levelField = fmtStat(tonumber(tostring(currStats.level)) or 0, lvlDelta)
+
+    -- Status & Color
+    local resultEmoji, resultLabel, embedColor
+    if resultStatus == "ESCAPED" then
+        resultEmoji = "🟢"
+        resultLabel = "Escaped!"
+        embedColor  = 0x2ECC71  -- hijau
+    elseif resultStatus == "Match Ended" then
+        resultEmoji = "🔵"
+        resultLabel = "Match Ended"
+        embedColor  = 0x3498DB  -- biru
+    elseif resultStatus == "Manual" then
+        resultEmoji = "📋"
+        resultLabel = "Manual Report"
+        embedColor  = 0x9B59B6  -- ungu
+    else
+        resultEmoji = "⚡"
+        resultLabel = tostring(resultStatus or "Auto Farm")
+        embedColor  = 0xF39C12  -- oranye
+    end
+
+    -- Hitung total gain
+    local gainParts = {}
+    if expDelta   > 0 then table.insert(gainParts, "+" .. expDelta   .. " EXP")   end
+    if screwDelta > 0 then table.insert(gainParts, "+" .. screwDelta .. " Screw")  end
+    if sinDelta   > 0 then table.insert(gainParts, "+" .. sinDelta   .. " Sin")    end
+    if gearDelta  > 0 then table.insert(gainParts, "+" .. gearDelta  .. " Gear")   end
+    local gainStr = #gainParts > 0 and table.concat(gainParts, "  •  ") or "Tidak ada perubahan stats"
 
     -- Reset baseline untuk match berikutnya
     _matchStartStats = currStats
-    _matchStartTime = tick()
+    _matchStartTime  = tick()
 
-    local resultEmoji = resultStatus == "ESCAPED" and "🟢" or (resultStatus == "Manual" and "🔵" or "🟡")
-    local resultLabel = resultStatus == "ESCAPED" and "Escaped" or (resultStatus == "Manual" and "Manual Report" or tostring(resultStatus))
+    local descLine = string.format(
+        "%s **%s** — Match #**%d** | Server: `%s`",
+        resultEmoji, resultLabel, _totalMatchCount, maskedSId
+    )
 
     local payload = {
-        username = "Sky Hub Notifier",
-        avatar_url = "https://cdn-icons-png.flaticon.com/512/3135/3135715.png",
+        username   = "Sky Hub Notifier",
+        avatar_url = "https://cdn-icons-png.flaticon.com/512/6295/6295417.png",
         embeds = {
             {
-                title = "📊 Sky Hub • Match Summary",
-                color = 0x5865F2,  -- Discord Blurple (Sky Hub style)
-                description = string.format("%s **%s** | Server: `%s` | Match #%d",
-                    resultEmoji, resultLabel, maskedSId, _totalMatchCount),
+                title       = "🏆 Sky Hub  •  Match Summary",
+                color       = embedColor,
+                description = descLine .. "\n\n> " .. gainStr,
+                thumbnail   = { url = "https://cdn-icons-png.flaticon.com/512/3135/3135715.png" },
                 fields = {
-                    { name = "👤 Player", value = maskedName, inline = true },
-                    { name = "🎮 Map", value = currStats.map or "Unknown Map", inline = true },
-                    { name = "⏱️ Durasi", value = matchTimeStr, inline = true },
-                    { name = "🆙 Level", value = levelField, inline = true },
-                    { name = "⭐ EXP", value = expField, inline = true },
-                    { name = "🔩 Screws", value = screwField, inline = true },
-                    { name = "⚙️ Gears", value = gearField, inline = true },
-                    { name = "☠️ Sin", value = sinField, inline = true },
-                    { name = "🏆 Match Total", value = tostring(_totalMatchCount), inline = true },
+                    -- Row 1: identitas
+                    { name = "👤  Player",      value = maskedName,                           inline = true },
+                    { name = "🗺️  Map",          value = currStats.map or "Unknown Map",       inline = true },
+                    { name = "⏱️  Durasi",       value = matchTimeStr,                         inline = true },
+                    -- Row 2: currency utama
+                    { name = "⭐  EXP",          value = expField,                             inline = true },
+                    { name = "🔩  Screws",       value = screwField,                           inline = true },
+                    { name = "☠️  Sin",          value = sinField,                             inline = true },
+                    -- Row 3: sekunder
+                    { name = "⚙️  Gears",        value = gearField,                            inline = true },
+                    { name = "🆙  Level",        value = levelField,                           inline = true },
+                    { name = "🎮  Total Match",  value = "Match ke-**" .. _totalMatchCount .. "**", inline = true },
                 },
                 footer = {
-                    text = "Sky Hub Auto Farming • Violence District • " .. os.date("%d/%m/%Y %H:%M:%S")
-                }
+                    text     = "Sky Hub  •  Violence District Ultimate Script",
+                    icon_url = "https://cdn-icons-png.flaticon.com/512/3135/3135715.png"
+                },
+                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
             }
         }
     }
 
     local ok, res = pcall(function()
         return req({
-            Url = webhookUrl,
-            Method = "POST",
+            Url     = webhookUrl,
+            Method  = "POST",
             Headers = { ["Content-Type"] = "application/json" },
-            Body = HttpService:JSONEncode(payload)
+            Body    = HttpService:JSONEncode(payload)
         })
     end)
     return ok, res
@@ -2862,21 +2958,39 @@ local ok_wm, WMacLib = pcall(function()
     local src = game:HttpGet("https://raw.githubusercontent.com/Wicikk/WMacLib/main/WMacLib.lua")
     -- Patch rbxassetid://0 agar tidak memicu error asset not found di console engine
     src = src:gsub('"rbxassetid://0"', '""'):gsub("'rbxassetid://0'", "''")
-    -- [FIX DRAGGING BUG] WMacLib asli menimpa dragInput dengan MouseMovement, sehingga input == dragInput gagal saat MouseButton1 dilepas.
-    -- Patch ini menjamin dragging_ langsung false begitu MouseButton1 / Touch dilepas pada Window maupun Slider!
+    -- [FIX DRAGGING BUG] Limit gsub ke 1 penggantian pertama saja (limit=1) agar tidak merusak fungsi lain!
+    -- WMacLib asli menimpa dragInput dengan MouseMovement, sehingga input == dragInput gagal saat MouseButton1 dilepas.
     src = src:gsub(
         "if input == dragInput then",
-        "if input == dragInput or input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then"
+        "if input == dragInput or input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then",
+        1  -- <-- limit: HANYA ganti kemunculan PERTAMA saja!
     )
     local fn, err = loadstring(src)
     if not fn then
         error(tostring(err or "Failed to compile WMacLib"))
     end
-    return fn()
+    local result = fn()
+    if type(result) ~= "table" then
+        error("WMacLib tidak mengembalikan tabel yang valid")
+    end
+    return result
 end)
 if not ok_wm or not WMacLib then
     warn("[Sky Hub] Gagal memuat WMacLib: " .. tostring(WMacLib))
-    return
+    -- Jangan return! Coba load dari URL alternatif
+    ok_wm, WMacLib = pcall(function()
+        local src2 = game:HttpGet("https://raw.githubusercontent.com/Wicikk/WMacLib/refs/heads/main/WMacLib.lua")
+        src2 = src2:gsub('"rbxassetid://0"', '""'):gsub("'rbxassetid://0'", "''")
+        local fn2, err2 = loadstring(src2)
+        if not fn2 then error(tostring(err2 or "Compile error")) end
+        local r2 = fn2()
+        if type(r2) ~= "table" then error("Return bukan table") end
+        return r2
+    end)
+    if not ok_wm or not WMacLib then
+        warn("[Sky Hub] WMacLib gagal total, script dihentikan.")
+        return
+    end
 end
 
 local Window = WMacLib:Window({
@@ -3859,13 +3973,19 @@ end
 -- Watcher: jika peran berubah menjadi Killer di tengah permainan, bersihkan tracking segera
 pcall(function()
     local function onRoleChanged()
-        if is_local_player_killer and is_local_player_killer() then
-            cleanup_animator_tracks()
-            isParrying = false
-        end
+        pcall(function()
+            if is_local_player_killer and is_local_player_killer() then
+                cleanup_animator_tracks()
+                isParrying = false
+            end
+        end)
     end
-    LocalPlayer:GetAttributeChangedSignal("CurrentRole"):Connect(onRoleChanged)
-    LocalPlayer:GetAttributeChangedSignal("Role"):Connect(onRoleChanged)
+    -- Wrap setiap GetAttributeChangedSignal di pcall tersendiri agar tidak crash jika atribut tidak ada
+    pcall(function() LocalPlayer:GetAttributeChangedSignal("CurrentRole"):Connect(onRoleChanged) end)
+    pcall(function() LocalPlayer:GetAttributeChangedSignal("Role"):Connect(onRoleChanged) end)
+    pcall(function() LocalPlayer:GetAttributeChangedSignal("Team"):Connect(onRoleChanged) end)
+    pcall(function() LocalPlayer:GetAttributeChangedSignal("Side"):Connect(onRoleChanged) end)
+    pcall(function() LocalPlayer:GetAttributeChangedSignal("CharacterType"):Connect(onRoleChanged) end)
 end)
 
 
