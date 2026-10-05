@@ -1189,7 +1189,14 @@ pcall(function()
 end)
 
 local ok_wm, WMacLib = pcall(function()
-    return loadstring(game:HttpGet("https://raw.githubusercontent.com/Wicikk/WMacLib/main/WMacLib.lua"))()
+    local src = game:HttpGet("https://raw.githubusercontent.com/Wicikk/WMacLib/main/WMacLib.lua")
+    -- [FIX DRAGGING BUG] WMacLib asli menimpa dragInput dengan MouseMovement, sehingga input == dragInput gagal saat MouseButton1 dilepas.
+    -- Patch ini menjamin dragging_ langsung false begitu MouseButton1 / Touch dilepas pada Window maupun Slider!
+    src = src:gsub(
+        "if input == dragInput then",
+        "if input == dragInput or input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then"
+    )
+    return loadstring(src)()
 end)
 if not ok_wm or not WMacLib then
     warn("[Sky Hub] Gagal memuat WMacLib: " .. tostring(WMacLib))
@@ -1454,27 +1461,25 @@ local function agen_tick()
     local lineRot = currentRot % 360
     if lineRot < 0 then lineRot = lineRot + 360 end
 
-    -- TARGET ZONA PUTIH (DEAD CENTER = Goal + 108.5°):
-    -- Zona putih berada di rentang 105.0° s/d 112.0°. Titik tengah presisi adalah 108.5°!
-    local centerTarget = (goalRot + 108.5 + autoGenOffset) % 360
+    -- TARGET ZONA PUTIH (100% DEAD CENTER PRESISI):
+    -- Titik tengah zona putih Violence District adalah tepat pada Goal.Rotation + 108.3°
+    local centerTarget = (goalRot + 108.3) % 360
     if centerTarget < 0 then centerTarget = centerTarget + 360 end
 
     local speed = math.abs(rawSpeed)
 
-    -- Jarak sudut bertanda dari posisi jarum ke titik tengah zona putih
+    -- Jarak sudut bertanda dari jarum ke titik tengah target (0.0° = pas di tengah)
     local signedDist = (centerTarget - lineRot) % 360
     if signedDist > 180 then signedDist = signedDist - 360 end
 
-    -- AMBANG TEMBAK DEAD CENTER:
-    -- Tembak HANYA saat jarum berada paling dekat dengan titik tengah (menghilangkan early trigger 5° yang membuat tidak pas di tengah)
-    local hitThreshold = math.max(speed * 0.85, 1.8)
+    -- Trigger optimal saat jarum berada tepat di tengah (memperhitungkan latency input 0.5 frame)
     local shouldHit = false
     if rawSpeed >= 0 then
-        -- Jarum berputar searah jarum jam (CW)
-        shouldHit = (signedDist <= hitThreshold and signedDist >= - (speed * 0.4))
+        -- Searah jarum jam (Normal CW): tembak saat signedDist <= speed * 0.65 dan belum melewati tengah
+        shouldHit = (signedDist <= (speed * 0.65) and signedDist >= - (speed * 0.35))
     else
-        -- Jarum berputar berlawanan jarum jam (CCW)
-        shouldHit = (signedDist >= -hitThreshold and signedDist <= (speed * 0.4))
+        -- Berlawanan jarum jam (Kutukan/Hex CCW)
+        shouldHit = (signedDist >= - (speed * 0.65) and signedDist <= (speed * 0.35))
     end
 
     if shouldHit then
@@ -2162,28 +2167,11 @@ SecAutoGen:Toggle({
         autoGenEnabled = enabled
         if enabled then
             agen_start()
-            Window:Notify({ Title = "Auto Perfect Gen", Description = "Aktif! Otomatis Perfect di semua generator.", Lifetime = 3 })
+            Window:Notify({ Title = "Auto Perfect Gen", Description = "Aktif! Otomatis Perfect di tengah zona putih.", Lifetime = 3 })
         else
             agen_stop()
             Window:Notify({ Title = "Auto Perfect Gen", Description = "Dimatikan.", Lifetime = 2 })
         end
-    end
-})
-
-SecAutoGen:Slider({
-    Name = "Kalibrasi Offset Jarum (Derajat)",
-    Default = 0,
-    Minimum = -10,
-    Maximum = 10,
-    DisplayMethod = "Round",
-    Precision = 1,
-    Callback = function(val)
-        autoGenOffset = tonumber(val) or 0
-        Window:Notify({
-            Title = "Auto Perfect Gen",
-            Description = string.format("Offset: %+.1f° (geser + jika terlalu ke kiri, - jika terlalu ke kanan)", autoGenOffset),
-            Lifetime = 2
-        })
     end
 })
 
@@ -2332,7 +2320,7 @@ local tofUpdateConn        = nil
 local tofResultEvent       = nil
 local tofFireEvent         = nil
 local tofGunTable          = nil
-local tofRepatchInterval   = 0.5
+local tofRepatchInterval   = 0.25
 local tofMetaHooked        = false
 local tofOrigNamecall      = nil
 local tofOrigRenvRandom    = nil
@@ -2791,64 +2779,17 @@ SecTOF:Toggle({
             tof_start()
             Window:Notify({
                 Title = "⚡ Twist of Fate ULTRA",
-                Description = "Anti Miss aktif! 5 layer proteksi: random hook, result block, fireserver intercept, GC patch, & attribute patch.",
-                Lifetime = 5
+                Description = "Anti Miss aktif! Proteksi otomatis 5 layer berjalan.",
+                Lifetime = 3
             })
         else
             tof_stop()
             Window:Notify({
                 Title = "Twist of Fate",
                 Description = "Anti Miss dimatikan.",
-                Lifetime = 3
+                Lifetime = 2
             })
         end
-    end
-})
-
--- Slider: seberapa sering re-patch dilakukan
-SecTOF:Slider({
-    Name = "Agresivitas Patch (detik)",
-    Default = 5,
-    Minimum = 1,
-    Maximum = 10,
-    DisplayMethod = "Round",
-    Precision = 0,
-    Callback = function(val)
-        -- Nilai 1 = paling agresif (re-patch tiap 0.1 detik)
-        -- Nilai 10 = paling ringan (re-patch tiap 2 detik)
-        tofRepatchInterval = val == 1 and 0.1
-            or val == 2 and 0.2
-            or val == 3 and 0.3
-            or val == 4 and 0.5
-            or val == 5 and 0.5
-            or val == 6 and 0.75
-            or val == 7 and 1.0
-            or val == 8 and 1.5
-            or val == 9 and 2.0
-            or 2.0
-        Window:Notify({
-            Title = "TOF Agresivitas",
-            Description = string.format("Re-patch setiap %.1f detik. Semakin kecil = semakin kuat.", tofRepatchInterval),
-            Lifetime = 3
-        })
-    end
-})
-
-SecTOF:Button({
-    Name = "Force Patch Sekarang",
-    Callback = function()
-        if not tofAntiMissEnabled then
-            Window:Notify({ Title = "TOF", Description = "Aktifkan Anti Miss terlebih dahulu!", Lifetime = 3 })
-            return
-        end
-        tof_get_remotes()
-        tof_patch_gun_table()
-        tof_patch_character_attrs()
-        Window:Notify({
-            Title = "⚡ Force Patch",
-            Description = "Semua layer di-patch ulang! GC scan + attribute reset.",
-            Lifetime = 3
-        })
     end
 })
 end -- [End TabCombat]
