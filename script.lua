@@ -18,6 +18,65 @@ if not LocalPlayer then
     if not LocalPlayer then LocalPlayer = Players.LocalPlayer end
 end
 
+-- [FORWARD DECLARATIONS FOR SCOPING]
+-- Menjamin jumlah variabel lokal di main function jauh di bawah batas 200 Lua (LUAI_MAXVARS)
+
+-- Modul 1, 2, 3, 4 (Avatar & Outfit Studio)
+local apply_avatar_swap, reset_avatar_swap
+local apply_outfit
+local add_accessory, remove_accessory, remove_all_accessories, update_accessory_transform
+local apply_korblox, remove_korblox, apply_headless, remove_headless
+
+-- Modul 6 (Auto Heal)
+local autoHealEnabled = false
+local autoheal_start, autoheal_stop, start_auto_heal, stop_auto_heal
+
+-- Modul 7 (Killer Radar)
+local killerRadarEnabled = false
+local RADAR_RANGE = 350
+local killerradar_start, killerradar_stop, check_is_killer, radar_is_killer
+
+-- Modul 8 & 9 (Fullbright & Custom FOV)
+local fullbrightEnabled = false
+local fullbright_start, fullbright_stop
+local customFovEnabled = false
+local customFovValue = 70
+local fov_start, fov_stop, fov_apply
+
+-- Modul 10 (Infinite Item Charges)
+local infiniteChargesEnabled = false
+local infinite_charges_start, infinite_charges_stop, infinite_charges_apply, infcharges_start, infcharges_stop
+
+-- Modul 11 (ESP Exit Gate)
+local espGateEnabled = false
+local start_esp_gate, stop_esp_gate, is_exit_gate_lever, esp_gate_get_part
+
+-- Modul 12 (Auto Escape & Bypass)
+local autoEscapeEnabled = false
+local start_auto_escape, stop_auto_escape, trigger_instant_escape, teleport_to_lobby
+
+-- Modul 13 (Discord Webhook Notifier)
+local webhookUrl = ""
+local webhookNotifyEscape = true
+local webhookNotifyMatch = true
+local send_discord_webhook, start_webhook_live_monitor, stop_webhook_live_monitor, get_player_stats
+
+-- Modul Auto Perfect Generator
+local autoGenEnabled = false
+local agen_start, agen_stop, start_auto_generator, stop_auto_generator
+
+-- Modul 4.5 (Auto Parry)
+local autoParryEnabled = false
+local autoparry_start, autoparry_stop, start_auto_parry, stop_auto_parry
+
+-- Modul 4.6 (Twist of Fate - Anti Miss)
+local tofAntiMissEnabled = false
+local tof_start, tof_stop
+
+-- Modul ESP Generator
+local espGenEnabled = false
+local start_esp_gen, stop_esp_gen, start_esp_generator, stop_esp_generator
+
 -- ==============================================================================
 -- HELPER UTILITIES
 -- ==============================================================================
@@ -71,6 +130,7 @@ local function hex_to_color(hex)
 end
 
 -- ==============================================================================
+do
 -- MODUL 1: AVATAR CLONER & SWAP (Client Mirroring)
 -- ==============================================================================
 shared.AvatarSwapState = shared.AvatarSwapState or { targets = {} }
@@ -306,7 +366,7 @@ local function dress_mirror(player, char, desc, st, modelPrefix)
     return true, "Avatar berhasil dipasang pada " .. player.Name
 end
 
-local function apply_avatar_swap(targetName, avatarUsername)
+function apply_avatar_swap(targetName, avatarUsername)
     local target = find_player(targetName)
     if not target then return false, "Pemain '" .. tostring(targetName) .. "' tidak ditemukan di server!" end
 
@@ -327,7 +387,7 @@ local function apply_avatar_swap(targetName, avatarUsername)
     return true, "Avatar '" .. avatarUsername .. "' dipasang ke " .. target.Name
 end
 
-local function reset_avatar_swap(targetName)
+function reset_avatar_swap(targetName)
     if not targetName or targetName == "" then
         for p in pairs(SwapState.targets) do cleanup_swap(p) end
         return true, "Semua avatar pemain dikembalikan normal."
@@ -468,7 +528,7 @@ local function get_outfit_desc(username, outfitNameOrId)
     return desc, outfitName
 end
 
-local function apply_outfit(username, outfitQuery, targetName)
+function apply_outfit(username, outfitQuery, targetName)
     local target = find_player(targetName)
     if not target then return false, "Target tidak ditemukan di server" end
 
@@ -513,7 +573,7 @@ local function apply_acc_scale(part, scale)
     end
 end
 
-local function add_accessory(targetName, assetId, offX, offY, offZ, scaleVal)
+function add_accessory(targetName, assetId, offX, offY, offZ, scaleVal)
     local target = find_player(targetName)
     if not target then return false, "Pemain tidak ditemukan" end
 
@@ -631,7 +691,7 @@ local function add_accessory(targetName, assetId, offX, offY, offZ, scaleVal)
     return true, "Aksesoris ID " .. cleanId .. " dipasang ke " .. target.Name
 end
 
-local function update_accessory_transform(targetName, assetId, offX, offY, offZ, scaleVal)
+function update_accessory_transform(targetName, assetId, offX, offY, offZ, scaleVal)
     local target = find_player(targetName)
     if not target then return false, "Pemain tidak ditemukan" end
 
@@ -695,7 +755,7 @@ local function update_accessory_transform(targetName, assetId, offX, offY, offZ,
     end
 end
 
-local function remove_accessory(targetName, assetId)
+function remove_accessory(targetName, assetId)
     local target = find_player(targetName)
     if not target then return false, "Pemain tidak ditemukan" end
 
@@ -794,7 +854,7 @@ local function remove_accessory(targetName, assetId)
     end
 end
 
-local function remove_all_accessories(targetName)
+function remove_all_accessories(targetName)
     local target = find_player(targetName)
     if not target then return false, "Pemain tidak ditemukan" end
 
@@ -845,7 +905,7 @@ shared.HeadlessActive = shared.HeadlessActive or {}
 shared.HeadlessConns = shared.HeadlessConns or {}
 shared.HeadlessHBConns = shared.HeadlessHBConns or {}
 
-local function remove_korblox(targetName)
+function remove_korblox(targetName)
     local target = find_player(targetName)
     if not target then return false, "Pemain tidak ditemukan" end
 
@@ -914,7 +974,7 @@ local function remove_korblox(targetName)
     return true, "Korblox dinonaktifkan untuk " .. target.Name
 end
 
-local function apply_korblox(targetName, assetId, yOffset)
+function apply_korblox(targetName, assetId, yOffset)
     local target = find_player(targetName)
     if not target then return false, "Pemain tidak ditemukan" end
     local char = target.Character
@@ -1070,7 +1130,7 @@ local function make_headless_swap(target)
     end
 end
 
-local function apply_headless(targetName)
+function apply_headless(targetName)
     local target = find_player(targetName)
     if not target then return false, "Target tidak ditemukan" end
 
@@ -1121,7 +1181,7 @@ local function apply_headless(targetName)
     return true, "Headless diterapkan pada " .. target.Name
 end
 
-local function remove_headless(targetName)
+function remove_headless(targetName)
     local target = find_player(targetName)
     if not target then return false, "Target tidak ditemukan" end
 
@@ -1179,15 +1239,19 @@ end
 
 
 
+
+end
+
 -- ==============================================================================
+do
 -- MODUL 6: AUTO HEAL
 -- ==============================================================================
-local autoHealEnabled = false
+autoHealEnabled = false
 local autoHealConn = nil
 local autoHealCooldown = 0
 local HEAL_COOLDOWN = 1.5  -- detik antara heal
 
-local function autoheal_start()
+function autoheal_start()
     if autoHealConn then return end
     autoHealConn = RunService.Heartbeat:Connect(function(dt)
         if not autoHealEnabled then return end
@@ -1233,7 +1297,7 @@ local function autoheal_start()
     end)
 end
 
-local function autoheal_stop()
+function autoheal_stop()
     if autoHealConn then
         autoHealConn:Disconnect()
         autoHealConn = nil
@@ -1241,14 +1305,18 @@ local function autoheal_stop()
     autoHealCooldown = 0
 end
 
+
+end
+
 -- ==============================================================================
+do
 -- MODUL 7: KILLER RADAR (HUD Mini-Map)
 -- ==============================================================================
-local killerRadarEnabled = false
+killerRadarEnabled = false
 local killerRadarGui = nil
 local killerRadarConn = nil
 local RADAR_SIZE = 160
-local RADAR_RANGE = 350  -- stud radius
+RADAR_RANGE = 350  -- stud radius
 
 local function radar_create_gui()
     if killerRadarGui then pcall(function() killerRadarGui:Destroy() end) end
@@ -1356,7 +1424,7 @@ end
 -- ==============================================================================
 -- UNIVERSAL KILLER & SURVIVOR DETECTION HELPER
 -- ==============================================================================
-local function check_is_killer(char, player)
+function check_is_killer(char, player)
     if not char then return false end
     if not player then
         pcall(function() player = Players:GetPlayerFromCharacter(char) end)
@@ -1411,7 +1479,7 @@ local function check_is_killer(char, player)
 end
 
 -- Backward compatibility alias
-local function radar_is_killer(player, char)
+function radar_is_killer(player, char)
     return check_is_killer(char, player)
 end
 
@@ -1566,7 +1634,7 @@ end
 
 local killerRadarCircle = nil
 
-local function killerradar_start()
+function killerradar_start()
     if killerRadarGui then pcall(function() killerRadarGui:Destroy() end) end
     local sg, rc = radar_create_gui()
     killerRadarCircle = rc
@@ -1577,16 +1645,20 @@ local function killerradar_start()
     end)
 end
 
-local function killerradar_stop()
+function killerradar_stop()
     if killerRadarConn then killerRadarConn:Disconnect(); killerRadarConn = nil end
     if killerRadarGui then pcall(function() killerRadarGui:Destroy() end); killerRadarGui = nil end
     killerRadarCircle = nil
 end
 
+
+end
+
 -- ==============================================================================
+do
 -- MODUL 8: FULLBRIGHT + NO FOG
 -- ==============================================================================
-local fullbrightEnabled = false
+fullbrightEnabled = false
 local fullbrightConn = nil
 local origAmbient = nil
 local origOutdoor = nil
@@ -1630,7 +1702,7 @@ local function fullbright_restore()
     end)
 end
 
-local function fullbright_start()
+function fullbright_start()
     pcall(function()
         local lighting = game:GetService("Lighting")
         origAmbient = lighting.Ambient
@@ -1647,7 +1719,7 @@ local function fullbright_start()
     end)
 end
 
-local function fullbright_stop()
+function fullbright_stop()
     if fullbrightConn then fullbrightConn:Disconnect(); fullbrightConn = nil end
     fullbright_restore()
 end
@@ -1655,18 +1727,18 @@ end
 -- ==============================================================================
 -- MODUL 9: CUSTOM FOV (Field of View)
 -- ==============================================================================
-local customFovEnabled = false
-local customFovValue = 70
+customFovEnabled = false
+customFovValue = 70
 local origFov = nil
 local fovConn = nil
 
-local function fov_apply(val)
+function fov_apply(val)
     pcall(function()
         workspace.CurrentCamera.FieldOfView = val
     end)
 end
 
-local function fov_start(val)
+function fov_start(val)
     customFovValue = val or customFovValue
     pcall(function() origFov = workspace.CurrentCamera.FieldOfView end)
     fov_apply(customFovValue)
@@ -1681,20 +1753,24 @@ local function fov_start(val)
     end)
 end
 
-local function fov_stop()
+function fov_stop()
     if fovConn then fovConn:Disconnect(); fovConn = nil end
     pcall(function()
         if origFov then workspace.CurrentCamera.FieldOfView = origFov end
     end)
 end
 
+
+end
+
 -- ==============================================================================
+do
 -- MODUL 10: INFINITE ITEM CHARGES
 -- ==============================================================================
-local infiniteChargesEnabled = false
+infiniteChargesEnabled = false
 local infiniteChargesConn = nil
 
-local function infinite_charges_apply()
+function infinite_charges_apply()
     pcall(function()
         local char = LocalPlayer and LocalPlayer.Character
         if not char then return end
@@ -1733,7 +1809,7 @@ local function infinite_charges_apply()
     end)
 end
 
-local function infinite_charges_start()
+function infinite_charges_start()
     infinite_charges_apply()
     if infiniteChargesConn then infiniteChargesConn:Disconnect() end
     local t = 0
@@ -1747,18 +1823,22 @@ local function infinite_charges_start()
     end)
 end
 
-local function infinite_charges_stop()
+function infinite_charges_stop()
     if infiniteChargesConn then infiniteChargesConn:Disconnect(); infiniteChargesConn = nil end
 end
 
+
+end
+
 -- ==============================================================================
+do
 -- MODUL 11: ESP EXIT GATE (LEVER SAJA)
 -- ==============================================================================
-local espGateEnabled = false
+espGateEnabled = false
 local espGateConns = {}
 local espGateObjects = {}
 
-local function is_exit_gate_lever(obj)
+function is_exit_gate_lever(obj)
     if not obj then return false end
     local name = obj.Name:lower()
     
@@ -1781,7 +1861,7 @@ local function is_exit_gate_lever(obj)
     return false
 end
 
-local function esp_gate_get_part(obj)
+function esp_gate_get_part(obj)
     if obj:IsA("BasePart") then return obj end
     if obj:IsA("Model") then
         return obj:FindFirstChild("Lever") or obj:FindFirstChild("Switch") 
@@ -1860,7 +1940,7 @@ local function esp_gate_scan()
     end
 end
 
-local function start_esp_gate()
+function start_esp_gate()
     for _, c in ipairs(espGateConns) do pcall(function() c:Disconnect() end) end
     espGateConns = {}
     for obj, data in pairs(espGateObjects) do
@@ -1889,7 +1969,7 @@ local function start_esp_gate()
     table.insert(espGateConns, updateConn)
 end
 
-local function stop_esp_gate()
+function stop_esp_gate()
     for _, c in ipairs(espGateConns) do
         if typeof(c) == "RBXScriptConnection" then
             pcall(function() c:Disconnect() end)
@@ -1906,7 +1986,7 @@ end
 -- ==============================================================================
 -- MODUL 12: AUTO ESCAPE & BYPASS (SURVIVOR WIN)
 -- ==============================================================================
-local autoEscapeEnabled = false
+autoEscapeEnabled = false
 local autoEscapeConn = nil
 
 local function find_escape_target()
@@ -1931,7 +2011,7 @@ local function find_escape_target()
 end
 
 -- Helper: Teleport ke Lobby / Waiting Room setelah Escape
-local function teleport_to_lobby(hrp)
+function teleport_to_lobby(hrp)
     if not hrp then return false end
     local lobbyTarget = nil
 
@@ -1979,7 +2059,7 @@ local function teleport_to_lobby(hrp)
 end
 
 -- BYPASS AUTO ESCAPE ENGINE (MULTI-LAYER, REAL WIN, DIRECT TO LOBBY)
-local function trigger_instant_escape()
+function trigger_instant_escape()
     local char = LocalPlayer and LocalPlayer.Character
     local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
     if not hrp then return false, "Karakter tidak ditemukan!" end
@@ -2136,7 +2216,7 @@ local function trigger_instant_escape()
     return true, "Memulai Bypass Escape otomatis..."
 end
 
-local function start_auto_escape()
+function start_auto_escape()
     if autoEscapeConn then autoEscapeConn:Disconnect() end
     autoEscapeConn = RunService.Heartbeat:Connect(function()
         if not autoEscapeEnabled then return end
@@ -2148,16 +2228,20 @@ local function start_auto_escape()
     end)
 end
 
-local function stop_auto_escape()
+function stop_auto_escape()
     if autoEscapeConn then autoEscapeConn:Disconnect(); autoEscapeConn = nil end
 end
 
+
+end
+
 -- ==============================================================================
+do
 -- MODUL 13: DISCORD WEBHOOK NOTIFIER
 -- ==============================================================================
-local webhookUrl = ""
-local webhookNotifyEscape = true
-local webhookNotifyMatch = true
+webhookUrl = ""
+webhookNotifyEscape = true
+webhookNotifyMatch = true
 
 -- Helper: scan leaderstats, attributes, dan values dari sebuah instance root
 local _statsRef = nil
@@ -2201,7 +2285,7 @@ local function _scan_stats_from(root)
 end
 
 -- Helper: ambil stats player (Level, EXP, Screw, Gold, Map)
-local function get_player_stats()
+function get_player_stats()
     local stats = {
         level = "?", exp = "?", screw = "?", gold = "?",
         hp = "?", map = "?", role = "?"
@@ -2253,7 +2337,7 @@ local function get_player_stats()
     return stats
 end
 
-local function send_discord_webhook(embedTitle, embedDesc, colorHex)
+function send_discord_webhook(embedTitle, embedDesc, colorHex)
     if not webhookUrl or webhookUrl == "" or not webhookUrl:find("discord.com/api/webhooks") then
         return false, "Webhook URL belum diisi atau tidak valid!"
     end
@@ -2304,7 +2388,7 @@ end
 local _webhookLiveConn = nil
 local _lastLiveStats = {}
 
-local function start_webhook_live_monitor()
+function start_webhook_live_monitor()
     if _webhookLiveConn then _webhookLiveConn:Disconnect() end
     _lastLiveStats = get_player_stats()
     local timer = 0
@@ -2342,10 +2426,13 @@ local function start_webhook_live_monitor()
     end)
 end
 
-local function stop_webhook_live_monitor()
+function stop_webhook_live_monitor()
     if _webhookLiveConn then _webhookLiveConn:Disconnect(); _webhookLiveConn = nil end
 end
 
+
+
+end
 
 -- ==============================================================================
 -- WMACLIB UI INITIALIZATION
@@ -2685,11 +2772,12 @@ local acc_id = "10159600649"
 local mod_target = ""
 
 -- ==============================================================================
+do
 -- MODUL AUTO PERFECT GENERATOR (SKILL CHECK AUTOMATION)
 -- ==============================================================================
 local PlayerGui       = LocalPlayer:WaitForChild("PlayerGui")
 
-local autoGenEnabled  = false
+autoGenEnabled = false
 local autoGenConn     = nil
 local autoGenHitCount = 0
 local autoGenOffset   = 0
@@ -2924,7 +3012,7 @@ local function agen_tick()
     end
 end
 
-local function agen_start()
+function agen_start()
     if autoGenConn then return end
     autoGenHitCount       = 0
     isMinigameActive      = false
@@ -2936,7 +3024,7 @@ local function agen_start()
     autoGenConn = RunService.RenderStepped:Connect(agen_tick)
 end
 
-local function agen_stop()
+function agen_stop()
     if autoGenConn then
         autoGenConn:Disconnect()
         autoGenConn = nil
@@ -2947,10 +3035,14 @@ local function agen_stop()
     lineMoveCount = 0
 end
 
+
+end
+
 -- ==============================================================================
+do
 -- MODUL 4.5: AUTO PARRY (PARRYING DAGGER)
 -- ==============================================================================
-local autoParryEnabled = false
+autoParryEnabled = false
 local autoParryConn    = nil
 local PARRY_DISTANCE   = 16.0
 local PARRY_COOLDOWN   = 3.5  -- Mengikuti cooldown resmi game (minimal 3.5 detik)
@@ -3250,7 +3342,7 @@ end
 
 local autoParryDescConn = nil
 
-local function autoparry_start()
+function autoparry_start()
     if autoParryConn then return end
     isParrying = false
     lastParryTick = 0
@@ -3279,7 +3371,7 @@ local function autoparry_start()
     end)
 end
 
-local function autoparry_stop()
+function autoparry_stop()
     if autoParryConn then
         autoParryConn:Disconnect()
         autoParryConn = nil
@@ -3290,6 +3382,9 @@ local function autoparry_stop()
     end
     isParrying = false
     cleanup_animator_tracks()
+end
+
+
 end
 
 -- ==============================================================================
@@ -3820,6 +3915,7 @@ local function update_crosshair()
 end
 
 -- ==============================================================================
+do
 -- MODUL 4.6: TWIST OF FATE - ANTI MISS (100% HIT CHANCE) [ULTRA MODE]
 -- ==============================================================================
 -- STRATEGI KOMPREHENSIF LINTAS ENVIRONMENT:
@@ -3829,7 +3925,7 @@ end
 --   [L4] getgc() scanner & patch tabel/upvalue di memori
 --   [L5] Attribute Character & Tool patch tiap Heartbeat
 -- ==============================================================================
-local tofAntiMissEnabled  = false
+tofAntiMissEnabled = false
 local tofUpdateConn        = nil
 local tofResultEvent       = nil
 local tofFireEvent         = nil
@@ -4109,7 +4205,7 @@ local function tof_patch_character_attrs()
     end)
 end
 
-local function tof_start()
+function tof_start()
     tof_get_remotes()
     tof_hook_namecall()         -- [L1] C-level __namecall intercept (Result & Fire)
     tof_hook_renv()             -- [L2] getrenv() math.random hook
@@ -4130,7 +4226,7 @@ local function tof_start()
     end)
 end
 
-local function tof_stop()
+function tof_stop()
     tof_unhook_namecall()
     tof_unhook_renv()
     if tofUpdateConn then
@@ -4138,6 +4234,9 @@ local function tof_stop()
         tofUpdateConn = nil
     end
     tofGunTable = nil
+end
+
+
 end
 
 -- ==============================================================================
@@ -4655,9 +4754,10 @@ local function stop_esp_player()
 end
 
 -- ==============================================================================
+do
 -- MODUL ESP GENERATOR
 -- ==============================================================================
-local espGenEnabled   = false
+espGenEnabled = false
 local espHighlight    = true   -- selalu aktif
 local espMaxDist      = math.huge -- tampilkan semua generator di map tanpa batas jarak
 
@@ -4832,7 +4932,7 @@ local function esp_scan()
     end
 end
 
-local function start_esp_gen()
+function start_esp_gen()
     if espConn then return end
     esp_scan()
     local scanTimer = 0
@@ -4878,12 +4978,15 @@ local function start_esp_gen()
     end)
 end
 
-local function stop_esp_gen()
+function stop_esp_gen()
     if espConn then
         espConn:Disconnect()
         espConn = nil
     end
     esp_hide_all()
+end
+
+
 end
 
 -- ==============================================================================
@@ -5695,3 +5798,15 @@ Window:Notify({
 print("[OK] Sky Hub (Violence District - 8 Tabs) berhasil dijalankan!")
 end -- [End TabConfig]
 
+
+-- Aliases
+start_auto_heal = autoheal_start
+stop_auto_heal = autoheal_stop
+start_auto_generator = agen_start
+stop_auto_generator = agen_stop
+start_auto_parry = autoparry_start
+stop_auto_parry = autoparry_stop
+start_esp_generator = start_esp_gen
+stop_esp_generator = stop_esp_gen
+infcharges_start = infinite_charges_start
+infcharges_stop = infinite_charges_stop
