@@ -1951,21 +1951,21 @@ function infinite_charges_apply()
         for _, container in ipairs(containers) do
             for _, obj in ipairs(container:GetChildren()) do
                 if obj:IsA("Tool") then
-                    -- 1. Berikan Max Charges & Ammo (999) agar tidak pernah habis
-                    local maxChargeKeys = { "Charges", "charges", "MaxCharges", "maxCharges", "Ammo", "ammo", "RemainingCharges", "Durability" }
-                    for _, k in ipairs(maxChargeKeys) do
-                        local v = obj:GetAttribute(k)
-                        if type(v) == "number" and v >= 0 then
-                            obj:SetAttribute(k, math.max(v, 999))
+                    -- 1. Kunci Uses / CurrentUses ke 0 (mencegah item dikonsumsi/dihapus server)
+                    local usedKeys = { "Uses", "uses", "CurrentUses", "currentUses", "UsedCount", "UseCount" }
+                    for _, k in ipairs(usedKeys) do
+                        if obj:GetAttribute(k) ~= nil then
+                            obj:SetAttribute(k, 0)
                         end
                     end
 
-                    -- 2. Kunci Uses / CurrentUses ke 0 (AGAR ITEM TIDAK DIHAPUS OLEH GAME KARENA OVER-USED!)
-                    local usedKeys = { "Uses", "uses", "CurrentUses", "currentUses", "UsedCount", "UseCount" }
-                    for _, k in ipairs(usedKeys) do
+                    -- 2. Pulihkan Charges & Ammo ke nilai maksimum aman (tidak 999 agar anti-cheat server tidak menghapus item)
+                    local maxChargeKeys = { "Charges", "charges", "Ammo", "ammo", "RemainingCharges", "Durability" }
+                    local maxVal = obj:GetAttribute("MaxCharges") or obj:GetAttribute("maxCharges") or obj:GetAttribute("MaxAmmo") or 10
+                    for _, k in ipairs(maxChargeKeys) do
                         local v = obj:GetAttribute(k)
-                        if type(v) == "number" then
-                            obj:SetAttribute(k, 0)
+                        if type(v) == "number" and v < maxVal then
+                            obj:SetAttribute(k, maxVal)
                         end
                     end
                 end
@@ -1984,6 +1984,20 @@ function infinite_charges_start()
         if t >= 0.5 then
             t = 0
             infinite_charges_apply()
+        end
+    end)
+
+    -- Proteksi instan saat respawn atau item baru masuk Backpack
+    pcall(function()
+        local bp = LocalPlayer:FindFirstChildOfClass("Backpack")
+        if bp and not bp:GetAttribute("_chargesHooked") then
+            bp:SetAttribute("_chargesHooked", true)
+            bp.ChildAdded:Connect(function(child)
+                if infiniteChargesEnabled and child:IsA("Tool") then
+                    task.wait(0.1)
+                    infinite_charges_apply()
+                end
+            end)
         end
     end)
 end
@@ -2310,17 +2324,28 @@ function trigger_instant_escape()
 
     _isEscaping = true
     task.spawn(function()
-        -- [LANGKAH 1] Kumpulkan semua Gate, ExitLever, dan Part Ujung Gerbang di Workspace
+        -- [LANGKAH 1] Kumpulkan semua Gate, ExitLever, dan part pintu di Workspace
         local gates = {}
         local exitLevers = {}
         local gateEnds = {}
+        local primaryLever = nil
+        local primaryLeverPart = nil
 
         for _, obj in ipairs(workspace:GetDescendants()) do
             local n = obj.Name:lower()
             if obj:IsA("Model") and (n == "gate" or n:find("exitgate") or n == "leftgate" or n == "rightgate") then
                 table.insert(gates, obj)
+                local el = obj:FindFirstChild("ExitLever")
+                if el and not primaryLever then
+                    primaryLever = el
+                    primaryLeverPart = el:FindFirstChild("Lever") or el:FindFirstChildWhichIsA("BasePart")
+                end
             elseif obj:IsA("Model") and (n == "exitlever" or n:find("exitlever")) then
                 table.insert(exitLevers, obj)
+                if not primaryLever then
+                    primaryLever = obj
+                    primaryLeverPart = obj:FindFirstChild("Lever") or obj:FindFirstChildWhichIsA("BasePart")
+                end
             elseif obj:IsA("BasePart") then
                 if n == "leftgate-end" or n == "rightgate-end" or n:find("gate-end")
                     or n:find("gate_end") or n == "escapezone" or n == "exitzone" or n == "winzone"
@@ -2339,53 +2364,73 @@ function trigger_instant_escape()
             end
         end
 
-        -- [LANGKAH 3] Tembak SEMUA remote escape/reward di awal
-        -- (Penting: fire dulu reward agar server catat stat SEBELUM player keluar)
-        fire_escape_reward_remotes()
+        -- [LANGKAH 3] TELEPORT LANGSUNG KE LEVER TERLEBIH DAHULU
+        -- (Sangat penting: Server memvalidasi jarak player ke lever saat menarik tuas!)
+        if primaryLeverPart then
+            pcall(function()
+                hrp.CFrame = primaryLeverPart.CFrame * CFrame.new(0, 1, 2)
+            end)
+            task.wait(0.2)
+        end
 
-        -- [LANGKAH 4] Tembak LeverEvent & LeverAnim untuk membuka gerbang
+        -- [LANGKAH 4] Aktifkan fase Escape pada Server Match & Buka Lever
         pcall(function()
             local remotes = ReplicatedStorage:FindFirstChild("Remotes")
             if remotes then
+                -- 1. Trigger Escapetime agar server membuka pintu match dari awal
+                local genF = remotes:FindFirstChild("Generator")
+                if genF then
+                    local et = genF:FindFirstChild("Escapetime")
+                    if et then
+                        et:FireServer()
+                        et:FireServer(true)
+                    end
+                end
+
+                -- 2. Tembak LeverEvent & LeverAnim untuk membuka tuas secara instan
                 local exitF = remotes:FindFirstChild("Exit")
                 if exitF then
                     local lEvent = exitF:FindFirstChild("LeverEvent")
-                    local lAnim = exitF:FindFirstChild("LeverAnim")
+                    local lAnim  = exitF:FindFirstChild("LeverAnim")
                     for _, g in ipairs(gates) do
-                        local el = g:FindFirstChild("ExitLever") or g:FindFirstChildWhichIsA("Model")
+                        local el = g:FindFirstChild("ExitLever") or primaryLever
+                        local lev = el and (el:FindFirstChild("Lever") or el:FindFirstChildWhichIsA("BasePart"))
                         if lEvent then
                             if el then
-                                pcall(function() lEvent:FireServer(el) end)
-                                pcall(function() lEvent:FireServer(el, true) end)
-                                pcall(function() lEvent:FireServer(el, 100) end)
+                                lEvent:FireServer(el)
+                                lEvent:FireServer(el, true)
+                                lEvent:FireServer(el, 100)
                             end
-                            pcall(function() lEvent:FireServer(g) end)
-                            pcall(function() lEvent:FireServer(g, true) end)
-                            pcall(function() lEvent:FireServer(true) end)
-                            pcall(function() lEvent:FireServer(100) end)
-                            pcall(function() lEvent:FireServer() end)
+                            if lev then
+                                lEvent:FireServer(lev)
+                                lEvent:FireServer(lev, true)
+                                lEvent:FireServer(lev, 100)
+                            end
+                            lEvent:FireServer(g)
+                            lEvent:FireServer(g, true)
+                            lEvent:FireServer(true)
+                            lEvent:FireServer(100)
                         end
                         if lAnim and el then
-                            pcall(function() lAnim:FireServer(el) end)
-                            pcall(function() lAnim:FireServer(el, true) end)
+                            lAnim:FireServer(el)
+                            lAnim:FireServer(el, true)
                         end
                     end
                 end
 
-                -- Items Gate remote
+                -- 3. Items Gate remote
                 local itemsF = remotes:FindFirstChild("Items")
                 if itemsF then
                     local gF = itemsF:FindFirstChild("Gate")
                     if gF and gF:FindFirstChild("gate") then
-                        pcall(function() gF.gate:FireServer() end)
-                        pcall(function() gF.gate:FireServer(true) end)
+                        gF.gate:FireServer()
+                        gF.gate:FireServer(true)
                     end
                 end
             end
         end)
 
-        -- Tunggu sebentar agar server memproses event sebelum teleport
-        task.wait(0.5)
+        task.wait(0.3)
 
         -- [LANGKAH 5] Set attribute Escaped pada character/player
         pcall(function()
@@ -2397,66 +2442,96 @@ function trigger_instant_escape()
             end
             LocalPlayer:SetAttribute("Escaped", true)
             LocalPlayer:SetAttribute("WinState", true)
+            LocalPlayer:SetAttribute("Survived", true)
         end)
 
-        -- [LANGKAH 6] Teleport Langsung ke Ujung Escape (LeftGate-end / RightGate-end)
-        if #gateEnds > 0 then
-            for _, endPart in ipairs(gateEnds) do
-                hrp.CFrame = endPart.CFrame * CFrame.new(0, 2, 0)
-                task.wait(0.08)
-                hrp.CFrame = endPart.CFrame * CFrame.new(0, 2, -15)
-                task.wait(0.08)
-                hrp.CFrame = endPart.CFrame * CFrame.new(0, 2, -30)
-                task.wait(0.08)
-                if firetouchinterest then
-                    pcall(function()
-                        firetouchinterest(hrp, endPart, 0)
-                        task.wait(0.02)
-                        firetouchinterest(hrp, endPart, 1)
-                    end)
-                end
-            end
-        elseif #exitLevers > 0 then
-            -- Fallback: tembus via ExitLever
-            for _, el in ipairs(exitLevers) do
-                local lev = el:FindFirstChild("Lever") or el:FindFirstChildWhichIsA("BasePart")
-                if lev then
-                    hrp.CFrame = lev.CFrame * CFrame.new(0, 2, -35)
-                    task.wait(0.1)
-                    hrp.CFrame = lev.CFrame * CFrame.new(0, 2, -80)
-                    task.wait(0.1)
-                    if firetouchinterest then
-                        pcall(function()
-                            firetouchinterest(hrp, lev, 0)
-                            task.wait(0.02)
-                            firetouchinterest(hrp, lev, 1)
-                        end)
-                    end
-                end
-            end
-        elseif #gates > 0 then
-            -- Fallback terakhir: tembus langsung lewat gate
-            for _, g in ipairs(gates) do
-                local pp = g.PrimaryPart or g:FindFirstChildWhichIsA("BasePart")
-                if pp then
-                    hrp.CFrame = pp.CFrame * CFrame.new(0, 2, -40)
-                    task.wait(0.1)
-                    hrp.CFrame = pp.CFrame * CFrame.new(0, 2, -100)
-                    task.wait(0.1)
+        -- [LANGKAH 6] Teleport bertahap melewati pintu gerbang hingga ke zona pelarian luar
+        local chosenGate = gates[1]
+        local centerPos = nil
+        local lookDir = Vector3.new(0, 0, -1)
+
+        if chosenGate then
+            local lg = chosenGate:FindFirstChild("LeftGate") or chosenGate:FindFirstChild("LeftGate-end")
+            local rg = chosenGate:FindFirstChild("RightGate") or chosenGate:FindFirstChild("RightGate-end")
+            if lg and rg then
+                centerPos = (lg.Position + rg.Position) / 2
+                if primaryLeverPart then
+                    local diff = centerPos - primaryLeverPart.Position
+                    if diff.Magnitude > 0.5 then lookDir = diff.Unit end
                 end
             end
         end
 
-        -- [LANGKAH 7] Simulasi berjalan keluar gerbang agar trigger Touched game aktif normal
-        -- (Server butuh waktu beberapa detik untuk memproses escape & menambahkan EXP)
+        if not centerPos and primaryLeverPart then
+            centerPos = primaryLeverPart.Position + Vector3.new(0, 0, -10)
+        end
+
+        if centerPos then
+            -- Tepat di tengah gerbang
+            pcall(function() hrp.CFrame = CFrame.new(centerPos + Vector3.new(0, 2, 0), centerPos + lookDir) end)
+            task.wait(0.12)
+            -- 25 studs ke luar gerbang
+            pcall(function() hrp.CFrame = CFrame.new(centerPos + lookDir * 25 + Vector3.new(0, 2, 0), centerPos + lookDir * 50) end)
+            task.wait(0.12)
+            -- 55 studs ke luar gerbang (melewati batas trigger escape)
+            pcall(function() hrp.CFrame = CFrame.new(centerPos + lookDir * 55 + Vector3.new(0, 2, 0), centerPos + lookDir * 100) end)
+            task.wait(0.12)
+            -- 90 studs ke luar gerbang
+            pcall(function() hrp.CFrame = CFrame.new(centerPos + lookDir * 90 + Vector3.new(0, 2, 0), centerPos + lookDir * 120) end)
+            task.wait(0.12)
+        elseif #gateEnds > 0 then
+            for _, endPart in ipairs(gateEnds) do
+                pcall(function()
+                    hrp.CFrame = endPart.CFrame * CFrame.new(0, 2, -15)
+                    task.wait(0.08)
+                    hrp.CFrame = endPart.CFrame * CFrame.new(0, 2, -40)
+                    task.wait(0.08)
+                end)
+            end
+        end
+
+        -- [LANGKAH 7] Sentuh semua part gerbang dan trigger escape (firetouchinterest)
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                local n = obj.Name:lower()
+                if n == "leftgate-end" or n == "rightgate-end" or n:find("gate-end")
+                    or n:find("gate_end") or n:find("escape") or n:find("exit") or n == "gate" then
+                    if firetouchinterest then
+                        pcall(function()
+                            firetouchinterest(hrp, obj, 0)
+                            task.wait(0.02)
+                            firetouchinterest(hrp, obj, 1)
+                        end)
+                    end
+                end
+            end
+        end
+
+        -- [LANGKAH 8] Tembak Remote Round & Reward Remotes untuk mencatat EXP & Kemenangan
+        pcall(function()
+            local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+            if remotes then
+                local roundR = remotes:FindFirstChild("Round")
+                if roundR then
+                    roundR:FireServer()
+                    roundR:FireServer(true)
+                    roundR:FireServer("Escaped")
+                    roundR:FireServer("Escape")
+                    roundR:FireServer("Win")
+                    roundR:FireServer(LocalPlayer)
+                    roundR:FireServer(LocalPlayer, "Escaped")
+                    roundR:FireServer(LocalPlayer, true)
+                end
+            end
+        end)
+        fire_escape_reward_remotes()
+
+        -- [LANGKAH 9] Tunggu server memproses reward (3.5 detik, TANPA loop velocity agar tidak muter-muter)
         local escapeProcessed = false
         local connList = {}
-
-        -- Snapshot stat sebelum escape untuk deteksi perubahan
         local expBefore   = tonumber(tostring(LocalPlayer:GetAttribute("ExpinRound") or LocalPlayer:GetAttribute("EXP") or LocalPlayer:GetAttribute("Exp") or 0)) or 0
         local screwBefore = tonumber(tostring(LocalPlayer:GetAttribute("Screws") or LocalPlayer:GetAttribute("screw") or LocalPlayer:GetAttribute("Screw") or 0)) or 0
 
-        -- Listen ke berbagai nama attribute EXP/reward yang mungkin dipakai game
         local attrNames = {
             "ExpinRound", "EXP", "Exp", "XP", "experience",
             "Screws", "screw", "Screw", "Sin", "Gears", "Reward"
@@ -2469,29 +2544,9 @@ function trigger_instant_escape()
                 table.insert(connList, conn)
             end)
         end
-        -- Listen di Character juga
-        pcall(function()
-            if char and char.Parent then
-                for _, attrName in ipairs(attrNames) do
-                    pcall(function()
-                        local conn = char:GetAttributeChangedSignal(attrName):Connect(function()
-                            escapeProcessed = true
-                        end)
-                        table.insert(connList, conn)
-                    end)
-                end
-            end
-        end)
 
-        -- Dorong karakter menembus zona escape + poll perubahan stat selama 4 detik
-        for step = 1, 40 do
+        for step = 1, 35 do
             if escapeProcessed then break end
-            pcall(function()
-                if hrp and hrp.Parent then
-                    hrp.AssemblyLinearVelocity = hrp.CFrame.LookVector * 20
-                end
-            end)
-            -- Cek manual perubahan stat setiap 0.5 detik
             if step % 5 == 0 then
                 pcall(function()
                     local expNow   = tonumber(tostring(LocalPlayer:GetAttribute("ExpinRound") or LocalPlayer:GetAttribute("EXP") or LocalPlayer:GetAttribute("Exp") or 0)) or 0
@@ -2504,20 +2559,15 @@ function trigger_instant_escape()
             task.wait(0.1)
         end
 
-        -- Bersihkan semua listener
         for _, conn in ipairs(connList) do
             pcall(function() conn:Disconnect() end)
         end
 
-        -- [LANGKAH 8] Fire reward remotes sekali lagi untuk memastikan server mencatat hasil match
-        task.wait(0.5)
+        -- [LANGKAH 10] Konfirmasi akhir remotes sebelum kembali ke Lobby
         fire_escape_reward_remotes()
+        task.wait(0.5)
 
-        -- [LANGKAH 9] Tunggu server game memproses reward sebelum fallback ke Lobby
-        -- Tunggu 4 detik total agar server benar-benar mencatat EXP + Screws + Sin ke akun
-        task.wait(4.0)
-
-        -- Cek apakah player masih di map match atau sudah otomatis dipindahkan oleh game
+        -- [LANGKAH 11] Teleport ke Lobby jika game belum otomatis memindahkan player
         local inLobby = false
         pcall(function()
             local currChar = LocalPlayer and LocalPlayer.Character
@@ -2527,11 +2577,10 @@ function trigger_instant_escape()
             end
         end)
 
-        -- [LANGKAH 10] Kirim Discord Webhook per-match summary setelah stat EXP & Screws bertambah
-        -- Webhook delay 2 detik lagi agar stat sudah terupdate sempurna
+        -- [LANGKAH 12] Kirim Discord Webhook summary
         pcall(function()
             if webhookNotifyEscape and webhookUrl and webhookUrl ~= "" then
-                task.delay(2.0, function()
+                task.delay(1.5, function()
                     pcall(function() send_match_summary_webhook("ESCAPED") end)
                 end)
             end
@@ -2545,7 +2594,7 @@ function trigger_instant_escape()
 
         local statusMsg = escapeProcessed
             and "Escape sukses! EXP & Screws berhasil diproses server."
-            or  "Escape selesai. Periksa F9 jika EXP belum bertambah."
+            or  "Escape selesai. Membawa karakter kembali ke Lobby."
         Window:Notify({
             Title = "✅ Escape Sukses!",
             Description = statusMsg,
@@ -3433,11 +3482,10 @@ local function agen_tick()
     if goalRot < 0 then goalRot = goalRot + 360 end
 
     -- DUKUNGAN KHUSUS KING'S SCOURGE (RAPID-FIRE CHECKS):
-    -- 1. Deteksi perpindahan Goal sudut (> 1.5°) = ronde baru langsung siap
+    -- Deteksi perpindahan Goal sudut (> 2.0°) = ronde/skill check baru langsung reset
     if lastGoalRotation ~= nil then
         local goalDiff = math.abs((goalRot - lastGoalRotation + 180) % 360 - 180)
-        if goalDiff > 1.5 then
-            -- Goal bergeser = skill check baru muncul, reset SEGERA (no delay)
+        if goalDiff > 2.0 then
             hasHitCurrentMinigame = false
             lastHitTick            = 0
             lineMoveCount          = 1
@@ -3445,17 +3493,6 @@ local function agen_tick()
         end
     else
         lastGoalRotation = goalRot
-    end
-
-    -- 2. Auto Re-Arm: jika jarum sudah bergerak jauh dari zona hit TANPA delay (untuk King's Scourge)
-    if hasHitCurrentMinigame then
-        -- Deteksi jarum melewati zona hit sebelumnya (>= 1 frame pergerakan)
-        local distPast = (currentRot - (goalRot + 108.3)) % 360
-        if distPast > 15 and distPast < 345 then
-            -- Jarum sudah jauh dari titik hit sebelumnya = siap untuk hit berikutnya
-            hasHitCurrentMinigame = false
-            lastHitTick = 0
-        end
     end
 
     -- Minigame baru muncul
@@ -3492,35 +3529,35 @@ local function agen_tick()
     -- Tunggu minimal 1 frame pergerakan agar kecepatan terukur (maksimal responsif)
     if lineMoveCount < 1 then return end
 
-    -- Jangan tekan lagi jika sudah pernah hit untuk ronde ini
+    -- Jangan tekan lagi jika sudah pernah hit untuk minigame ini
     if hasHitCurrentMinigame then return end
 
     -- Normalisasi rotasi needle (0-360)
     local lineRot = currentRot % 360
     if lineRot < 0 then lineRot = lineRot + 360 end
 
-    -- TARGET ZONA PUTIH (100% DEAD CENTER PRESISI):
-    -- Titik tengah zona putih Violence District adalah tepat pada Goal.Rotation + 108.3°
-    local centerTarget = (goalRot + 108.3) % 360
-    if centerTarget < 0 then centerTarget = centerTarget + 360 end
+    -- TARGET ZONA PUTIH PRESISI (Violence District white zone: offset 104.5° s/d 112.5°, center 108.3°)
+    local offset = (lineRot - goalRot) % 360
+    local speed  = math.abs(rawSpeed)
 
-    local speed = math.abs(rawSpeed)
-
-    -- Jarak sudut bertanda dari jarum ke titik tengah target (0.0° = pas di tengah)
-    local signedDist = (centerTarget - lineRot) % 360
-    if signedDist > 180 then signedDist = signedDist - 360 end
-
-    -- Jendela hit dinamis: anti-skip saat jarum berkecepatan tinggi (King's Scourge)
-    local hitWindowAhead = math.max(4.5, speed * 0.85)
-    local hitWindowBehind = math.max(3.5, speed * 0.65)
-
+    -- Keputusan hit adaptif anti-miss (mendukung speed tinggi King's Scourge):
     local shouldHit = false
     if rawSpeed >= 0 then
-        -- Searah jarum jam (Normal CW): tembak saat berada dalam jendela hit presisi
-        shouldHit = (signedDist <= hitWindowAhead and signedDist >= -hitWindowBehind)
+        -- Searah jarum jam (Normal & Fast King's Scourge CW):
+        -- 1. Posisi jarum saat ini berada di dalam zona putih
+        if offset >= 105.0 and offset <= 112.0 then
+            shouldHit = true
+        -- 2. Kecepatan tinggi (King's Scourge): jarum akan masuk zona putih di frame ini / frame input
+        elseif offset < 105.0 and (offset + speed * 1.05) >= 106.0 then
+            shouldHit = true
+        end
     else
-        -- Berlawanan jarum jam (Kutukan/Hex CCW)
-        shouldHit = (signedDist >= -hitWindowAhead and signedDist <= hitWindowBehind)
+        -- Berlawanan jarum jam (Hex / CCW):
+        if offset >= 105.0 and offset <= 112.0 then
+            shouldHit = true
+        elseif offset > 112.0 and (offset - speed * 1.05) <= 111.0 then
+            shouldHit = true
+        end
     end
 
     if shouldHit then
@@ -3529,11 +3566,11 @@ local function agen_tick()
         autoGenHitCount       = autoGenHitCount + 1
         agen_press(spaceObj)
 
-        -- Feedback console (F9) saja tanpa popup notifikasi di layar
+        -- Feedback console (F9)
         pcall(function()
             print(string.format(
-                "[AutoGen] PERFECT HIT! Jarum: %.1f° | Goal: %.1f° | Selisih: %.1f° | Target: %.1f° | Speed: %.2f°/f",
-                lineRot, goalRot, (lineRot - goalRot) % 360, centerTarget, speed
+                "[AutoGen] PERFECT HIT! Jarum: %.1f° | Goal: %.1f° | Offset: %.1f° | Speed: %.2f°/f",
+                lineRot, goalRot, offset, speed
             ))
         end)
     end
