@@ -1882,31 +1882,30 @@ local function trigger_instant_escape()
     local escaped = false
 
     -- [LAYER 1] Scan SEMUA Remote Events/Functions di seluruh game
-    pcall(function()
-        local function try_fire(obj)
-            local n = obj.Name:lower()
-            if n:find("escape") or n:find("exit") or n:find("win") or n:find("survivor")
-                or n:find("finish") or n:find("complete") or n:find("endmatch")
-                or n:find("endevent") or n:find("gameover") or n:find("roundend") then
-                if obj:IsA("RemoteEvent") then
-                    pcall(function() obj:FireServer() end)
-                    pcall(function() obj:FireServer(true) end)
-                    pcall(function() obj:FireServer(LocalPlayer) end)
-                    escaped = true
-                elseif obj:IsA("RemoteFunction") then
-                    pcall(function() obj:InvokeServer() end)
-                    pcall(function() obj:InvokeServer(true) end)
-                    escaped = true
-                elseif obj:IsA("BindableEvent") then
-                    pcall(function() obj:Fire() end)
-                    pcall(function() obj:Fire(true) end)
-                    escaped = true
-                end
+    -- try_fire didefinisikan sebagai upvalue di luar pcall (valid di Luau)
+    local function try_fire(obj)
+        local n = obj.Name:lower()
+        if n:find("escape") or n:find("exit") or n:find("win") or n:find("survivor")
+            or n:find("finish") or n:find("complete") or n:find("endmatch")
+            or n:find("endevent") or n:find("gameover") or n:find("roundend") then
+            if obj:IsA("RemoteEvent") then
+                pcall(function() obj:FireServer() end)
+                pcall(function() obj:FireServer(true) end)
+                pcall(function() obj:FireServer(LocalPlayer) end)
+                escaped = true
+            elseif obj:IsA("RemoteFunction") then
+                pcall(function() obj:InvokeServer() end)
+                pcall(function() obj:InvokeServer(true) end)
+                escaped = true
+            elseif obj:IsA("BindableEvent") then
+                pcall(function() obj:Fire() end)
+                pcall(function() obj:Fire(true) end)
+                escaped = true
             end
         end
-        -- Scan ReplicatedStorage
+    end
+    pcall(function()
         for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do try_fire(obj) end
-        -- Scan Workspace (kadang ada di dalam map folder)
         for _, obj in ipairs(workspace:GetDescendants()) do
             if obj:IsA("RemoteEvent") or obj:IsA("BindableEvent") then try_fire(obj) end
         end
@@ -1998,73 +1997,82 @@ local webhookUrl = ""
 local webhookNotifyEscape = true
 local webhookNotifyMatch = true
 
+-- Helper: scan leaderstats/attribute dari sebuah instance root
+-- (didefinisikan di luar pcall agar valid di Luau)
+local _statsRef = nil  -- diisi oleh get_player_stats saat dipakai
+
+local function _scan_stats_from(root)
+    if not root or not _statsRef then return end
+    local stats = _statsRef
+    pcall(function()
+        local ls = root:FindFirstChild("leaderstats")
+        if ls then
+            for _, v in ipairs(ls:GetChildren()) do
+                local n = v.Name:lower()
+                if n:find("level") or n == "lv" or n == "lvl" then stats.level = tostring(v.Value) end
+                if n:find("exp") or n:find("xp") or n:find("experience") then stats.exp = tostring(v.Value) end
+                if n:find("screw") then stats.screw = tostring(v.Value) end
+                if n:find("gold") or n:find("coin") or n:find("cash") or n:find("money") then stats.gold = tostring(v.Value) end
+            end
+        end
+    end)
+    pcall(function()
+        local attrLevel = LocalPlayer:GetAttribute("Level") or LocalPlayer:GetAttribute("PlayerLevel") or LocalPlayer:GetAttribute("Lv")
+        local attrExp   = LocalPlayer:GetAttribute("EXP") or LocalPlayer:GetAttribute("Experience") or LocalPlayer:GetAttribute("XP")
+        local attrScrew = LocalPlayer:GetAttribute("Screw") or LocalPlayer:GetAttribute("Screws")
+        local attrGold  = LocalPlayer:GetAttribute("Gold") or LocalPlayer:GetAttribute("Coins") or LocalPlayer:GetAttribute("Cash")
+        local attrRole  = LocalPlayer:GetAttribute("CurrentRole") or LocalPlayer:GetAttribute("Role")
+        if attrLevel then stats.level = tostring(attrLevel) end
+        if attrExp   then stats.exp   = tostring(attrExp)   end
+        if attrScrew then stats.screw = tostring(attrScrew) end
+        if attrGold  then stats.gold  = tostring(attrGold)  end
+        if attrRole  then stats.role  = tostring(attrRole)  end
+    end)
+end
+
 -- Helper: ambil stats player (Level, EXP, Screw, Gold, Map)
 local function get_player_stats()
     local stats = {
         level = "?", exp = "?", screw = "?", gold = "?",
         hp = "?", map = "?", role = "?"
     }
+    _statsRef = stats
+
     pcall(function()
         local char = LocalPlayer and LocalPlayer.Character
         local hum = char and char:FindFirstChildOfClass("Humanoid")
         if hum then
             stats.hp = math.floor(hum.Health) .. "/" .. math.floor(hum.MaxHealth)
         end
+    end)
 
-        -- Cek PlayerGui / leaderstats / PlayerData
-        local function searchStats(root)
-            if not root then return end
-            -- leaderstats (standar Roblox)
-            local ls = root:FindFirstChild("leaderstats")
-            if ls then
-                for _, v in ipairs(ls:GetChildren()) do
-                    local n = v.Name:lower()
-                    if n:find("level") or n == "lv" or n == "lvl" then stats.level = tostring(v.Value) end
-                    if n:find("exp") or n:find("xp") or n:find("experience") then stats.exp = tostring(v.Value) end
-                    if n:find("screw") then stats.screw = tostring(v.Value) end
-                    if n:find("gold") or n:find("coin") or n:find("cash") or n:find("money") then stats.gold = tostring(v.Value) end
-                end
-            end
-            -- Cek attribute langsung di Player
-            local attrLevel = LocalPlayer:GetAttribute("Level") or LocalPlayer:GetAttribute("PlayerLevel") or LocalPlayer:GetAttribute("Lv")
-            local attrExp   = LocalPlayer:GetAttribute("EXP") or LocalPlayer:GetAttribute("Experience") or LocalPlayer:GetAttribute("XP")
-            local attrScrew = LocalPlayer:GetAttribute("Screw") or LocalPlayer:GetAttribute("Screws")
-            local attrGold  = LocalPlayer:GetAttribute("Gold") or LocalPlayer:GetAttribute("Coins") or LocalPlayer:GetAttribute("Cash")
-            if attrLevel then stats.level = tostring(attrLevel) end
-            if attrExp   then stats.exp   = tostring(attrExp)   end
-            if attrScrew then stats.screw = tostring(attrScrew) end
-            if attrGold  then stats.gold  = tostring(attrGold)  end
-            -- Cek role
-            local attrRole = LocalPlayer:GetAttribute("CurrentRole") or LocalPlayer:GetAttribute("Role")
-            if attrRole then stats.role = tostring(attrRole) end
+    _scan_stats_from(LocalPlayer)
+
+    pcall(function()
+        local pd = ReplicatedStorage:FindFirstChild("PlayerData") or ReplicatedStorage:FindFirstChild("Data")
+        if pd then
+            local mine = pd:FindFirstChild(LocalPlayer.Name) or pd:FindFirstChild(tostring(LocalPlayer.UserId))
+            if mine then _scan_stats_from(mine) end
         end
-        searchStats(LocalPlayer)
-        -- Fallback: cek di PlayerData di ReplicatedStorage / folder lain
-        pcall(function()
-            local pd = ReplicatedStorage:FindFirstChild("PlayerData") or ReplicatedStorage:FindFirstChild("Data")
-            if pd then
-                local mine = pd:FindFirstChild(LocalPlayer.Name) or pd:FindFirstChild(tostring(LocalPlayer.UserId))
-                if mine then searchStats(mine) end
-            end
-        end)
+    end)
 
-        -- Cek map yang sedang dimainkan
+    pcall(function()
         local mapFolder = workspace:FindFirstChild("Map") or workspace:FindFirstChild("CurrentMap")
             or workspace:FindFirstChild("Level") or workspace:FindFirstChild("MapFolder")
             or workspace:FindFirstChild("GameMap")
         if mapFolder then
             stats.map = mapFolder.Name
         else
-            -- Coba ambil dari game.PlaceId atau attribute
             local mapAttr = workspace:GetAttribute("MapName") or workspace:GetAttribute("CurrentMap")
                 or workspace:GetAttribute("Map") or workspace:GetAttribute("Level")
             if mapAttr then stats.map = tostring(mapAttr) end
         end
         if stats.map == "?" then
-            -- Fallback: nama workspace
             stats.map = game.PlaceId and ("Place " .. tostring(game.PlaceId)) or "Unknown"
         end
     end)
+
+    _statsRef = nil
     return stats
 end
 
