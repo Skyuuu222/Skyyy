@@ -1454,23 +1454,28 @@ local function agen_tick()
     local lineRot = currentRot % 360
     if lineRot < 0 then lineRot = lineRot + 360 end
 
-    -- TARGET ZONA PUTIH (PERFECT ZONE DEAD CENTER = Goal + 109.0°):
-    -- Zona putih berada di 105.0° s/d 113.0°. Titik tengah mutlak adalah 109.0°!
-    local centerTarget = (goalRot + 109.0 + autoGenOffset) % 360
+    -- TARGET ZONA PUTIH (DEAD CENTER = Goal + 108.5°):
+    -- Zona putih berada di rentang 105.0° s/d 112.0°. Titik tengah presisi adalah 108.5°!
+    local centerTarget = (goalRot + 108.5 + autoGenOffset) % 360
     if centerTarget < 0 then centerTarget = centerTarget + 360 end
 
-    -- PREDIKSI POSISI JARUM FRAME BERIKUTNYA (saat keypress diproses game):
-    -- Menjamin 100% tepat baik saat jarum berputar lambat maupun super cepat (King's Scourge)!
     local speed = math.abs(rawSpeed)
-    local predictedRot = (lineRot + speed * 1.0) % 360
 
-    -- Jarak jarum prediksi menuju titik tengah zona putih
-    local distToCenter = (centerTarget - predictedRot) % 360
+    -- Jarak sudut bertanda dari posisi jarum ke titik tengah zona putih
+    local signedDist = (centerTarget - lineRot) % 360
+    if signedDist > 180 then signedDist = signedDist - 360 end
 
-    -- Tembak jika posisi prediksi tepat mendarat di zona putih:
-    -- Untuk kecepatan tinggi (King's Scourge), toleransi mengikuti kecepatan per frame
-    local tolerance = math.max(speed * 0.75, 3.5)
-    local shouldHit = (distToCenter <= tolerance or distToCenter >= (360 - tolerance))
+    -- AMBANG TEMBAK DEAD CENTER:
+    -- Tembak HANYA saat jarum berada paling dekat dengan titik tengah (menghilangkan early trigger 5° yang membuat tidak pas di tengah)
+    local hitThreshold = math.max(speed * 0.85, 1.8)
+    local shouldHit = false
+    if rawSpeed >= 0 then
+        -- Jarum berputar searah jarum jam (CW)
+        shouldHit = (signedDist <= hitThreshold and signedDist >= - (speed * 0.4))
+    else
+        -- Jarum berputar berlawanan jarum jam (CCW)
+        shouldHit = (signedDist >= -hitThreshold and signedDist <= (speed * 0.4))
+    end
 
     if shouldHit then
         hasHitCurrentMinigame = true
@@ -2162,6 +2167,23 @@ SecAutoGen:Toggle({
             agen_stop()
             Window:Notify({ Title = "Auto Perfect Gen", Description = "Dimatikan.", Lifetime = 2 })
         end
+    end
+})
+
+SecAutoGen:Slider({
+    Name = "Kalibrasi Offset Jarum (Derajat)",
+    Default = 0,
+    Minimum = -10,
+    Maximum = 10,
+    DisplayMethod = "Round",
+    Precision = 1,
+    Callback = function(val)
+        autoGenOffset = tonumber(val) or 0
+        Window:Notify({
+            Title = "Auto Perfect Gen",
+            Description = string.format("Offset: %+.1f° (geser + jika terlalu ke kiri, - jika terlalu ke kanan)", autoGenOffset),
+            Lifetime = 2
+        })
     end
 })
 
