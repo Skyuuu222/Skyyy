@@ -2187,41 +2187,84 @@ local _isEscaping = false
 local _escapeCheckTimer = 0
 local _autoEscapeStarted = false
 
--- Helper: Cari MeshPart 'Main' dari lever gate (dibutuhkan LeverEvent)
-local function find_lever_main_part()
-    -- Pass 1: Cari MeshPart 'Main' di bawah model lever/gate (keyword match)
+-- ==============================================================================
+-- STRUKTUR GERBANG EXIT (terbukti dari hasil Scan):
+--   Workspace.Map.Rooftop.Gate                (Model gerbang)
+--     .ExitLever                              (Model tuas)
+--       .Main / .Lever / .LeverStart / .LeverGoal / .Tp / .Bulb1-3
+--     .LeftGate / .RightGate                  (daun pintu yg bergeser)
+--     .LeftGate-end / .RightGate-end          (panel pintu)
+--     .DoorFrame / .Window
+--     .Box                                    (VOLUME KELUAR - tujuan utama!)
+--
+-- PENTING: map punya LEBIH DARI SATU gerbang (hasil scan menemukan Gate di 2 lokasi),
+-- jadi kita harus memilih gerbang yang paling dekat dengan karakter, bukan yang pertama.
+local function get_exit_gate()
+    local gates = {}
+
     for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") and obj.Name == "Main" then
-            local pn  = (obj.Parent and obj.Parent.Name:lower()) or ""
-            local gpn = (obj.Parent and obj.Parent.Parent and obj.Parent.Parent.Name:lower()) or ""
-            if pn:find("lever") or pn:find("gate") or pn:find("exit") or pn:find("switch")
-                or gpn:find("lever") or gpn:find("gate") or gpn:find("exit") then
-                return obj
-            end
-        end
-        -- Cari dari model lever/gate
         if obj:IsA("Model") then
-            local n = obj.Name:lower()
-            if n:find("lever") or n:find("exitlever") or n:find("gatelever") then
-                local mainPart = obj:FindFirstChild("Main") or obj:FindFirstChildWhichIsA("BasePart")
-                if mainPart then return mainPart end
+            local leverModel = obj:FindFirstChild("ExitLever")
+            if leverModel and leverModel:IsA("Model") then
+                local main = leverModel:FindFirstChild("Main")
+                    or leverModel:FindFirstChildWhichIsA("BasePart")
+                if main then
+                    table.insert(gates, {
+                        model     = obj,
+                        leverModel= leverModel,
+                        main      = main,
+                        lever     = leverModel:FindFirstChild("Lever") or main,
+                        leverStart= leverModel:FindFirstChild("LeverStart"),
+                        leverGoal = leverModel:FindFirstChild("LeverGoal"),
+                        box       = obj:FindFirstChild("Box"),
+                        leftGate  = obj:FindFirstChild("LeftGate"),
+                        rightGate = obj:FindFirstChild("RightGate"),
+                        leftEnd   = obj:FindFirstChild("LeftGate-end"),
+                        rightEnd  = obj:FindFirstChild("RightGate-end"),
+                    })
+                end
             end
         end
     end
-    -- Pass 2: Fallback - kembalikan MeshPart 'Main' pertama di workspace
-    -- (log membuktikan game menggunakan MeshPart bernama 'Main')
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("MeshPart") and obj.Name == "Main" then
-            return obj
-        end
+
+    if #gates == 0 then return nil end
+
+    -- Pilih gerbang TERDEKAT dengan karakter (paling mungkin yang aktif di round ini)
+    local char = LocalPlayer and LocalPlayer.Character
+    local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
+    if not hrp then return gates[1] end
+
+    local pos = hrp.Position
+    local best, bestDist = gates[1], math.huge
+    for _, g in ipairs(gates) do
+        local ref = g.box or g.main
+        local d = (ref.Position - pos).Magnitude
+        if d < bestDist then best, bestDist = g, d end
     end
-    -- Pass 3: Any BasePart bernama 'Main'
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") and obj.Name == "Main" then
-            return obj
-        end
+    return best
+end
+
+-- Helper: Titik jangkar karakter DI DALAM zona keluar.
+-- Prioritas 1 = volume `Box` (zona keluar asli), letakkan di dasar volumenya
+-- supaya karakter benar-benar berada di dalam box, bukan melayang di tengah.
+local function gate_anchor_cframe(g)
+    if not g then return nil end
+    if g.box and g.box:IsA("BasePart") and g.box.Size.Magnitude > 1 then
+        return g.box.CFrame * CFrame.new(0, -(g.box.Size.Y / 2) + 3, 0)
+    end
+    if g.leftEnd and g.rightEnd then
+        return CFrame.new((g.leftEnd.Position + g.rightEnd.Position) / 2)
+    end
+    if g.main then
+        return g.main.CFrame * CFrame.new(0, 2, 4)
     end
     return nil
+end
+
+-- Wrapper kompatibilitas: tetap mengembalikan MeshPart 'Main' dari gerbang aktif
+local function find_lever_main_part()
+    local g = get_exit_gate()
+    return g and g.main or nil
 end
 
 -- Helper: Notifikasi aman via Window WMacLib.
@@ -2242,52 +2285,7 @@ local function safe_notify(opts)
     end)
 end
 
--- Helper: Cari zona/part trigger exit di map.
--- Dari log Touch game: 'Workspace.Map.Gate.Box' -> inilah zona pemicu keluar yang sebenarnya.
-local function find_exit_trigger_zone()
-    -- Prioritas 1: nama persis yang dipakai game
-    local exact = { "leftgate-end", "rightgate-end", "gate-end", "gate_end" }
-    for _, key in ipairs(exact) do
-        for _, obj in ipairs(workspace:GetDescendants()) do
-            if obj:IsA("BasePart") and obj.Name:lower() == key then return obj end
-        end
-    end
-
-    -- Prioritas 2: part 'Box' di dalam folder/model Gate (pola asli game)
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") and obj.Name:lower() == "box" then
-            local pn = (obj.Parent and obj.Parent.Name:lower()) or ""
-            if pn:find("gate") or pn:find("exit") or pn:find("escape") then return obj end
-        end
-    end
-
-    -- Prioritas 3: nama zona exit / win
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            local n = obj.Name:lower()
-            if n:find("exitzone") or n:find("escapezone") or n:find("winzone")
-                or n:find("levergoal") or n:find("exitbox") or n:find("exitgoal") then
-                return obj
-            end
-        end
-    end
-
-    -- Prioritas 4: part terbesar di dalam folder Gate (kandidat volume trigger)
-    local best, bestSize = nil, -1
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            local pn = (obj.Parent and obj.Parent.Name:lower()) or ""
-            if pn:find("gate") or pn:find("exit") then
-                local s = obj.Size.X * obj.Size.Y * obj.Size.Z
-                if s > bestSize then best, bestSize = obj, s end
-            end
-        end
-    end
-    return best
-end
-
--- Diagnosa: dump semua remote & part terkait exit ke console (F9) agar trigger
--- asli bisa ditemukan manual tanpa menebak.
+-- Diagnosa: ringkas per-gerbang (tidak lagi men Enterprises semua part dekorasi)
 function scan_exit_triggers()
     print("========== [SCAN] TRIGGER / REMOTE EXIT ==========")
 
@@ -2297,39 +2295,56 @@ function scan_exit_triggers()
             local n = string.lower(r.Name)
             if n:find("exit") or n:find("escape") or n:find("lever") or n:find("gate")
                 or n:find("round") or n:find("win") or n:find("end") or n:find("finish")
-                or n:find("surviv") or n:find("reward") then
+                or n:find("moriend") or n:find("surviv") or n:find("reward") then
                 print("  [REMOTE]", r:GetFullName(), "|", r.ClassName)
             end
         end
     end
 
-    print("--- [MAP] Part/Model terkait gate/exit di Workspace ---")
+    -- Kumpulkan gerbang secara terstruktur
+    local gates = {}
     for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") or obj:IsA("Model") then
-            local n = string.lower(obj.Name)
-            local pn = (obj.Parent and string.lower(obj.Parent.Name)) or ""
-            if n:find("exit") or n:find("lever") or n:find("gate") or n:find("escape")
-                or n:find("winzone") or n:find("zone") or n:find("end") or n == "box"
-                or n == "main"
-                or pn:find("gate") or pn:find("exit") or pn:find("lever") then
-                local extra = ""
-                if obj:IsA("BasePart") then
-                    extra = string.format("Pos: %d, %d, %d | Size: %d, %d, %d | Touch: %s | Query: %s",
-                        math.floor(obj.Position.X), math.floor(obj.Position.Y), math.floor(obj.Position.Z),
-                        math.floor(obj.Size.X), math.floor(obj.Size.Y), math.floor(obj.Size.Z),
-                        tostring(obj.CanTouch), tostring(obj.CanQuery))
-                end
-                print("  [MAP]", obj:GetFullName(), "|", obj.ClassName, "|", extra)
+        if obj:IsA("Model") then
+            local leverModel = obj:FindFirstChild("ExitLever")
+            if leverModel and leverModel:IsA("Model") then
+                table.insert(gates, { model = obj, leverModel = leverModel })
             end
         end
     end
 
-    local zone = find_exit_trigger_zone()
-    local leverMain = find_lever_main_part()
-    print("  >> ZONA TRIGGER:", zone and zone:GetFullName() or "TIDAK DITEMUKAN")
-    print("  >> LEVER MAIN  :", leverMain and leverMain:GetFullName() or "TIDAK DITEMUKAN")
+    print("--- [GERBANG] di Workspace ---")
+    print("  Total gerbang ditemukan:", #gates)
+    for idx, g in ipairs(gates) do
+        local main    = g.leverModel:FindFirstChild("Main")
+        local box     = g.model:FindFirstChild("Box")
+        local leftEnd = g.model:FindFirstChild("LeftGate-end")
+        local rightEnd= g.model:FindFirstChild("RightGate-end")
+        local leftGate= g.model:FindFirstChild("LeftGate")
+        print(string.format("  [%d] %s", idx, g.model:GetFullName()))
+        if main    then print("       Main      :", main:GetFullName())    else print("       Main      : -") end
+        if box     then
+            print(string.format("       Box(zona) : Pos %d, %d, %d | Size %d, %d, %d | Touch %s",
+                math.floor(box.Position.X), math.floor(box.Position.Y), math.floor(box.Position.Z),
+                math.floor(box.Size.X), math.floor(box.Size.Y), math.floor(box.Size.Z),
+                tostring(box.CanTouch)))
+        else print("       Box(zona) : -") end
+        if leftEnd then print("       LeftEnd   : Pos", math.floor(leftEnd.Position.X) .. "," .. math.floor(leftEnd.Position.Y) .. "," .. math.floor(leftEnd.Position.Z)) end
+        if rightEnd then print("       RightEnd  : Pos", math.floor(rightEnd.Position.X) .. "," .. math.floor(rightEnd.Position.Y) .. "," .. math.floor(rightEnd.Position.Z)) end
+        if leftGate and rightGate then
+            print("       Gap gate  :", (leftGate.Position - rightGate.Position).Magnitude, "stud")
+        end
+    end
+
+    local active = get_exit_gate()
+    print("  >> GERBANG AKTIF (terdekat):", active and active.model:GetFullName() or "TIDAK DITEMUKAN")
+    print("  >> ANCHOR:", (function()
+        local cf = gate_anchor_cframe(active)
+        if not cf then return "TIDAK ADA" end
+        local p = cf.Position
+        return string.format("Pos %d, %d, %d", math.floor(p.X), math.floor(p.Y), math.floor(p.Z))
+    end)())
     print("========== [SCAN] SELESAI ==========")
-    safe_notify({ Title = "Scan Trigger", Description = "Lihat output console (F9) untuk daftar remote & part exit.", Lifetime = 6 })
+    safe_notify({ Title = "Scan Trigger", Description = "Lihat output console (F9) untuk daftar gerbang & remote exit.", Lifetime = 6 })
 end
 
 local function find_escape_target()
@@ -2481,6 +2496,27 @@ local function fire_escape_reward_remotes()
                         fireRewardRemote(r, true)
                     end
                 end
+                -- [SCAN 2026-10-06] LeverAnim: animasi tuas saat tuas ditekan
+                local leverAnim = exitF:FindFirstChild("LeverAnim")
+                if leverAnim then
+                    pcall(function() leverAnim:FireServer(true) end)
+                    pcall(function() leverAnim:FireServer() end)
+                end
+            end
+
+            -- [SCAN 2026-10-06] Items.Gate.gate: penanda keluar lewat item Gate
+            local itemsF = remotes:FindFirstChild("Items")
+            if itemsF then
+                local gateF = itemsF:FindFirstChild("Gate")
+                if gateF then
+                    local gateRemote = gateF:FindFirstChild("gate")
+                    if gateRemote then
+                        pcall(function() gateRemote:FireServer() end)
+                        pcall(function() gateRemote:FireServer(true) end)
+                        pcall(function() gateRemote:FireServer("Escaped") end)
+                        pcall(function() gateRemote:FireServer(LocalPlayer) end)
+                    end
+                end
             end
         end
     end)
@@ -2512,11 +2548,9 @@ function trigger_instant_escape()
         task.wait(0.1)
 
         -- ======================================================================
-        -- [TAHAP A] Cari SEMUA pemicu exit + remote lever.
-        -- Server hanya memberi status escaped bila karakter benar-benar MASUK
-        -- zona trigger, jadi karakter akan kita PIN di sana (bukan trigger dari jauh).
+        -- [TAHAP A] Tentukan gerbang exit yang SEDANG AKTIF di round ini.
+        -- Map punya >1 gerbang, jadi pilih yang TERDEKAT dengan karakter.
         -- ======================================================================
-        local leverMainPart = find_lever_main_part()
         local leverEvent = nil
         pcall(function()
             if remotes then
@@ -2527,103 +2561,117 @@ function trigger_instant_escape()
             end
         end)
 
-        -- Kumpulkan SELURUH part gate/exit sekali saja (hemat, tidak scan tiap frame)
+        local gate = get_exit_gate()
+        local leverMainPart = gate and gate.main or nil
+        local anchorCF = gate_anchor_cframe(gate)
+
+        -- Part-part gerbang yang perlu disentuh (kumpulkan sekali saja)
         local gateParts = {}
-        for _, obj in ipairs(workspace:GetDescendants()) do
-            if obj:IsA("BasePart") then
-                local n  = obj.Name:lower()
-                local pn = (obj.Parent and obj.Parent.Name:lower()) or ""
-                if n:find("gate") or n:find("exit") or n:find("lever") or n:find("escape")
-                    or n:find("winzone") or n:find("zone") or n == "box"
-                    or pn:find("gate") or pn:find("exit") or pn:find("lever") then
-                    table.insert(gateParts, obj)
+        if gate then
+            local seen = {}
+            local function add(p)
+                if p and p:IsA("BasePart") and not seen[p] then
+                    seen[p] = true
+                    table.insert(gateParts, p)
                 end
             end
-        end
-
-        -- Titik jangkar: tengah zona trigger, atau dekat lever kalau zona tidak ada
-        local zone = find_exit_trigger_zone()
-        local anchorCF = nil
-        if zone then
-            anchorCF = zone.CFrame
-            print("[AutoEscape] Trigger exit:", zone:GetFullName())
-        elseif leverMainPart then
-            anchorCF = leverMainPart.CFrame * CFrame.new(0, 2, 4)
-            print("[AutoEscape] Fallback jangkar:", leverMainPart:GetFullName())
+            add(gate.box); add(gate.leftEnd); add(gate.rightEnd)
+            add(gate.leftGate); add(gate.rightGate)
+            add(gate.leverModel:FindFirstChild("Tp"))
         end
 
         local currentChar = LocalPlayer and LocalPlayer.Character
         local currentHrp  = currentChar and (currentChar:FindFirstChild("HumanoidRootPart") or currentChar:FindFirstChild("Torso"))
 
-        -- ======================================================================
-        -- [TAHAP B] PIN karakter di trigger + tekan lever terus-menerus.
-        -- Server menandai escaped saat karakter MENETAP di zona, bukan saat
-        -- remoteditembak sekali dari luar. 40 iterasi x 0.1s = 4 detik.
-        -- ======================================================================
-        if currentHrp and anchorCF then
-            pcall(function() currentHrp.CFrame = anchorCF end)
-            task.wait(0.15)
+        if gate then
+            print("[AutoEscape] Gerbang aktif :", gate.model:GetFullName())
+        else
+            print("[AutoEscape] PERINGATAN: tidak ada gerbang exit ditemukan!")
+        end
+        if anchorCF then
+            local ap = anchorCF.Position
+            print("[AutoEscape] Anchor (dalam zona):",
+                math.floor(ap.X) .. ", " .. math.floor(ap.Y) .. ", " .. math.floor(ap.Z))
         end
 
-        if leverEvent and leverMainPart then
-            for i = 1, 40 do
-                -- kunci karakter tetap berada di dalam zona trigger
-                if currentHrp and currentHrp.Parent and anchorCF then
-                    pcall(function()
-                        currentHrp.CFrame = anchorCF
-                        currentHrp.AssemblyLinearVelocity = Vector3.zero
-                    end)
-                end
-                -- signature benar: FireServer(MeshPart 'Main', bool tekan)
-                pcall(function() leverEvent:FireServer(leverMainPart, true) end)
-                task.wait(0.05)
-                pcall(function() leverEvent:FireServer(leverMainPart, false) end)
+        -- ======================================================================
+        -- [TAHAP B] PIN karakter DI DALAM zona Box + tekan lever berulang.
+        -- Zona keluar asli adalah part `Box` (46x37x28). Karakter harus berada
+        -- DI DALAM volume itu supaya handler Touched server ikut berjalan.
+        -- ======================================================================
+        local function pin()
+            if currentHrp and currentHrp.Parent and anchorCF then
+                pcall(function()
+                    currentHrp.CFrame = anchorCF
+                    currentHrp.AssemblyLinearVelocity = Vector3.zero
+                    currentHrp.AssemblyAngularVelocity = Vector3.zero
+                end)
+            end
+        end
 
-                -- sentuh semua part gate (enter + leave)
-                if currentHrp and firetouchinterest then
-                    for _, gp in ipairs(gateParts) do
+        local function touchAll()
+            if currentHrp and firetouchinterest then
+                for _, gp in ipairs(gateParts) do
+                    if gp.Parent then
                         pcall(function()
                             firetouchinterest(currentHrp, gp, 0)
                             firetouchinterest(currentHrp, gp, 1)
                         end)
                     end
                 end
+            end
+        end
+
+        -- Tahap B1: masuk zona & tembak touch (biar server tahu kita di dalam)
+        pin()
+        task.wait(0.15)
+        for _ = 1, 10 do
+            pin()
+            touchAll()
+            task.wait(0.1)
+        end
+
+        -- Tahap B2: tekan lever selama 3 detik sambil tetap di dalam zona
+        if leverEvent and leverMainPart then
+            for _ = 1, 30 do
+                pin()
+                pcall(function() leverEvent:FireServer(leverMainPart, true) end)
+                task.wait(0.05)
+                pcall(function() leverEvent:FireServer(leverMainPart, false) end)
+                touchAll()
                 task.wait(0.05)
             end
-            print("[AutoEscape] Lever ditekan 40x sambil di-pin di trigger:", leverMainPart.Name)
+            print("[AutoEscape] Lever ditekan 30x sambil di-pin di zona:", leverMainPart.Name)
         elseif leverEvent then
-            -- Fallback: kirim ke SEMUA MeshPart 'Main' yang ada
             local mains = {}
             for _, obj in ipairs(workspace:GetDescendants()) do
                 if obj:IsA("MeshPart") and obj.Name == "Main" then table.insert(mains, obj) end
             end
-            for i = 1, 20 do
-                if currentHrp and anchorCF then
-                    pcall(function()
-                        currentHrp.CFrame = anchorCF
-                        currentHrp.AssemblyLinearVelocity = Vector3.zero
-                    end)
-                end
+            for _ = 1, 20 do
+                pin()
                 for _, m in ipairs(mains) do
                     pcall(function() leverEvent:FireServer(m, true) end)
                     pcall(function() leverEvent:FireServer(m, false) end)
                 end
-                if currentHrp and firetouchinterest then
-                    for _, gp in ipairs(gateParts) do
-                        pcall(function()
-                            firetouchinterest(currentHrp, gp, 0)
-                            firetouchinterest(currentHrp, gp, 1)
-                        end)
-                    end
-                end
+                touchAll()
                 task.wait(0.1)
             end
             print("[AutoEscape] Dikirim ke", #mains, "MeshPart 'Main'")
         end
 
+        -- Tahap B3: tetap di dalam zona bonus 2 detik setelah tuas ditekan
+        for _ = 1, 20 do
+            pin()
+            touchAll()
+            task.wait(0.1)
+        end
+
         -- Lepas pin: karakter bebas bergerak lagi
         if currentHrp and currentHrp.Parent then
-            pcall(function() currentHrp.AssemblyLinearVelocity = Vector3.zero end)
+            pcall(function()
+                currentHrp.AssemblyLinearVelocity = Vector3.zero
+                currentHrp.AssemblyAngularVelocity = Vector3.zero
+            end)
         end
         task.wait(0.2)
 
