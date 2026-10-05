@@ -4087,40 +4087,69 @@ local function in_gen_zone(offset, zmin, zmax)
 end
 
 -- ==============================================================================
--- MODE KALIBRASI
+-- MODE KALIBRASI (BERBASIS GEOMETRI, BUKAN KECEPATAN)
 -- ==============================================================================
--- Cara kerjanya sederhana dan tidak menebak:
--- Jarum pada circular skill check bergerak CEPAT saat berada di zona putih,
--- dan bergerak pelan di luar zona. Jadi kalau kita lihat bagian mana dari
--- putaran yang paling cepat, di situlah zona putihnya.
 --
--- Kita kumpulkan semua offset selama satu putaran penuh, lalu mencari
--- bagian mana yang jarumnya paling cepat. Itu zonanya.
+-- CATATAN PENTING:
+-- Versi sebelumnya mengira jarum bergerak lebih cepat di zona putih.
+-- Itu SALAH. Jarum berputar dengan kecepatan konstan, jadi kecepatan
+-- tidak membawa informasi apa pun tentang zona. Hasilnya seluruh
+-- lingkaran terdeteksi sebagai zona (0 sampai 359 derajat).
+--
+-- Cara yang benar: baca langsung ukuran elemen "Goal" di UI.
+-- Goal itu visual arc zona putih, jadi ukurannya langsung encodes
+-- lebar zonanya. Kita cukup membacanya, tanpa menebak.
+--
+-- Yang dikembalikan: lebar zona dalam derajat, diukur dari elemen Goal.
 -- ==============================================================================
 
--- Data yang dikumpulkan selama kalibrasi.
-calibSpeeds    = {}   -- offset (derajat) -> kecepatan absolut terbesar
-calibMinSeen   = nil
-calibMaxSeen   = nil
+-- Lebar zona terakhir hasil pengukuran (derajat), 0 = belum diukur.
+calibZoneWidth = 0
 
--- Terapkan zona hasil kalibrasi, dengan lebar dibatasi supaya tidak
--- terlalu longgar dan jadi sering gagal.
-local function apply_calibration(minSeen, maxSeen)
-    local lo, hi = minSeen, maxSeen
-    if lo > hi then lo, hi = hi, lo end
+-- Hitung lebar zona (derajat) dari geometri elemen Goal.
+--
+-- Argumen:
+--   goalObj : elemen "Goal" (arc zona putih)
+--
+-- Cara hitung:
+--   1. Ambil AbsoluteSize dari Goal (panjang busur arc).
+--   2. Ambil radius lingkaran dari elemen induknya.
+--   3. Lebar zona = (panjang busur / keliling) x 360 derajat.
+local function measure_zone_degrees(goalObj)
+    if not goalObj then return nil end
 
-    -- Batas lebar maksimal supaya tidak terlalu forgiving.
-    local maxWidth = 24
-    local width = hi - lo
-    if width > maxWidth then
-        local center = (lo + hi) / 2
-        lo = center - maxWidth / 2
-        hi = center + maxWidth / 2
+    local goalSize = goalObj.AbsoluteSize
+    if goalSize.X < 1 or goalSize.Y < 1 then return nil end
+
+    -- Elemen induk dipakai sebagai acuan skala lingkaran.
+    local frame = goalObj.Parent
+    if not frame then return nil end
+    local frameSize = frame.AbsoluteSize
+    if frameSize.X < 1 or frameSize.Y < 1 then return nil end
+
+    -- Panjang busur Goal. Untuk arc horizontal, lebarnya = panjang busur.
+    local arcLen = math.max(goalSize.X, goalSize.Y)
+
+    -- Radius: pakai setengah dimensi terkecil dari frame sebagai
+    -- perkiraan radius lingkaran skill check.
+    local radius = math.min(frameSize.X, frameSize.Y) / 2
+    if radius < 1 then return nil end
+
+    -- Keliling lingkaran penuh, lalu konversi busur ke derajat.
+    local circumference = 2 * math.pi * radius
+    local degrees = (arcLen / circumference) * 360
+
+    -- Sanity check: zona yang masuk akal itu 3 sampai 120 derajat.
+    -- Di luar rentang itu berarti perkiraan kita salah.
+    if degrees < 3 or degrees > 120 then
+        -- Tetap laporkan angka mentahnya supaya bisa dikoreksi.
+        log("[AutoGen] Goal %.0fx%.0f piksel di frame %.0fx%.0f "
+            .. "-> perkiraan %.1f derajat (di luar rentang wajar)",
+            goalSize.X, goalSize.Y, frameSize.X, frameSize.Y, degrees)
+        return nil, radius, arcLen, degrees
     end
 
-    agenZoneMin = lo
-    agenZoneMax = hi
-    return lo, hi
+    return degrees, radius, arcLen
 end
 
 -- Helper untuk memastikan GUI benar-benar aktif & terlihat di layar
@@ -4320,48 +4349,40 @@ local function agen_tick()
     local offset = (lineRot - goalRot) % 360
 
     -- ======================================================================
-    -- MODE KALIBRASI
+    -- MODE KALIBRASI (GEOMETRI)
     --
-    -- Kalau kalibrasi aktif, kita HANYA mengamati dan mencatat, tidak
-    -- menekan apa pun. Data yang dikumpulkan: di offset berapa jarum
-    -- bergerak paling cepat. Itu menandakan zona putih.
+    -- Kalau aktif, kita HANYA mengukur dari elemen "Goal" lalu menyimpan
+    -- hasilnya. Tidak ada yang ditekan, dan selesai dalam satu frame
+    -- supaya tidak jadi spam log.
     -- ======================================================================
     if agenCalibrating then
-        local speedAbs = math.abs(angularVel)
-        local prev = calibSpeeds[offset]
-        if prev == nil or speedAbs > prev then
-            calibSpeeds[offset] = speedAbs
-        end
+        local deg, radius, arcLen = measure_zone_degrees(goalObj)
 
-        -- Cari blok offset yang jarumnya paling cepat.
-        -- Deteksi selesai setelah jarum sudah melewati semua sudut,
-        -- yaitu sudah pernah melihat offset di seluruh rentang 0-360.
-        local keys = {}
-        for k in pairs(calibSpeeds) do keys[#keys + 1] = k end
-        table.sort(keys)
+        if deg then
+            calibZoneWidth = deg
 
-        if #keys >= 60 then
-            -- Ambil kecepatan tertinggi sebagai acuan.
-            local maxSpeed = 0
-            for _, v in pairs(calibSpeeds) do
-                if v > maxSpeed then maxSpeed = v end
+            -- Zona dibangun di sekitar titik tengah rentang saat ini,
+            -- supaya lebar barunya mengikuti hasil pengukuran.
+            local center = (agenZoneMin + agenZoneMax) / 2
+            local lo = center - deg / 2
+            local hi = center + deg / 2
+
+            -- Bungkus ke rentang 0-360.
+            if lo < 0 then
+                lo = lo + 360
+                hi = hi + 360
             end
 
-            -- Ambil semua offset yang kecepatannya setidaknya 60 persen
-            -- dari puncak. Itu rentang zona putihnya.
-            local minSeen, maxSeen = nil, nil
-            for _, k in ipairs(keys) do
-                if calibSpeeds[k] >= maxSpeed * 0.6 then
-                    if minSeen == nil or k < minSeen then minSeen = k end
-                    if maxSeen == nil or k > maxSeen then maxSeen = k end
-                end
-            end
+            agenZoneMin = lo
+            agenZoneMax = hi
 
-            if minSeen and maxSeen then
-                local lo, hi = apply_calibration(minSeen, maxSeen)
-                log("[AutoGen] Kalibrasi selesai: zona %.1f sampai %.1f derajat "
-                    .. "(deteksi mentah %.1f sampai %.1f, puncak %.0f)",
-                    lo, hi, minSeen, maxSeen, maxSpeed)
+            log("[AutoGen] Kalibrasi selesai: lebar zona %.1f derajat "
+                .. "(busur %.1f piksel, radius %.1f piksel)", deg, arcLen, radius)
+            log("[AutoGen] Zona sekarang: %.1f sampai %.1f derajat", lo, hi)
+        else
+            -- Pengukuran gagal. Jangan spam log, cukup satu kali.
+            if not calibZoneWidth then
+                log("[AutoGen] Kalibrasi gagal: ukuran Goal tidak terbaca.")
             end
         end
         return
@@ -5186,25 +5207,29 @@ SecAutoGen:Toggle({
     Callback = function(enabled)
         agenCalibrating = enabled
         if enabled then
-            -- Bersihkan data lama supaya mengukur putaran yang baru.
-            -- Tabel ini global, jadi bisa langsung di-reset dari sini.
-            calibSpeeds  = {}
-            calibMinSeen = nil
-            calibMaxSeen = nil
+            calibZoneWidth = nil
             Window:Notify({
                 Title = "Kalibrasi Zona",
-                Description = "Aktif. Biarkan Auto Perfect Gen menyala "
-                    .. "satu putaran penuh, lalu cek console untuk hasil deteksi.",
-                Lifetime = 5
-            })
-        else
-            Window:Notify({
-                Title = "Kalibrasi Selesai",
-                Description = string.format(
-                    "Zona putih terdeteksi: %.1f sampai %.1f derajat.",
-                    agenZoneMin, agenZoneMax),
+                Description = "Aktif. Munculkan skill check, lalu "
+                    .. "matikan kalibrasi untuk menyimpan hasil pengukuran.",
                 Lifetime = 4
             })
+        else
+            if calibZoneWidth then
+                Window:Notify({
+                    Title = "Kalibrasi Selesai",
+                    Description = string.format(
+                        "Lebar zona %.1f derajat. Zona: %.1f sampai %.1f.",
+                        calibZoneWidth, agenZoneMin, agenZoneMax),
+                    Lifetime = 5
+                })
+            else
+                Window:Notify({
+                    Title = "Kalibrasi Gagal",
+                    Description = "Ukuran Goal tidak terbaca. Coba lagi saat skill check tampil.",
+                    Lifetime = 4
+                })
+            end
         end
     end
 })
