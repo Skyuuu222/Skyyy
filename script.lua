@@ -1709,7 +1709,7 @@ local function esp_gate_update()
             espGateObjects[obj] = nil
         else
             local dist = math.floor((camPos - data.part.Position).Magnitude)
-            data.lbl.Text = string.format("[🚪 LEVER GATE] (%dm)", dist)
+            data.lbl.Text = string.format("[LEVER GATE] (%dm)", dist)
         end
     end
 end
