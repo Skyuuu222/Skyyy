@@ -8,9 +8,13 @@ local HttpService = game:GetService("HttpService")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local CoreGui = game:GetService("CoreGui")
-
 local LocalPlayer = Players.LocalPlayer
+if not LocalPlayer then
+    pcall(function()
+        LocalPlayer = Players.PlayerAdded:Wait()
+    end)
+    if not LocalPlayer then LocalPlayer = Players.LocalPlayer end
+end
 
 -- ==============================================================================
 -- HELPER UTILITIES
@@ -1717,13 +1721,19 @@ end)
 
 local ok_wm, WMacLib = pcall(function()
     local src = game:HttpGet("https://raw.githubusercontent.com/Wicikk/WMacLib/main/WMacLib.lua")
+    -- Patch rbxassetid://0 agar tidak memicu error asset not found di console engine
+    src = src:gsub('"rbxassetid://0"', '""'):gsub("'rbxassetid://0'", "''")
     -- [FIX DRAGGING BUG] WMacLib asli menimpa dragInput dengan MouseMovement, sehingga input == dragInput gagal saat MouseButton1 dilepas.
     -- Patch ini menjamin dragging_ langsung false begitu MouseButton1 / Touch dilepas pada Window maupun Slider!
     src = src:gsub(
         "if input == dragInput then",
         "if input == dragInput or input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then"
     )
-    return loadstring(src)()
+    local fn, err = loadstring(src)
+    if not fn then
+        error(tostring(err or "Failed to compile WMacLib"))
+    end
+    return fn()
 end)
 if not ok_wm or not WMacLib then
     warn("[Sky Hub] Gagal memuat WMacLib: " .. tostring(WMacLib))
@@ -4798,8 +4808,15 @@ local SecWin = TabConfig:Section({})
 SecWin:Header({ Name = WMacLib:Gradient("Jendela & Kontrol", Color3.fromRGB(255, 160, 60), Color3.fromRGB(255, 80, 120)) })
 
 -- Watermark & FPS
-local watermark = WMacLib:Watermark({ Name = "Sky Hub", Version = "v1.0.0" })
-watermark:SetVisible(false)
+local watermark
+pcall(function()
+    if WMacLib and WMacLib.Watermark then
+        watermark = WMacLib:Watermark({ Name = "Sky Hub", Version = "v1.0.0" })
+        if watermark and watermark.SetVisible then
+            watermark:SetVisible(false)
+        end
+    end
+end)
 
 local fpsCount, fpsElapsed = 0, 0
 RunService.Heartbeat:Connect(function(dt)
@@ -4807,7 +4824,9 @@ RunService.Heartbeat:Connect(function(dt)
     fpsElapsed = fpsElapsed + dt
     if fpsElapsed >= 0.5 then
         pcall(function()
-            watermark:Set("FPS", math.round(fpsCount / fpsElapsed) .. " FPS")
+            if watermark and watermark.Set then
+                watermark:Set("FPS", math.round(fpsCount / fpsElapsed) .. " FPS")
+            end
         end)
         fpsCount = 0
         fpsElapsed = 0
@@ -4818,7 +4837,11 @@ SecWin:Toggle({
     Name = "Logo Watermark & FPS Overlay",
     Default = false,
     Callback = function(value)
-        watermark:SetVisible(value)
+        pcall(function()
+            if watermark and watermark.SetVisible then
+                watermark:SetVisible(value)
+            end
+        end)
     end
 })
 
