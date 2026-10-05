@@ -1419,16 +1419,14 @@ local function radar_update(radarCircle)
 
     local allPlayers = Players:GetPlayers()
     for _, p in ipairs(allPlayers) do
-        if p == LocalPlayer then continue end
-
-        local pChar = p.Character
-        local pHrp = pChar and pChar:FindFirstChild("HumanoidRootPart")
-        if not pHrp then continue end
-
-        -- Cek jarak 3D langsung dari HRP ke HRP
-        local diff = pHrp.Position - myPos
-        local dist3D = math.sqrt(diff.X * diff.X + diff.Y * diff.Y + diff.Z * diff.Z)
-        if dist3D > RADAR_RANGE then continue end
+        if p ~= LocalPlayer then
+            local pChar = p.Character
+            local pHrp = pChar and pChar:FindFirstChild("HumanoidRootPart")
+            if pHrp then
+                -- Cek jarak 3D langsung dari HRP ke HRP
+                local diff = pHrp.Position - myPos
+                local dist3D = math.sqrt(diff.X * diff.X + diff.Y * diff.Y + diff.Z * diff.Z)
+                if dist3D <= RADAR_RANGE then
 
         -- Posisi relatif ke kamera (world space -> camera object space)
         -- Ini menghasilkan titik yang mengikuti arah pandang kamera persis
@@ -1504,6 +1502,9 @@ local function radar_update(radarCircle)
             lblS.Font = Enum.Font.Gotham
             lblS.ZIndex = 10
             lblS.Parent = dot
+        end
+                end
+            end
         end
     end
 end
@@ -1923,20 +1924,21 @@ local function trigger_instant_escape()
             local searchRoot = targetObj.Parent or targetObj
             -- Cek di parent dan grandparent
             for _, ancestor in ipairs({targetObj, targetObj.Parent, targetObj.Parent and targetObj.Parent.Parent}) do
-                if not ancestor then continue end
-                for _, desc in ipairs(ancestor:GetDescendants()) do
-                    if desc:IsA("ProximityPrompt") then
-                        pcall(function()
-                            if fireproximityprompt then
-                                fireproximityprompt(desc)
-                            else
-                                desc.Enabled = true
-                                desc:InputHoldBegin()
-                                task.wait((desc.HoldDuration or 1) + 0.05)
-                                desc:InputHoldEnd()
-                            end
-                        end)
-                        escaped = true
+                if ancestor then
+                    for _, desc in ipairs(ancestor:GetDescendants()) do
+                        if desc:IsA("ProximityPrompt") then
+                            pcall(function()
+                                if fireproximityprompt then
+                                    fireproximityprompt(desc)
+                                else
+                                    desc.Enabled = true
+                                    desc:InputHoldBegin()
+                                    task.wait((desc.HoldDuration or 1) + 0.05)
+                                    desc:InputHoldEnd()
+                                end
+                            end)
+                            escaped = true
+                        end
                     end
                 end
             end
