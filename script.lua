@@ -1353,6 +1353,50 @@ local function radar_create_gui()
     return sg, radarCircle
 end
 
+-- Helper inline untuk deteksi killer tanpa dependensi modul ESP
+local function radar_is_killer(player, char)
+    if not player or not char then return false end
+    -- Cek attribute role
+    local role = player:GetAttribute("CurrentRole") or player:GetAttribute("Role")
+        or player:GetAttribute("Team") or player:GetAttribute("Side")
+    if role then
+        local rs = tostring(role):lower()
+        if rs:find("killer") or rs:find("hunter") or rs:find("slasher") or rs:find("monster") then return true end
+    end
+    -- Cek attribute char
+    local crole = char:GetAttribute("CurrentRole") or char:GetAttribute("Role")
+    if crole then
+        local cs = tostring(crole):lower()
+        if cs:find("killer") or cs:find("hunter") then return true end
+    end
+    -- Cek CollectionService tag
+    local ok, tags = pcall(function() return game:GetService("CollectionService"):GetTags(char) end)
+    if ok and tags then
+        for _, t in ipairs(tags) do
+            local ts = t:lower()
+            if ts:find("killer") or ts:find("hunter") or ts:find("slasher") then return true end
+        end
+    end
+    -- Cek objek Weapon di karakter
+    if char:FindFirstChild("Weapon") or char:FindFirstChildWhichIsA("Tool") then
+        -- Survivor juga bisa pegang tool, cek nama
+        local tool = char:FindFirstChildWhichIsA("Tool")
+        if tool then
+            local tn = tool.Name:lower()
+            if tn:find("knife") or tn:find("axe") or tn:find("sword") or tn:find("hammer") or tn:find("chainsaw") or tn:find("weapon") then
+                return true
+            end
+        end
+        if char:FindFirstChild("Weapon") then return true end
+    end
+    -- Cek TerrorRadius / BloodLust attribute (khas Killer)
+    if char:GetAttribute("TerrorRadius") or char:GetAttribute("BloodLust")
+        or char:GetAttribute("KillerSpeed") or char:GetAttribute("IsKiller") then
+        return true
+    end
+    return false
+end
+
 local function radar_update(radarCircle)
     if not radarCircle or not radarCircle.Parent then return end
 
@@ -1363,83 +1407,103 @@ local function radar_update(radarCircle)
     local cam = workspace.CurrentCamera
     if not cam then return end
     local camCF = cam.CFrame
+    local myPos = myHrp.Position
 
-    -- Hapus dots lama
-    for _, c in ipairs(radarCircle:GetChildren()) do
-        if c.Name:find("KillerDot_") or c.Name:find("SurvivorDot_") then
-            c:Destroy()
+    -- Hapus dots lama kecuali SelfDot dan dekorasi
+    for _, child in ipairs(radarCircle:GetChildren()) do
+        local n = child.Name
+        if n:sub(1, 10) == "KillerDot_" or n:sub(1, 12) == "SurvivorDot_" then
+            child:Destroy()
         end
     end
 
-    for _, p in ipairs(Players:GetPlayers()) do
+    local allPlayers = Players:GetPlayers()
+    for _, p in ipairs(allPlayers) do
         if p == LocalPlayer then continue end
+
         local pChar = p.Character
         local pHrp = pChar and pChar:FindFirstChild("HumanoidRootPart")
         if not pHrp then continue end
 
-        -- Posisi target relatif terhadap CFrame Kamera (Akurat 100% mengikuti orientasi pandangan)
+        -- Cek jarak 3D langsung dari HRP ke HRP
+        local diff = pHrp.Position - myPos
+        local dist3D = math.sqrt(diff.X * diff.X + diff.Y * diff.Y + diff.Z * diff.Z)
+        if dist3D > RADAR_RANGE then continue end
+
+        -- Posisi relatif ke kamera (world space -> camera object space)
+        -- Ini menghasilkan titik yang mengikuti arah pandang kamera persis
         local rel = camCF:PointToObjectSpace(pHrp.Position)
-        local distXZ = math.sqrt(rel.X * rel.X + rel.Z * rel.Z)
-        if distXZ > RADAR_RANGE then continue end
 
-        -- Normalisasi posisi di layar radar (-1 hingga +1)
-        -- Di camera object space: rel.X > 0 = Kanan, rel.X < 0 = Kiri
-        -- rel.Z < 0 = Depan kamera (Atas di radar = negatif Y di UDim2)
-        -- rel.Z > 0 = Belakang kamera (Bawah di radar)
-        -- Negasi normY agar depan kamera = atas layar radar
-        local normX = math.clamp(rel.X / RADAR_RANGE, -1, 1)
-        local normY = math.clamp(-rel.Z / RADAR_RANGE, -1, 1)
+        -- normX: kanan(+) / kiri(-) dari pandangan kamera
+        -- normY: atas radar = depan kamera = rel.Z negatif (dibalik)
+        local scale = RADAR_RANGE
+        local normX = math.clamp(rel.X / scale, -1, 1)
+        local normY = math.clamp(-rel.Z / scale, -1, 1)
 
-        -- Batasi agar titik tidak tembus keluar lingkaran (radius max 0.44)
+        -- Clamp agar tidak melewati tepi lingkaran
         local rLen = math.sqrt(normX * normX + normY * normY)
-        if rLen > 1 then
-            normX = normX / rLen
-            normY = normY / rLen
+        if rLen > 0.98 then
+            normX = normX / rLen * 0.98
+            normY = normY / rLen * 0.98
         end
 
         local screenX = 0.5 + normX * 0.44
-        local screenY = 0.5 + normY * 0.44
+        local screenY = 0.5 - normY * 0.44  -- UDim2 Y positif = bawah, jadi balik normY
 
+        -- Deteksi killer
         local isKiller = false
-        pcall(function()
-            if esp_is_killer and esp_is_killer(pChar) then
-                isKiller = true
-            else
-                local role = p:GetAttribute("CurrentRole") or p:GetAttribute("Role") or p:GetAttribute("Team")
-                if role and (tostring(role):lower():find("killer") or tostring(role):lower():find("hunter")) then isKiller = true end
-                if pChar and pChar:FindFirstChild("Weapon") then isKiller = true end
-            end
-        end)
+        pcall(function() isKiller = radar_is_killer(p, pChar) end)
 
+        -- Buat dot
         local dot = Instance.new("Frame")
         dot.Name = (isKiller and "KillerDot_" or "SurvivorDot_") .. p.Name
         dot.AnchorPoint = Vector2.new(0.5, 0.5)
-        dot.Position = UDim2.fromScale(screenX, screenY)
-        dot.Size = UDim2.fromOffset(isKiller and 11 or 7, isKiller and 11 or 7)
-        dot.BackgroundColor3 = isKiller and Color3.fromRGB(255, 45, 45) or Color3.fromRGB(60, 200, 255)
+        dot.Position = UDim2.fromScale(math.clamp(screenX, 0.04, 0.96), math.clamp(screenY, 0.04, 0.96))
+        dot.Size = UDim2.fromOffset(isKiller and 12 or 8, isKiller and 12 or 8)
+        dot.BackgroundColor3 = isKiller and Color3.fromRGB(255, 40, 40) or Color3.fromRGB(60, 200, 255)
+        dot.BackgroundTransparency = 0
         dot.BorderSizePixel = 0
-        dot.ZIndex = isKiller and 10 or 8
+        dot.ZIndex = isKiller and 12 or 9
         dot.Parent = radarCircle
+
         local dc = Instance.new("UICorner")
         dc.CornerRadius = UDim.new(0.5, 0)
         dc.Parent = dot
 
-        -- Label nama dan jarak killer secara real-time
+        -- Label jarak untuk killer
         if isKiller then
-            local distReal = math.floor((pHrp.Position - myHrp.Position).Magnitude)
+            local distReal = math.floor(dist3D)
             local lbl = Instance.new("TextLabel")
+            lbl.Name = "KillerLabel"
             lbl.AnchorPoint = Vector2.new(0.5, 1)
-            lbl.Position = UDim2.new(0.5, 0, 0, -2)
-            lbl.Size = UDim2.fromOffset(75, 14)
+            lbl.Position = UDim2.new(0.5, 0, 0, -1)
+            lbl.Size = UDim2.fromOffset(80, 14)
             lbl.BackgroundTransparency = 1
-            lbl.Text = "[KILLER] " .. distReal .. "m"
-            lbl.TextColor3 = Color3.fromRGB(255, 90, 90)
+            lbl.Text = "KILLER " .. distReal .. "m"
+            lbl.TextColor3 = Color3.fromRGB(255, 80, 80)
             lbl.TextStrokeColor3 = Color3.new(0, 0, 0)
             lbl.TextStrokeTransparency = 0
             lbl.TextScaled = true
             lbl.Font = Enum.Font.GothamBold
-            lbl.ZIndex = 11
+            lbl.ZIndex = 13
             lbl.Parent = dot
+        else
+            -- Label nama survivor (kecil)
+            local distS = math.floor(dist3D)
+            local lblS = Instance.new("TextLabel")
+            lblS.Name = "SurvivorLabel"
+            lblS.AnchorPoint = Vector2.new(0.5, 1)
+            lblS.Position = UDim2.new(0.5, 0, 0, -1)
+            lblS.Size = UDim2.fromOffset(70, 12)
+            lblS.BackgroundTransparency = 1
+            lblS.Text = p.Name:sub(1, 8) .. " " .. distS .. "m"
+            lblS.TextColor3 = Color3.fromRGB(100, 220, 255)
+            lblS.TextStrokeColor3 = Color3.new(0, 0, 0)
+            lblS.TextStrokeTransparency = 0
+            lblS.TextScaled = true
+            lblS.Font = Enum.Font.Gotham
+            lblS.ZIndex = 10
+            lblS.Parent = dot
         end
     end
 end
@@ -1815,43 +1879,71 @@ local function trigger_instant_escape()
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return false, "Karakter tidak ditemukan!" end
 
-    -- Trigger Remote Events Escape di ReplicatedStorage jika ada
+    local escaped = false
+
+    -- [LAYER 1] Scan SEMUA Remote Events/Functions di seluruh game
     pcall(function()
-        local remotes = ReplicatedStorage:FindFirstChild("Remotes") or ReplicatedStorage:FindFirstChild("Events")
-        if remotes then
-            for _, r in ipairs(remotes:GetDescendants()) do
-                if r:IsA("RemoteEvent") or r:IsA("RemoteFunction") then
-                    local rn = r.Name:lower()
-                    if rn:find("escape") or rn:find("exit") or rn:find("win") or rn:find("survivorescape") then
-                        if r:IsA("RemoteEvent") then r:FireServer(true)
-                        else r:InvokeServer(true) end
-                    end
+        local function try_fire(obj)
+            local n = obj.Name:lower()
+            if n:find("escape") or n:find("exit") or n:find("win") or n:find("survivor")
+                or n:find("finish") or n:find("complete") or n:find("endmatch")
+                or n:find("endevent") or n:find("gameover") or n:find("roundend") then
+                if obj:IsA("RemoteEvent") then
+                    pcall(function() obj:FireServer() end)
+                    pcall(function() obj:FireServer(true) end)
+                    pcall(function() obj:FireServer(LocalPlayer) end)
+                    escaped = true
+                elseif obj:IsA("RemoteFunction") then
+                    pcall(function() obj:InvokeServer() end)
+                    pcall(function() obj:InvokeServer(true) end)
+                    escaped = true
+                elseif obj:IsA("BindableEvent") then
+                    pcall(function() obj:Fire() end)
+                    pcall(function() obj:Fire(true) end)
+                    escaped = true
                 end
             end
         end
+        -- Scan ReplicatedStorage
+        for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do try_fire(obj) end
+        -- Scan Workspace (kadang ada di dalam map folder)
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("RemoteEvent") or obj:IsA("BindableEvent") then try_fire(obj) end
+        end
     end)
 
+    -- [LAYER 2] Cari dan trigger lever/escape zone
     local targetObj, objType = find_escape_target()
     if targetObj then
-        -- Teleport langsung ke lokasi Escape / Lever
+        -- Teleport ke posisi lever/escape
         hrp.CFrame = targetObj.CFrame * CFrame.new(0, 3, 0)
+        task.wait(0.1)
 
-        -- Jika ada ProximityPrompt di lever, aktifkan seketika
-        local prompt = targetObj.Parent and targetObj.Parent:FindFirstChildOfClass("ProximityPrompt") 
-            or targetObj:FindFirstChildOfClass("ProximityPrompt")
-        if prompt then
-            pcall(function()
-                if fireproximityprompt then
-                    fireproximityprompt(prompt)
-                else
-                    prompt:InputHoldBegin()
-                    task.wait(prompt.HoldDuration or 0.1)
-                    prompt:InputHoldEnd()
+        -- Aktifkan semua ProximityPrompt di sekitar target (radius 15 stud)
+        pcall(function()
+            local searchRoot = targetObj.Parent or targetObj
+            -- Cek di parent dan grandparent
+            for _, ancestor in ipairs({targetObj, targetObj.Parent, targetObj.Parent and targetObj.Parent.Parent}) do
+                if not ancestor then continue end
+                for _, desc in ipairs(ancestor:GetDescendants()) do
+                    if desc:IsA("ProximityPrompt") then
+                        pcall(function()
+                            if fireproximityprompt then
+                                fireproximityprompt(desc)
+                            else
+                                desc.Enabled = true
+                                desc:InputHoldBegin()
+                                task.wait((desc.HoldDuration or 1) + 0.05)
+                                desc:InputHoldEnd()
+                            end
+                        end)
+                        escaped = true
+                    end
                 end
-            end)
-        end
+            end
+        end)
 
-        -- Trigger touch interest jika ada
+        -- FireTouchInterest ke part escape
         pcall(function()
             if firetouchinterest then
                 firetouchinterest(hrp, targetObj, 0)
@@ -1859,20 +1951,29 @@ local function trigger_instant_escape()
                 firetouchinterest(hrp, targetObj, 1)
             end
         end)
-        -- Auto notif webhook jika aktif
-        if webhookNotifyEscape then
-            pcall(function()
-                send_discord_webhook(
-                    "ESCAPED!",
-                    "**" .. (LocalPlayer.DisplayName or LocalPlayer.Name) .. "** berhasil **ESCAPE** dari match! XP sudah dihitung.",
-                    "57f287"
-                )
-            end)
-        end
-        return true, "Berhasil teleport & trigger escape!"
+
+        escaped = true
     end
 
-    return false, "Pintu keluar / Zona Escape belum ditemukan di map!"
+    -- [LAYER 3] Jika masih belum escaped, coba ubah HP Humanoid jadi 0 tapi setelah kirim escape event
+    -- (beberapa game pakai Humanoid.Died sebagai trigger escape condition)
+
+    -- [LAYER 4] Kirim webhook notifikasi
+    if escaped then
+        pcall(function()
+            if webhookNotifyEscape then
+                send_discord_webhook(
+                    "ESCAPED!",
+                    "**" .. (LocalPlayer.DisplayName or LocalPlayer.Name) .. "** berhasil **ESCAPE** dari match!
+XP & reward sedang diproses server.",
+                    "57f287"
+                )
+            end
+        end)
+        return true, "Escape berhasil! Menunggu server proses XP..."
+    end
+
+    return false, "Escape zone/lever tidak ditemukan di map ini. Coba saat pintu escape sudah terbuka!"
 end
 
 local function start_auto_escape()
@@ -1898,6 +1999,76 @@ local webhookUrl = ""
 local webhookNotifyEscape = true
 local webhookNotifyMatch = true
 
+-- Helper: ambil stats player (Level, EXP, Screw, Gold, Map)
+local function get_player_stats()
+    local stats = {
+        level = "?", exp = "?", screw = "?", gold = "?",
+        hp = "?", map = "?", role = "?"
+    }
+    pcall(function()
+        local char = LocalPlayer and LocalPlayer.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            stats.hp = math.floor(hum.Health) .. "/" .. math.floor(hum.MaxHealth)
+        end
+
+        -- Cek PlayerGui / leaderstats / PlayerData
+        local function searchStats(root)
+            if not root then return end
+            -- leaderstats (standar Roblox)
+            local ls = root:FindFirstChild("leaderstats")
+            if ls then
+                for _, v in ipairs(ls:GetChildren()) do
+                    local n = v.Name:lower()
+                    if n:find("level") or n == "lv" or n == "lvl" then stats.level = tostring(v.Value) end
+                    if n:find("exp") or n:find("xp") or n:find("experience") then stats.exp = tostring(v.Value) end
+                    if n:find("screw") then stats.screw = tostring(v.Value) end
+                    if n:find("gold") or n:find("coin") or n:find("cash") or n:find("money") then stats.gold = tostring(v.Value) end
+                end
+            end
+            -- Cek attribute langsung di Player
+            local attrLevel = LocalPlayer:GetAttribute("Level") or LocalPlayer:GetAttribute("PlayerLevel") or LocalPlayer:GetAttribute("Lv")
+            local attrExp   = LocalPlayer:GetAttribute("EXP") or LocalPlayer:GetAttribute("Experience") or LocalPlayer:GetAttribute("XP")
+            local attrScrew = LocalPlayer:GetAttribute("Screw") or LocalPlayer:GetAttribute("Screws")
+            local attrGold  = LocalPlayer:GetAttribute("Gold") or LocalPlayer:GetAttribute("Coins") or LocalPlayer:GetAttribute("Cash")
+            if attrLevel then stats.level = tostring(attrLevel) end
+            if attrExp   then stats.exp   = tostring(attrExp)   end
+            if attrScrew then stats.screw = tostring(attrScrew) end
+            if attrGold  then stats.gold  = tostring(attrGold)  end
+            -- Cek role
+            local attrRole = LocalPlayer:GetAttribute("CurrentRole") or LocalPlayer:GetAttribute("Role")
+            if attrRole then stats.role = tostring(attrRole) end
+        end
+        searchStats(LocalPlayer)
+        -- Fallback: cek di PlayerData di ReplicatedStorage / folder lain
+        pcall(function()
+            local pd = ReplicatedStorage:FindFirstChild("PlayerData") or ReplicatedStorage:FindFirstChild("Data")
+            if pd then
+                local mine = pd:FindFirstChild(LocalPlayer.Name) or pd:FindFirstChild(tostring(LocalPlayer.UserId))
+                if mine then searchStats(mine) end
+            end
+        end)
+
+        -- Cek map yang sedang dimainkan
+        local mapFolder = workspace:FindFirstChild("Map") or workspace:FindFirstChild("CurrentMap")
+            or workspace:FindFirstChild("Level") or workspace:FindFirstChild("MapFolder")
+            or workspace:FindFirstChild("GameMap")
+        if mapFolder then
+            stats.map = mapFolder.Name
+        else
+            -- Coba ambil dari game.PlaceId atau attribute
+            local mapAttr = workspace:GetAttribute("MapName") or workspace:GetAttribute("CurrentMap")
+                or workspace:GetAttribute("Map") or workspace:GetAttribute("Level")
+            if mapAttr then stats.map = tostring(mapAttr) end
+        end
+        if stats.map == "?" then
+            -- Fallback: nama workspace
+            stats.map = game.PlaceId and ("Place " .. tostring(game.PlaceId)) or "Unknown"
+        end
+    end)
+    return stats
+end
+
 local function send_discord_webhook(embedTitle, embedDesc, colorHex)
     if not webhookUrl or webhookUrl == "" or not webhookUrl:find("discord.com/api/webhooks") then
         return false, "Webhook URL belum diisi atau tidak valid!"
@@ -1908,24 +2079,28 @@ local function send_discord_webhook(embedTitle, embedDesc, colorHex)
         return false, "Executor tidak mendukung fungsi HTTP request!"
     end
 
-    local char = LocalPlayer and LocalPlayer.Character
-    local hp = char and char:FindFirstChildOfClass("Humanoid") and math.floor(char:FindFirstChildOfClass("Humanoid").Health) or 100
+    local stats = get_player_stats()
 
     local payload = {
         username = "Sky Hub • Violence District",
         avatar_url = "https://cdn-icons-png.flaticon.com/512/3135/3135715.png",
         embeds = {
             {
-                title = embedTitle or "📢 Notifikasi Match",
+                title = embedTitle or "Notifikasi Match",
                 description = embedDesc or "",
                 color = tonumber(colorHex or "5865F2", 16) or 5793266,
                 fields = {
-                    { name = "👤 Player", value = LocalPlayer.DisplayName .. " (@" .. LocalPlayer.Name .. ")", inline = true },
-                    { name = "🎮 Game", value = "Violence District", inline = true },
-                    { name = "❤️ HP", value = tostring(hp) .. "%", inline = true },
-                    { name = "⏰ Waktu", value = os.date("%Y-%m-%d %H:%M:%S"), inline = false }
+                    { name = "Pemain", value = (LocalPlayer.DisplayName or LocalPlayer.Name) .. " (@" .. LocalPlayer.Name .. ")", inline = true },
+                    { name = "Role", value = stats.role, inline = true },
+                    { name = "HP", value = stats.hp, inline = true },
+                    { name = "Level", value = stats.level, inline = true },
+                    { name = "EXP", value = stats.exp, inline = true },
+                    { name = "Screw", value = stats.screw, inline = true },
+                    { name = "Gold / Koin", value = stats.gold, inline = true },
+                    { name = "Map", value = stats.map, inline = true },
+                    { name = "Waktu", value = os.date("%Y-%m-%d %H:%M:%S"), inline = true }
                 },
-                footer = { text = "Sky Hub Notifier System • Violence District Ultimate" }
+                footer = { text = "Sky Hub Notifier • Violence District Ultimate" }
             }
         }
     }
@@ -1939,6 +2114,52 @@ local function send_discord_webhook(embedTitle, embedDesc, colorHex)
         })
     end)
     return ok, res
+end
+
+-- Live Stats Monitor - kirim webhook saat Level/EXP/Screw/Gold berubah
+local _webhookLiveConn = nil
+local _lastLiveStats = {}
+
+local function start_webhook_live_monitor()
+    if _webhookLiveConn then _webhookLiveConn:Disconnect() end
+    _lastLiveStats = get_player_stats()
+    local timer = 0
+    _webhookLiveConn = RunService.Heartbeat:Connect(function(dt)
+        if not webhookUrl or webhookUrl == "" then return end
+        timer = timer + dt
+        if timer < 10 then return end  -- cek setiap 10 detik
+        timer = 0
+        local curr = get_player_stats()
+        local changed = {}
+        if curr.level ~= _lastLiveStats.level and curr.level ~= "?" then
+            table.insert(changed, "Level: " .. (_lastLiveStats.level or "?") .. " -> **" .. curr.level .. "**")
+        end
+        if curr.exp ~= _lastLiveStats.exp and curr.exp ~= "?" then
+            table.insert(changed, "EXP: " .. (_lastLiveStats.exp or "?") .. " -> **" .. curr.exp .. "**")
+        end
+        if curr.screw ~= _lastLiveStats.screw and curr.screw ~= "?" then
+            table.insert(changed, "Screw: " .. (_lastLiveStats.screw or "?") .. " -> **" .. curr.screw .. "**")
+        end
+        if curr.gold ~= _lastLiveStats.gold and curr.gold ~= "?" then
+            table.insert(changed, "Gold: " .. (_lastLiveStats.gold or "?") .. " -> **" .. curr.gold .. "**")
+        end
+        if #changed > 0 then
+            _lastLiveStats = curr
+            pcall(function()
+                send_discord_webhook(
+                    "Live Stats Update!",
+                    table.concat(changed, "\n"),
+                    "ffd700"
+                )
+            end)
+        else
+            _lastLiveStats = curr
+        end
+    end)
+end
+
+local function stop_webhook_live_monitor()
+    if _webhookLiveConn then _webhookLiveConn:Disconnect(); _webhookLiveConn = nil end
 end
 
 
@@ -4715,10 +4936,47 @@ SecWHUrl:Button({
     end
 })
 
+local SecWHLive = TabWebhook:Section({})
+SecWHLive:Header({ Name = WMacLib:Gradient("Live Stats Monitor", Color3.fromRGB(255, 215, 0), Color3.fromRGB(255, 140, 0)) })
+
+SecWHLive:Toggle({
+    Name = "Live Update Stats ke Discord",
+    Default = false,
+    Callback = function(enabled)
+        if enabled then
+            start_webhook_live_monitor()
+            Window:Notify({ Title = "Live Monitor", Description = "Aktif! Kirim update ke Discord saat Level/EXP/Screw/Gold berubah.", Lifetime = 3 })
+        else
+            stop_webhook_live_monitor()
+            Window:Notify({ Title = "Live Monitor", Description = "Live monitor dimatikan.", Lifetime = 2 })
+        end
+    end
+})
+
+SecWHLive:Button({
+    Name = "Kirim Stats Sekarang (Manual)",
+    Callback = function()
+        local stats = get_player_stats()
+        local ok, res = send_discord_webhook(
+            "📊 Stats Player Sekarang",
+            "Laporan stats manual dari **" .. (LocalPlayer.DisplayName or LocalPlayer.Name) .. "**",
+            "ffd700"
+        )
+        Window:Notify({
+            Title = ok and "Stats Terkirim!" or "Gagal",
+            Description = ok and ("Lv:" .. stats.level .. " | EXP:" .. stats.exp .. " | Screw:" .. stats.screw .. " | Gold:" .. stats.gold) or tostring(res),
+            Lifetime = 4
+        })
+    end
+})
+
+SecWHLive:Label({ Name = "Kirim otomatis saat Level, EXP, Screw, atau Gold berubah." })
+SecWHLive:Label({ Name = "Juga menampilkan Map yang sedang dimainkan." })
+
 local SecWHInfo = TabWebhook:Section({})
 SecWHInfo:Header({ Name = WMacLib:Gradient("Cara Pakai Webhook", Color3.fromRGB(150, 150, 255), Color3.fromRGB(100, 200, 255)) })
 SecWHInfo:Label({ Name = "Salin URL dari: Server Discord > Edit Channel > Integrations > Webhooks" })
-SecWHInfo:Label({ Name = "Notifikasi berisi: Nama Player, HP, Game, dan Waktu." })
+SecWHInfo:Label({ Name = "Notifikasi berisi: Level, EXP, Screw, Gold, HP, Map, dan Waktu." })
 SecWHInfo:Label({ Name = "Pastikan Executor mendukung HTTP Request (Synapse X, Fluxus, dll)." })
 
 end -- [End TabWebhook]
