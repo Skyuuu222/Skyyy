@@ -4545,7 +4545,7 @@ SecAutoEscape:Button({
     Name = "Scan Trigger Exit (Diagnosa)",
     Callback = function()
         scan_exit_triggers()
-    }
+    end
 })
 
 SecAutoEscape:Button({
