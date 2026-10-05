@@ -3691,9 +3691,9 @@ if not ok_wm or not WMacLib then
 end
 
 local Window = WMacLib:Window({
-    Title = "Skyyy",
-    Subtitle = "Sky anak baik",
-    Size = UDim2.fromOffset(560, 430),
+    Title = "Sky Hub",
+    Subtitle = "Violence District",
+    Size = UDim2.fromOffset(600, 460),
     DragStyle = 1,
     DisabledWindowControls = {},
     ShowUserInfo = true,
@@ -3735,103 +3735,144 @@ if wmacGui then wmacGui.Enabled = false end
 pcall(function() Window:SetState(false) end)
 
 -- ==============================================================================
--- WELCOME SCREEN KEREN & MODERN (TAMPIL PERTAMA SEBELUM MENU UTAMA)
+-- WELCOME SCREEN (TAMPIL PERTAMA SEBELUM MENU UTAMA)
 -- ==============================================================================
+-- Desain: glassmorphism dengan palet indigo-teal yang elegan.
+-- Gradien halus, sudut membulat besar, dan animasi halus supaya
+-- terasa premium tanpa norak.
+-- ==============================================================================
+
+-- Palet warna yang dipakai di seluruh welcome screen.
+-- Dipilih supaya serasi dan tidak mencolok.
+local P = {
+    bgCard    = Color3.fromRGB(16, 18, 28),
+    bgCardAlt = Color3.fromRGB(22, 25, 38),
+    bgChip    = Color3.fromRGB(28, 32, 48),
+    border    = Color3.fromRGB(46, 52, 74),
+    textMain  = Color3.fromRGB(238, 240, 250),
+    textMuted = Color3.fromRGB(140, 148, 175),
+    accentA   = Color3.fromRGB(99, 130, 255),   -- indigo
+    accentB   = Color3.fromRGB(72, 214, 200),   -- teal
+    accentC   = Color3.fromRGB(168, 120, 255),  -- violet
+}
+
+local function grad(parent, c1, c2, rotation)
+    local g = Instance.new("UIGradient")
+    g.Color = ColorSequence.new(c1, c2)
+    if rotation then g.Rotation = rotation end
+    g.Parent = parent
+    return g
+end
+
+local function round(obj, radius)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, radius)
+    c.Parent = obj
+    return c
+end
+
 task.spawn(function()
     pcall(function()
+        local TweenService = game:GetService("TweenService")
+
         local SG = Instance.new("ScreenGui")
         SG.Name = "SkyHubWelcome"
         SG.ResetOnSpawn = false
-        SG.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
         SG.IgnoreGuiInset = true
+        SG.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
         pcall(function()
             if gethui then SG.Parent = gethui()
             else SG.Parent = CoreGui end
         end)
         if not SG.Parent then SG.Parent = CoreGui end
 
-        -- Backdrop blur
+        -- Blur latar belakang supaya tulisan lebih fokus.
         local blur = Instance.new("BlurEffect")
-        blur.Size = 24
+        blur.Size = 18
         blur.Parent = workspace.CurrentCamera
 
-        -- Overlay gelap
+        -- Overlay gelap tipis, tidak fully opaque supaya game masih terlihat.
         local overlay = Instance.new("Frame")
         overlay.Size = UDim2.fromScale(1, 1)
-        overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-        overlay.BackgroundTransparency = 0.35
+        overlay.BackgroundColor3 = Color3.fromRGB(6, 7, 12)
+        overlay.BackgroundTransparency = 0.3
         overlay.BorderSizePixel = 0
         overlay.ZIndex = 1
         overlay.Parent = SG
 
-        -- Card container
+        -- Card utama di tengah layar.
         local card = Instance.new("Frame")
         card.AnchorPoint = Vector2.new(0.5, 0.5)
-        card.Position = UDim2.fromScale(0.5, 0.5)
-        card.Size = UDim2.fromOffset(520, 300)
-        card.BackgroundColor3 = Color3.fromRGB(13, 13, 20)
-        card.BackgroundTransparency = 0.05
+        card.Position = UDim2.fromScale(0.5, 0.56)
+        card.Size = UDim2.fromOffset(540, 330)
+        card.BackgroundColor3 = P.bgCard
+        card.BackgroundTransparency = 1
         card.BorderSizePixel = 0
+        card.ClipsDescendants = true
         card.ZIndex = 10
         card.Parent = SG
+        round(card, 22)
 
-        local cardCorner = Instance.new("UICorner")
-        cardCorner.CornerRadius = UDim.new(0, 20)
-        cardCorner.Parent = card
+        -- Garis tipis di sekeliling card supaya tidak terlihat flat.
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = P.border
+        stroke.Thickness = 1
+        stroke.Transparency = 0.5
+        stroke.Parent = card
 
-        -- Garis dekorasi atas (gradient strip)
-        local topStrip = Instance.new("Frame")
-        topStrip.Size = UDim2.new(1, 0, 0, 3)
-        topStrip.BackgroundColor3 = Color3.fromRGB(100, 180, 255)
-        topStrip.BorderSizePixel = 0
-        topStrip.ZIndex = 11
-        topStrip.Parent = card
-        local topCorner = Instance.new("UICorner")
-        topCorner.CornerRadius = UDim.new(0, 20)
-        topCorner.Parent = topStrip
-        local topGrad = Instance.new("UIGradient")
-        topGrad.Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(80, 120, 255)),
-            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(180, 80, 255)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 80, 160)),
-        })
-        topGrad.Parent = topStrip
+        -- Cahaya lembut di sudut kiri atas card (glassmorphism).
+        local sheen = Instance.new("Frame")
+        sheen.Size = UDim2.new(0.75, 0, 0.75, 0)
+        sheen.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        sheen.BackgroundTransparency = 0.96
+        sheen.BorderSizePixel = 0
+        sheen.Rotation = -18
+        sheen.ZIndex = 11
+        sheen.Parent = card
 
-        -- Logo / Icon area
-        local logoFrame = Instance.new("Frame")
-        logoFrame.AnchorPoint = Vector2.new(0.5, 0)
-        logoFrame.Position = UDim2.new(0.5, 0, 0, 28)
-        logoFrame.Size = UDim2.fromOffset(64, 64)
-        logoFrame.BackgroundColor3 = Color3.fromRGB(20, 25, 40)
-        logoFrame.BorderSizePixel = 0
-        logoFrame.ZIndex = 12
-        logoFrame.Parent = card
-        local lgCorner = Instance.new("UICorner")
-        lgCorner.CornerRadius = UDim.new(0, 16)
-        lgCorner.Parent = logoFrame
-        local lgGrad = Instance.new("UIGradient")
-        lgGrad.Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(60, 130, 255)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(180, 60, 255)),
-        })
-        lgGrad.Rotation = 135
-        lgGrad.Parent = logoFrame
+        -- Strip gradien tipis di atas card sebagai aksen.
+        local strip = Instance.new("Frame")
+        strip.Size = UDim2.new(1, 0, 0, 2)
+        strip.BackgroundColor3 = Color3.new(1, 1, 1)
+        strip.BorderSizePixel = 0
+        strip.ZIndex = 12
+        strip.Parent = card
+        grad(strip, P.accentA, P.accentC)
 
-        local logoLabel = Instance.new("TextLabel")
-        logoLabel.Size = UDim2.fromScale(1, 1)
-        logoLabel.BackgroundTransparency = 1
-        logoLabel.Text = "✦"
-        logoLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-        logoLabel.TextScaled = true
-        logoLabel.Font = Enum.Font.GothamBold
-        logoLabel.ZIndex = 13
-        logoLabel.Parent = logoFrame
+        -- Logo: kotak membulat dengan gradien dan simbol bintang.
+        local logo = Instance.new("Frame")
+        logo.AnchorPoint = Vector2.new(0.5, 0)
+        logo.Position = UDim2.new(0.5, 0, 0, 30)
+        logo.Size = UDim2.fromOffset(58, 58)
+        logo.BackgroundColor3 = Color3.new(1, 1, 1)
+        logo.BorderSizePixel = 0
+        logo.ZIndex = 12
+        logo.Parent = card
+        round(logo, 16)
+        grad(logo, P.accentA, P.accentC, 135)
 
-        -- Title
+        local logoStroke = Instance.new("UIStroke")
+        logoStroke.Color = Color3.fromRGB(255, 255, 255)
+        logoStroke.Thickness = 1
+        logoStroke.Transparency = 0.72
+        logoStroke.Parent = logo
+
+        local logoText = Instance.new("TextLabel")
+        logoText.Name = "LogoText"
+        logoText.Size = UDim2.fromScale(1, 1)
+        logoText.BackgroundTransparency = 1
+        logoText.Text = "S"
+        logoText.TextColor3 = Color3.fromRGB(255, 255, 255)
+        logoText.TextScaled = true
+        logoText.Font = Enum.Font.GothamBlack
+        logoText.ZIndex = 13
+        logoText.Parent = logo
+
+        -- Judul dengan gradien lembut.
         local title = Instance.new("TextLabel")
         title.AnchorPoint = Vector2.new(0.5, 0)
-        title.Position = UDim2.new(0.5, 0, 0, 105)
-        title.Size = UDim2.new(1, -40, 0, 42)
+        title.Position = UDim2.new(0.5, 0, 0, 102)
+        title.Size = UDim2.new(1, -40, 0, 40)
         title.BackgroundTransparency = 1
         title.Text = "Sky Hub"
         title.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -3839,140 +3880,140 @@ task.spawn(function()
         title.Font = Enum.Font.GothamBold
         title.ZIndex = 12
         title.Parent = card
-        local titleGrad = Instance.new("UIGradient")
-        titleGrad.Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(100, 180, 255)),
-            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(200, 100, 255)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 100, 160)),
-        })
-        titleGrad.Parent = title
+        grad(title, P.accentA, P.accentB)
 
-        -- Subtitle
         local sub = Instance.new("TextLabel")
         sub.AnchorPoint = Vector2.new(0.5, 0)
-        sub.Position = UDim2.new(0.5, 0, 0, 150)
-        sub.Size = UDim2.new(1, -60, 0, 22)
+        sub.Position = UDim2.new(0.5, 0, 0, 142)
+        sub.Size = UDim2.new(1, -60, 0, 20)
         sub.BackgroundTransparency = 1
-        sub.Text = "Violence District Ultimate Script  •  v2.0"
-        sub.TextColor3 = Color3.fromRGB(160, 160, 200)
+        sub.Text = "Violence District"
+        sub.TextColor3 = P.textMuted
         sub.TextScaled = true
         sub.Font = Enum.Font.Gotham
         sub.ZIndex = 12
         sub.Parent = card
 
-        -- Divider
+        -- Garis pemisah tipis.
         local div = Instance.new("Frame")
         div.AnchorPoint = Vector2.new(0.5, 0)
-        div.Position = UDim2.new(0.5, 0, 0, 183)
-        div.Size = UDim2.new(0.7, 0, 0, 1)
-        div.BackgroundColor3 = Color3.fromRGB(60, 60, 90)
+        div.Position = UDim2.new(0.5, 0, 0, 172)
+        div.Size = UDim2.new(0.72, 0, 0, 1)
+        div.BackgroundColor3 = P.border
+        div.BackgroundTransparency = 0.45
         div.BorderSizePixel = 0
         div.ZIndex = 12
         div.Parent = card
 
-        -- Info stats row
-        local features = {
-            { icon = "⚡", label = "Auto Gen" },
-            { icon = "🛡️", label = "Auto Parry" },
-            { icon = "❤️", label = "Auto Heal" },
-            { icon = "👁️", label = "ESP" },
-            { icon = "💀", label = "Killer Radar" },
-        }
-        local rowFrame = Instance.new("Frame")
-        rowFrame.AnchorPoint = Vector2.new(0.5, 0)
-        rowFrame.Position = UDim2.new(0.5, 0, 0, 196)
-        rowFrame.Size = UDim2.new(1, -40, 0, 50)
-        rowFrame.BackgroundTransparency = 1
-        rowFrame.ZIndex = 12
-        rowFrame.Parent = card
-        local rowLayout = Instance.new("UIListLayout")
-        rowLayout.FillDirection = Enum.FillDirection.Horizontal
-        rowLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-        rowLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-        rowLayout.Padding = UDim.new(0, 10)
-        rowLayout.Parent = rowFrame
-        for _, f in ipairs(features) do
+        -- Deretan chip fitur. Nama saja, tanpa emoji supaya tetap bersih.
+        local chips = { "Auto Gen", "Auto Parry", "Auto Heal", "ESP", "Auto Escape" }
+        local row = Instance.new("Frame")
+        row.AnchorPoint = Vector2.new(0.5, 0)
+        row.Position = UDim2.new(0.5, 0, 0, 190)
+        row.Size = UDim2.new(1, -40, 0, 34)
+        row.BackgroundTransparency = 1
+        row.ZIndex = 12
+        row.Parent = card
+
+        local layout = Instance.new("UIListLayout")
+        layout.FillDirection = Enum.FillDirection.Horizontal
+        layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+        layout.VerticalAlignment = Enum.VerticalAlignment.Center
+        layout.Padding = UDim.new(0, 8)
+        layout.Parent = row
+
+        for _, name in ipairs(chips) do
             local chip = Instance.new("Frame")
-            chip.Size = UDim2.fromOffset(80, 36)
-            chip.BackgroundColor3 = Color3.fromRGB(25, 30, 50)
+            chip.Size = UDim2.fromOffset(86, 30)
+            chip.BackgroundColor3 = P.bgChip
+            chip.BackgroundTransparency = 0.15
             chip.BorderSizePixel = 0
             chip.ZIndex = 13
-            chip.Parent = rowFrame
-            local chipCorner = Instance.new("UICorner")
-            chipCorner.CornerRadius = UDim.new(0, 10)
-            chipCorner.Parent = chip
-            local chipLabel = Instance.new("TextLabel")
-            chipLabel.Size = UDim2.fromScale(1, 1)
-            chipLabel.BackgroundTransparency = 1
-            chipLabel.Text = f.icon .. "  " .. f.label
-            chipLabel.TextColor3 = Color3.fromRGB(200, 210, 255)
-            chipLabel.TextScaled = true
-            chipLabel.Font = Enum.Font.Gotham
-            chipLabel.ZIndex = 14
-            chipLabel.Parent = chip
+            chip.Parent = row
+            round(chip, 9)
+
+            local chipText = Instance.new("TextLabel")
+            chipText.Size = UDim2.fromScale(1, 1)
+            chipText.BackgroundTransparency = 1
+            chipText.Text = name
+            chipText.TextColor3 = P.textMain
+            chipText.TextTransparency = 0.18
+            chipText.TextScaled = true
+            chipText.Font = Enum.Font.GothamMedium
+            chipText.ZIndex = 14
+            chipText.Parent = chip
         end
 
-        -- Footer loading bar
+        -- Progress bar tipis di bawah.
         local barBg = Instance.new("Frame")
         barBg.AnchorPoint = Vector2.new(0.5, 1)
-        barBg.Position = UDim2.new(0.5, 0, 1, -18)
-        barBg.Size = UDim2.new(0.8, 0, 0, 6)
-        barBg.BackgroundColor3 = Color3.fromRGB(30, 30, 50)
+        barBg.Position = UDim2.new(0.5, 0, 1, -46)
+        barBg.Size = UDim2.new(0.62, 0, 0, 4)
+        barBg.BackgroundColor3 = P.bgChip
+        barBg.BackgroundTransparency = 0.35
         barBg.BorderSizePixel = 0
         barBg.ZIndex = 12
         barBg.Parent = card
-        local barBgCorner = Instance.new("UICorner")
-        barBgCorner.CornerRadius = UDim.new(0, 4)
-        barBgCorner.Parent = barBg
+        round(barBg, 2)
 
-        local bar = Instance.new("Frame")
-        bar.Size = UDim2.fromScale(0, 1)
-        bar.BackgroundColor3 = Color3.fromRGB(100, 180, 255)
-        bar.BorderSizePixel = 0
-        bar.ZIndex = 13
-        bar.Parent = barBg
-        local barCorner = Instance.new("UICorner")
-        barCorner.CornerRadius = UDim.new(0, 4)
-        barCorner.Parent = bar
-        local barGrad2 = Instance.new("UIGradient")
-        barGrad2.Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(80, 120, 255)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 80, 200)),
-        })
-        barGrad2.Parent = bar
+        local barFill = Instance.new("Frame")
+        barFill.Size = UDim2.fromScale(0, 1)
+        barFill.BackgroundColor3 = Color3.new(1, 1, 1)
+        barFill.BorderSizePixel = 0
+        barFill.ZIndex = 13
+        barFill.Parent = barBg
+        round(barFill, 2)
+        grad(barFill, P.accentA, P.accentB)
 
-        -- Animate bar fill
-        local TweenService = game:GetService("TweenService")
-        local fillTween = TweenService:Create(bar, TweenInfo.new(2.4, Enum.EasingStyle.Sine), {
-            Size = UDim2.fromScale(1, 1)
-        })
-        fillTween:Play()
+        -- Teks status yang berubah saat loading.
+        local status = Instance.new("TextLabel")
+        status.AnchorPoint = Vector2.new(0.5, 1)
+        status.Position = UDim2.new(0.5, 0, 1, -22)
+        status.Size = UDim2.new(1, -40, 0, 16)
+        status.BackgroundTransparency = 1
+        status.Text = "Menyiapkan fitur..."
+        status.TextColor3 = P.textMuted
+        status.TextScaled = true
+        status.Font = Enum.Font.Gotham
+        status.ZIndex = 12
+        status.Parent = card
 
-        -- Fade in card
-        card.Position = UDim2.new(0.5, 0, 0.55, 0)
-        card.BackgroundTransparency = 1
-        local fadeIn = TweenService:Create(card, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-            Position = UDim2.fromScale(0.5, 0.5),
-            BackgroundTransparency = 0.05,
-        })
+        -- Fade in card.
+        local fadeIn = TweenService:Create(card,
+            TweenInfo.new(0.45, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+            { Position = UDim2.fromScale(0.5, 0.5), BackgroundTransparency = 0 })
         fadeIn:Play()
 
-        -- Wait loading to complete then fade out
-        task.wait(2.7)
-        local fadeOut = TweenService:Create(card, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-            Position = UDim2.new(0.5, 0, 0.45, 0),
-            BackgroundTransparency = 1,
-        })
-        local overlayOut = TweenService:Create(overlay, TweenInfo.new(0.5), {
-            BackgroundTransparency = 1,
-        })
-        fadeOut:Play()
-        overlayOut:Play()
-        fadeOut.Completed:Wait()
+        -- Isi progress bar sambil mengganti teks status.
+        TweenService:Create(barFill,
+            TweenInfo.new(2.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+            { Size = UDim2.fromScale(1, 1) }):Play()
+
+        task.spawn(function()
+            local steps = {
+                { 0.15, "Memuat antarmuka..." },
+                { 0.55, "Menyiapkan fitur..." },
+                { 0.85, "Almost there..." },
+            }
+            for _, step in ipairs(steps) do
+                task.wait(step[1])
+                status.Text = step[2]
+            end
+        end)
+
+        task.wait(2.5)
+
+        -- Fade out, lalu buka menu utama.
+        TweenService:Create(card,
+            TweenInfo.new(0.4, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
+            { Position = UDim2.fromScale(0.5, 0.46), BackgroundTransparency = 1 }):Play()
+        TweenService:Create(overlay, TweenInfo.new(0.4), { BackgroundTransparency = 1 }):Play()
+
+        task.wait(0.45)
         pcall(function() blur:Destroy() end)
         pcall(function() SG:Destroy() end)
 
-        -- SELESAI WELCOME -> TAMPILKAN MENU UTAMA WMACLIB DENGAN MULUS
+        -- Tampilkan menu utama WMacLib dengan mulus.
         findWmacGui()
         if wmacGui then wmacGui.Enabled = true end
         pcall(function() Window:SetState(true) end)
@@ -4010,6 +4051,77 @@ local lastLineRotation       = nil
 local lastGoalRotation       = nil
 local lastHitTick            = 0
 local lineMoveCount          = 0
+
+-- ==============================================================================
+-- KONSTANTA GENERATOR
+-- ==============================================================================
+-- Batas percobaan per minigame. Lebih dari 1 karena satu tekanan yang
+-- tidak registering di server tidak langsung menggagalkan seluruh minigame.
+AGEN_MAX_ATTEMPTS = 3
+
+-- Jeda minimum antar tekanan (detik). Mencegah spam saat jarum lambat.
+AGEN_PRESS_COOLDOWN = 0.05
+
+-- Rentang zona putih (derajat offset dari goal).
+-- Bisa diubah lewat slider karena tiap generator punya lebar zona berbeda.
+agenZoneMin = 103.0
+agenZoneMax = 114.0
+
+-- Penghitung percobaan untuk minigame yang sedang berjalan.
+hitAttempts = 0
+
+-- Timestamp terakhir, dipakai untuk menghitung kecepatan sudut per detik.
+lastGenTick = 0
+
+-- Flag mode kalibrasi. Kalau true, generator hanya mengamati, tidak menekan.
+agenCalibrating = false
+
+-- Uji apakah sebuah offset berada di dalam zona putih.
+-- Aman terhadap kasus di mana zona melintasi batas 0 derajat.
+local function in_gen_zone(offset, zmin, zmax)
+    if zmax >= zmin then
+        return offset >= zmin and offset <= zmax
+    end
+    -- Zona melintasi batas 0 (contoh: zmin 350, zmax 10).
+    return offset >= zmin or offset <= zmax
+end
+
+-- ==============================================================================
+-- MODE KALIBRASI
+-- ==============================================================================
+-- Cara kerjanya sederhana dan tidak menebak:
+-- Jarum pada circular skill check bergerak CEPAT saat berada di zona putih,
+-- dan bergerak pelan di luar zona. Jadi kalau kita lihat bagian mana dari
+-- putaran yang paling cepat, di situlah zona putihnya.
+--
+-- Kita kumpulkan semua offset selama satu putaran penuh, lalu mencari
+-- bagian mana yang jarumnya paling cepat. Itu zonanya.
+-- ==============================================================================
+
+-- Data yang dikumpulkan selama kalibrasi.
+calibSpeeds    = {}   -- offset (derajat) -> kecepatan absolut terbesar
+calibMinSeen   = nil
+calibMaxSeen   = nil
+
+-- Terapkan zona hasil kalibrasi, dengan lebar dibatasi supaya tidak
+-- terlalu longgar dan jadi sering gagal.
+local function apply_calibration(minSeen, maxSeen)
+    local lo, hi = minSeen, maxSeen
+    if lo > hi then lo, hi = hi, lo end
+
+    -- Batas lebar maksimal supaya tidak terlalu forgiving.
+    local maxWidth = 24
+    local width = hi - lo
+    if width > maxWidth then
+        local center = (lo + hi) / 2
+        lo = center - maxWidth / 2
+        hi = center + maxWidth / 2
+    end
+
+    agenZoneMin = lo
+    agenZoneMax = hi
+    return lo, hi
+end
 
 -- Helper untuk memastikan GUI benar-benar aktif & terlihat di layar
 local function is_gui_visible(v)
@@ -4126,6 +4238,8 @@ local function agen_tick()
             lastGoalRotation       = nil
             lastHitTick            = 0
             lineMoveCount          = 0
+            hitAttempts            = 0
+            lastGenTick            = 0
         end
         return
     end
@@ -4143,9 +4257,12 @@ local function agen_tick()
             lastHitTick            = 0
             lineMoveCount          = 1
             lastGoalRotation       = goalRot
+            lastGenTick            = tick()
+            hitAttempts            = 0
         end
     else
         lastGoalRotation = goalRot
+        lastGenTick      = tick()
     end
 
     -- Minigame baru muncul
@@ -4154,78 +4271,139 @@ local function agen_tick()
         hasHitCurrentMinigame = false
         lastLineRotation      = lineObj.Rotation
         lastGoalRotation      = goalRot
+        lastGenTick           = tick()
         lineMoveCount         = 0
+        hitAttempts           = 0
         return
     end
 
-    -- Hitung kecepatan jarum (derajat per frame, searah jarum jam)
-    local rawSpeed = 0
+    -- Kecepatan sudut jarum (derajat per detik, bertanda).
+    -- PENTING: memakai kecepatan per detik, bukan per frame, supaya
+    -- prediksi tetap akurat walaupun frame rate game sedang turun.
+    -- Nilai positif = searah jarum jam, negatif = berlawanan arah.
+    local nowTick = tick()
+    local rawDelta = 0
     if lastLineRotation ~= nil then
-        rawSpeed = (currentRot - lastLineRotation) % 360
-        if rawSpeed > 180 then rawSpeed = rawSpeed - 360 end
+        rawDelta = (currentRot - lastLineRotation) % 360
+        if rawDelta > 180 then rawDelta = rawDelta - 360 end
     end
+    local angularVel = rawDelta / math.max(nowTick - lastGenTick, 1 / 240)
     lastLineRotation = currentRot
+    lastGenTick = nowTick
 
-    -- Jika minigame sedang standby/idle (jarum diam di 0°):
-    if math.abs(rawSpeed) < 0.05 and (currentRot % 360 == 0) then
+    -- Standby: jarum diam di posisi 0 derajat, belum ada minigame.
+    if math.abs(rawDelta) < 0.01 and (currentRot % 360) < 0.01 then
         isMinigameActive      = false
         hasHitCurrentMinigame = false
         lineMoveCount         = 0
+        hitAttempts           = 0
         return
     end
 
-    -- Deteksi pergerakan jarum aktif
-    if math.abs(rawSpeed) > 0.05 then
+    -- Deteksi pergerakan jarum yang aktif.
+    if math.abs(rawDelta) > 0.01 then
         lineMoveCount = lineMoveCount + 1
     end
 
-    -- Tunggu minimal 1 frame pergerakan agar kecepatan terukur (maksimal responsif)
+    -- Tunggu minimal satu frame pergerakan agar kecepatan terukur.
     if lineMoveCount < 1 then return end
 
-    -- Jangan tekan lagi jika sudah pernah hit untuk minigame ini
-    if hasHitCurrentMinigame then return end
+    -- Batas percobaan per minigame. Tetap boleh mencoba lagi kalau
+    -- tekanan sebelumnya ternyata tidak registering di server.
+    if hitAttempts >= AGEN_MAX_ATTEMPTS then return end
 
-    -- Normalisasi rotasi needle (0-360)
+    -- Posisi jarum dinormalisasi ke rentang 0-360.
     local lineRot = currentRot % 360
     if lineRot < 0 then lineRot = lineRot + 360 end
 
-    -- TARGET ZONA PUTIH PRESISI (Violence District white zone: offset 104.5° s/d 112.5°, center 108.3°)
+    -- Offset jarum terhadap goal (0-360).
     local offset = (lineRot - goalRot) % 360
-    local speed  = math.abs(rawSpeed)
 
-    -- Keputusan hit adaptif anti-miss (mendukung speed tinggi King's Scourge):
-    -- Zona putih Violence District: offset ~104° s/d 113° (center ~108°)
-    local shouldHit = false
-    local ZONE_MIN = 103.0
-    local ZONE_MAX = 114.0
-    local ZONE_CENTER = 108.5
-    if rawSpeed >= 0 then
-        -- Searah jarum jam (Normal & Fast King's Scourge CW):
-        -- 1. Posisi jarum saat ini berada di dalam zona putih
-        if offset >= ZONE_MIN and offset <= ZONE_MAX then
-            shouldHit = true
-        -- 2. Kecepatan tinggi: prediksi apakah jarum masuk zona di frame ini
-        elseif offset < ZONE_MIN and (offset + speed * 1.2) >= ZONE_MIN then
-            shouldHit = true
+    -- ======================================================================
+    -- MODE KALIBRASI
+    --
+    -- Kalau kalibrasi aktif, kita HANYA mengamati dan mencatat, tidak
+    -- menekan apa pun. Data yang dikumpulkan: di offset berapa jarum
+    -- bergerak paling cepat. Itu menandakan zona putih.
+    -- ======================================================================
+    if agenCalibrating then
+        local speedAbs = math.abs(angularVel)
+        local prev = calibSpeeds[offset]
+        if prev == nil or speedAbs > prev then
+            calibSpeeds[offset] = speedAbs
         end
-    else
-        -- Berlawanan jarum jam (Hex / CCW):
-        if offset >= ZONE_MIN and offset <= ZONE_MAX then
+
+        -- Cari blok offset yang jarumnya paling cepat.
+        -- Deteksi selesai setelah jarum sudah melewati semua sudut,
+        -- yaitu sudah pernah melihat offset di seluruh rentang 0-360.
+        local keys = {}
+        for k in pairs(calibSpeeds) do keys[#keys + 1] = k end
+        table.sort(keys)
+
+        if #keys >= 60 then
+            -- Ambil kecepatan tertinggi sebagai acuan.
+            local maxSpeed = 0
+            for _, v in pairs(calibSpeeds) do
+                if v > maxSpeed then maxSpeed = v end
+            end
+
+            -- Ambil semua offset yang kecepatannya setidaknya 60 persen
+            -- dari puncak. Itu rentang zona putihnya.
+            local minSeen, maxSeen = nil, nil
+            for _, k in ipairs(keys) do
+                if calibSpeeds[k] >= maxSpeed * 0.6 then
+                    if minSeen == nil or k < minSeen then minSeen = k end
+                    if maxSeen == nil or k > maxSeen then maxSeen = k end
+                end
+            end
+
+            if minSeen and maxSeen then
+                local lo, hi = apply_calibration(minSeen, maxSeen)
+                log("[AutoGen] Kalibrasi selesai: zona %.1f sampai %.1f derajat "
+                    .. "(deteksi mentah %.1f sampai %.1f, puncak %.0f)",
+                    lo, hi, minSeen, maxSeen, maxSpeed)
+            end
+        end
+        return
+    end
+
+    -- Zona putih: rentang offset di mana tekanan dianggap berhasil.
+    -- Bisa diatur lewat slider karena tiap generator punya lebar
+    -- zona yang sedikit berbeda.
+    local zoneMin = agenZoneMin
+    local zoneMax = agenZoneMax
+
+    -- Prediksi lintasan jarum dalam LOOKAHEAD detik ke depan.
+    --
+    -- PERBAIKAN: sebelumnya hanya mengecek satu titik (offset saat ini
+    -- ditambah kecepatan kali 1.2). Pada King's Scourge jarum bergerak
+    -- sangat cepat sehingga bisa MELOMPAT melewati seluruh zona dalam
+    -- satu frame, sehingga tidak pernah terdeteksi.
+    -- Sekarang diambil beberapa sampel sepanjang lintasan, jadi zona
+    -- yang terlewat di antara dua frame tetap terdeteksi.
+    local LOOKAHEAD = 1 / 30
+    local SAMPLES  = 5
+    local shouldHit = false
+    for k = 0, SAMPLES do
+        local t = LOOKAHEAD * (k / SAMPLES)
+        local probe = (offset + angularVel * t) % 360
+        if in_gen_zone(probe, zoneMin, zoneMax) then
             shouldHit = true
-        elseif offset > ZONE_MAX and (offset - speed * 1.2) <= ZONE_MAX then
-            shouldHit = true
+            break
         end
     end
 
-    if shouldHit then
+    -- Tekan dengan jeda pendek antar percobaan supaya tidak spam.
+    if shouldHit and (nowTick - lastHitTick) >= AGEN_PRESS_COOLDOWN then
         hasHitCurrentMinigame = true
-        lastHitTick           = tick()
+        lastHitTick           = nowTick
         autoGenHitCount       = autoGenHitCount + 1
+        hitAttempts           = hitAttempts + 1
         agen_press(spaceObj)
 
-        -- Feedback console, hanya kalau SKY_DEBUG = true
-        log("[AutoGen] PERFECT HIT! Jarum: %.1f | Goal: %.1f | Offset: %.1f | Speed: %.2f",
-            lineRot, goalRot, offset, speed)
+        -- Detail hanya tampil kalau SKY_DEBUG = true.
+        log("[AutoGen] PERFECT HIT! Jarum: %.1f | Goal: %.1f | Offset: %.1f | Vel: %.0f | Percobaan %d",
+            lineRot, goalRot, offset, angularVel, hitAttempts)
     end
 end
 
@@ -4865,7 +5043,7 @@ local TabPlayer = tabGroup:Tab({ Name = "Player", Image = "lucide/user" })
 
 -- SEKSI 1: SPEED PLAYER
 local SecSpeed = TabPlayer:Section({})
-SecSpeed:Header({ Name = WMacLib:Gradient("Kecepatan Pemain (WalkSpeed)", Color3.fromRGB(80, 200, 255), Color3.fromRGB(120, 100, 255)) })
+SecSpeed:Header({ Name = WMacLib:Gradient("Kecepatan Pemain (WalkSpeed)", Color3.fromRGB(99,130,255), Color3.fromRGB(72,214,200)) })
 
 SecSpeed:Slider({
     Name = "WalkSpeed Slider",
@@ -4913,7 +5091,7 @@ SecSpeed:Button({
 
 -- SEKSI 2: FLY ENGINE
 local SecFly = TabPlayer:Section({})
-SecFly:Header({ Name = WMacLib:Gradient("Terbang (Infinite Yield Fly)", Color3.fromRGB(255, 170, 50), Color3.fromRGB(255, 80, 120)) })
+SecFly:Header({ Name = WMacLib:Gradient("Terbang (Infinite Yield Fly)", Color3.fromRGB(99,130,255), Color3.fromRGB(168,120,255)) })
 
 SecFly:Toggle({
     Name = "Aktifkan Fly",
@@ -4957,7 +5135,7 @@ SecFly:Input({
 
 -- SEKSI 3: ANTI-AFK
 local SecUtil = TabPlayer:Section({})
-SecUtil:Header({ Name = WMacLib:Gradient("Player Utility", Color3.fromRGB(100, 240, 160), Color3.fromRGB(60, 180, 255)) })
+SecUtil:Header({ Name = WMacLib:Gradient("Player Utility", Color3.fromRGB(99,130,255), Color3.fromRGB(120,160,255)) })
 
 SecUtil:Toggle({
     Name = "Anti-AFK (Cegah Disconnect 20 Menit)",
@@ -4980,7 +5158,7 @@ end -- [End TabPlayer]
 local TabMain = tabGroup:Tab({ Name = "Main", Image = "lucide/zap" })
 
 local SecAutoGen = TabMain:Section({})
-SecAutoGen:Header({ Name = WMacLib:Gradient("Auto Perfect Generator", Color3.fromRGB(100, 255, 180), Color3.fromRGB(60, 180, 255)) })
+SecAutoGen:Header({ Name = WMacLib:Gradient("Auto Perfect Generator", Color3.fromRGB(72,214,200), Color3.fromRGB(99,130,255)) })
 
 SecAutoGen:Toggle({
     Name = "Aktifkan Auto Perfect Gen",
@@ -4997,8 +5175,78 @@ SecAutoGen:Toggle({
     end
 })
 
+-- Kalibrasi otomatis.
+-- Mode ini hanya MENGAMATI jarum selama satu putaran dan mencari
+-- sendiri di mana zona putih berada, lalu menyimpannya otomatis.
+-- Gunanya kalau update game memindahkan zona, atau kalau zona tiap
+-- generator ternyata punya lebar yang berbeda-beda.
+SecAutoGen:Toggle({
+    Name = "Mode Kalibrasi (Deteksi Zona)",
+    Default = false,
+    Callback = function(enabled)
+        agenCalibrating = enabled
+        if enabled then
+            -- Bersihkan data lama supaya mengukur putaran yang baru.
+            -- Tabel ini global, jadi bisa langsung di-reset dari sini.
+            calibSpeeds  = {}
+            calibMinSeen = nil
+            calibMaxSeen = nil
+            Window:Notify({
+                Title = "Kalibrasi Zona",
+                Description = "Aktif. Biarkan Auto Perfect Gen menyala "
+                    .. "satu putaran penuh, lalu cek console untuk hasil deteksi.",
+                Lifetime = 5
+            })
+        else
+            Window:Notify({
+                Title = "Kalibrasi Selesai",
+                Description = string.format(
+                    "Zona putih terdeteksi: %.1f sampai %.1f derajat.",
+                    agenZoneMin, agenZoneMax),
+                Lifetime = 4
+            })
+        end
+    end
+})
+
+-- Slider untuk penyesuaian manual kalau zona masih meleset.
+SecAutoGen:Slider({
+    Name = "Zona Min (derajat)",
+    Default = 103,
+    Minimum = 80,
+    Maximum = 130,
+    Increment = 0.5,
+    DisplayMethod = "Decimal",
+    Precision = 1,
+    Callback = function(val)
+        -- Jaga zonaMin tetap di bawah zonaMax supaya tidak terbalik.
+        if val >= agenZoneMax then
+            agenZoneMax = val + 0.5
+        end
+        agenZoneMin = val
+    end
+})
+
+SecAutoGen:Slider({
+    Name = "Zona Max (derajat)",
+    Default = 114,
+    Minimum = 90,
+    Maximum = 140,
+    Increment = 0.5,
+    DisplayMethod = "Decimal",
+    Precision = 1,
+    Callback = function(val)
+        if val <= agenZoneMin then
+            agenZoneMin = val - 0.5
+        end
+        agenZoneMax = val
+    end
+})
+
+SecAutoGen:Label({ Name = "Kalau masih sering meleset, pakai Mode Kalibrasi lebih dulu." })
+
 local SecAutoParry = TabMain:Section({})
-SecAutoParry:Header({ Name = WMacLib:Gradient("Auto Parry", Color3.fromRGB(255, 90, 90), Color3.fromRGB(255, 180, 50)) })
+SecAutoParry:Header({ Name = WMacLib:Gradient("Auto Parry", Color3.fromRGB(232,120,140), Color3.fromRGB(168,120,255)) })
 
 SecAutoParry:Toggle({
     Name = "Aktifkan Auto Parry",
@@ -5025,7 +5273,7 @@ SecAutoParry:Toggle({
 
 -- SEKSI 3: AUTO HEAL
 local SecAutoHealMain = TabMain:Section({})
-SecAutoHealMain:Header({ Name = WMacLib:Gradient("Auto Heal (Pemulihan Otomatis)", Color3.fromRGB(80, 255, 120), Color3.fromRGB(60, 200, 80)) })
+SecAutoHealMain:Header({ Name = WMacLib:Gradient("Auto Heal (Pemulihan Otomatis)", Color3.fromRGB(86,204,158), Color3.fromRGB(72,214,200)) })
 
 SecAutoHealMain:Toggle({
     Name = "Aktifkan Auto Heal",
@@ -5055,7 +5303,7 @@ SecAutoHealMain:Slider({
 
 -- SEKSI: AUTO ESCAPE (BYPASS SURVIVOR WIN)
 local SecAutoEscape = TabMain:Section({})
-SecAutoEscape:Header({ Name = WMacLib:Gradient("Auto Escape (Bypass Win)", Color3.fromRGB(100, 255, 200), Color3.fromRGB(60, 200, 255)) })
+SecAutoEscape:Header({ Name = WMacLib:Gradient("Auto Escape (Bypass Win)", Color3.fromRGB(72,214,200), Color3.fromRGB(140,200,255)) })
 
 -- Pastikan auto-loop dari sesi sebelumnya tidak masih berjalan
 autoEscapeEnabled = false
@@ -5521,7 +5769,7 @@ end
 local TabCombat = tabGroup:Tab({ Name = "Combat", Image = "lucide/crosshair" })
 
 local SecCross = TabCombat:Section({})
-SecCross:Header({ Name = WMacLib:Gradient("Crosshair", Color3.fromRGB(255, 80, 80), Color3.fromRGB(255, 180, 50)) })
+SecCross:Header({ Name = WMacLib:Gradient("Crosshair", Color3.fromRGB(232,120,140), Color3.fromRGB(255,170,120)) })
 
 SecCross:Toggle({
     Name = "Aktifkan Crosshair",
@@ -5657,7 +5905,7 @@ SecCross:Button({
 -- SECTION: TWIST OF FATE - ANTI MISS
 -- ==============================================================================
 local SecTOF = TabCombat:Section({})
-SecTOF:Header({ Name = WMacLib:Gradient("Twist of Fate - Anti Miss [ULTRA]", Color3.fromRGB(255, 160, 60), Color3.fromRGB(255, 80, 200)) })
+SecTOF:Header({ Name = WMacLib:Gradient("Twist of Fate - Anti Miss [ULTRA]", Color3.fromRGB(168,120,255), Color3.fromRGB(99,130,255)) })
 
 SecTOF:Toggle({
     Name = "Anti Miss (100% Hit Chance) [ULTRA]",
@@ -5686,7 +5934,7 @@ SecTOF:Toggle({
 -- SEKSI: INFINITE ITEM CHARGES (UNLIMITED USES)
 -- ==============================================================================
 local SecInfCharge = TabCombat:Section({})
-SecInfCharge:Header({ Name = WMacLib:Gradient("Infinite Item Charges", Color3.fromRGB(80, 220, 255), Color3.fromRGB(150, 100, 255)) })
+SecInfCharge:Header({ Name = WMacLib:Gradient("Infinite Item Charges", Color3.fromRGB(99,130,255), Color3.fromRGB(168,120,255)) })
 
 SecInfCharge:Toggle({
     Name = "Aktifkan Infinite Charges",
@@ -6271,7 +6519,7 @@ end
 local TabESP = tabGroup:Tab({ Name = "ESP", Image = "lucide/eye" })
 
 local SecESPPlayer = TabESP:Section({})
-SecESPPlayer:Header({ Name = WMacLib:Gradient("ESP Player - Survivor dan Killer", Color3.fromRGB(255, 80, 80), Color3.fromRGB(255, 200, 80)) })
+SecESPPlayer:Header({ Name = WMacLib:Gradient("ESP Player - Survivor dan Killer", Color3.fromRGB(232,120,140), Color3.fromRGB(255,160,120)) })
 
 SecESPPlayer:Toggle({
     Name = "Aktifkan ESP Player",
@@ -6289,7 +6537,7 @@ SecESPPlayer:Toggle({
 })
 
 local SecESPGen = TabESP:Section({})
-SecESPGen:Header({ Name = WMacLib:Gradient("ESP Generator", Color3.fromRGB(100, 220, 255), Color3.fromRGB(80, 255, 160)) })
+SecESPGen:Header({ Name = WMacLib:Gradient("ESP Generator", Color3.fromRGB(86,204,158), Color3.fromRGB(99,130,255)) })
 
 SecESPGen:Toggle({
     Name = "Aktifkan ESP Generator",
@@ -6309,7 +6557,7 @@ SecESPGen:Toggle({
 
 -- SEKSI ESP EXIT GATE (tambah ke TabESP)
 local SecESPGate = TabESP:Section({})
-SecESPGate:Header({ Name = WMacLib:Gradient("ESP Pintu Keluar (Exit Gate)", Color3.fromRGB(255, 220, 60), Color3.fromRGB(255, 120, 40)) })
+SecESPGate:Header({ Name = WMacLib:Gradient("ESP Pintu Keluar (Exit Gate)", Color3.fromRGB(240,190,100), Color3.fromRGB(232,150,110)) })
 
 SecESPGate:Toggle({
     Name = "Aktifkan ESP Exit Gate",
@@ -6339,7 +6587,7 @@ local TabView = tabGroup:Tab({ Name = "View", Image = "lucide/sun" })
 
 -- SEKSI 1: FULLBRIGHT + NO FOG
 local SecFB = TabView:Section({})
-SecFB:Header({ Name = WMacLib:Gradient("Fullbright & No Fog", Color3.fromRGB(255, 220, 60), Color3.fromRGB(255, 140, 40)) })
+SecFB:Header({ Name = WMacLib:Gradient("Fullbright & No Fog", Color3.fromRGB(240,190,100), Color3.fromRGB(255,200,130)) })
 
 SecFB:Toggle({
     Name = "Aktifkan Fullbright + No Fog",
@@ -6358,7 +6606,7 @@ SecFB:Toggle({
 
 -- SEKSI 2: CUSTOM FOV
 local SecFov = TabView:Section({})
-SecFov:Header({ Name = WMacLib:Gradient("Custom FOV (Field of View)", Color3.fromRGB(100, 200, 255), Color3.fromRGB(60, 120, 255)) })
+SecFov:Header({ Name = WMacLib:Gradient("Custom FOV (Field of View)", Color3.fromRGB(99,130,255), Color3.fromRGB(140,200,255)) })
 
 SecFov:Toggle({
     Name = "Aktifkan Custom FOV",
@@ -6407,7 +6655,7 @@ do
 local TabRadar = tabGroup:Tab({ Name = "Radar", Image = "lucide/radio" })
 
 local SecRadar = TabRadar:Section({})
-SecRadar:Header({ Name = WMacLib:Gradient("Killer Radar (Mini-Map)", Color3.fromRGB(255, 60, 60), Color3.fromRGB(255, 160, 60)) })
+SecRadar:Header({ Name = WMacLib:Gradient("Killer Radar (Mini-Map)", Color3.fromRGB(232,100,120), Color3.fromRGB(200,120,180)) })
 
 SecRadar:Toggle({
     Name = "Aktifkan Killer Radar",
@@ -6437,7 +6685,7 @@ SecRadar:Slider({
 })
 
 local SecRadarInfo = TabRadar:Section({})
-SecRadarInfo:Header({ Name = WMacLib:Gradient("Cara Baca Radar", Color3.fromRGB(150, 150, 255), Color3.fromRGB(100, 200, 255)) })
+SecRadarInfo:Header({ Name = WMacLib:Gradient("Cara Baca Radar", Color3.fromRGB(140,152,190), Color3.fromRGB(120,170,200)) })
 SecRadarInfo:Label({ Name = "🟢 Titik Hijau = Kamu sendiri" })
 SecRadarInfo:Label({ Name = "🔴 Titik Merah = Killer (besar)" })
 SecRadarInfo:Label({ Name = "🔵 Titik Biru = Survivor (kecil)" })
@@ -6452,7 +6700,7 @@ do
 local TabWebhook = tabGroup:Tab({ Name = "Webhook", Image = "lucide/bell" })
 
 local SecWHUrl = TabWebhook:Section({})
-SecWHUrl:Header({ Name = WMacLib:Gradient("Discord Webhook Notifier", Color3.fromRGB(88, 101, 242), Color3.fromRGB(57, 197, 187)) })
+SecWHUrl:Header({ Name = WMacLib:Gradient("Discord Webhook Notifier", Color3.fromRGB(99,130,255), Color3.fromRGB(72,214,200)) })
 
 SecWHUrl:Input({
     Name = "URL Webhook Discord",
@@ -6516,7 +6764,7 @@ SecWHUrl:Button({
 })
 
 local SecWHSummary = TabWebhook:Section({})
-SecWHSummary:Header({ Name = WMacLib:Gradient("Per-Match Summary (Sky Hub Style)", Color3.fromRGB(88, 101, 242), Color3.fromRGB(57, 197, 187)) })
+SecWHSummary:Header({ Name = WMacLib:Gradient("Per-Match Summary (Sky Hub Style)", Color3.fromRGB(99,130,255), Color3.fromRGB(72,214,200)) })
 
 SecWHSummary:Toggle({
     Name = "Auto Kirim Summary Per-Match",
@@ -6548,7 +6796,7 @@ SecWHSummary:Label({ Name = "Format Sky Hub: Discord Blurple, Delta (+/-) Level,
 SecWHSummary:Label({ Name = "Summary dikirim per-match (bukan live update) saat match selesai / escape." })
 
 local SecWHInfo = TabWebhook:Section({})
-SecWHInfo:Header({ Name = WMacLib:Gradient("Cara Pakai Webhook", Color3.fromRGB(150, 150, 255), Color3.fromRGB(100, 200, 255)) })
+SecWHInfo:Header({ Name = WMacLib:Gradient("Cara Pakai Webhook", Color3.fromRGB(140,152,190), Color3.fromRGB(120,170,200)) })
 SecWHInfo:Label({ Name = "Salin URL dari: Server Discord > Edit Channel > Integrations > Webhooks" })
 SecWHInfo:Label({ Name = "Delta (+/-) dihitung otomatis dari awal match hingga kamu berhasil escape." })
 SecWHInfo:Label({ Name = "Pastikan Executor mendukung HTTP Request (Synapse X, Fluxus, Delta, dll)." })
@@ -6564,7 +6812,7 @@ local TabMod = tabGroup:Tab({ Name = "Modifikasi", Image = "lucide/sparkles" })
 
 -- SEKSI 1: SALIN AVATAR PEMAIN
 local SecAvatar = TabMod:Section({})
-SecAvatar:Header({ Name = WMacLib:Gradient("Salin Avatar Pemain", Color3.fromRGB(70, 150, 255), Color3.fromRGB(160, 100, 255)) })
+SecAvatar:Header({ Name = WMacLib:Gradient("Salin Avatar Pemain", Color3.fromRGB(99,130,255), Color3.fromRGB(168,120,255)) })
 
 SecAvatar:Input({
     Name = "Target di Server",
@@ -6612,7 +6860,7 @@ SecAvatar:Button({
 
 -- SEKSI 2: KLONING OUTFIT TERSIMPAN
 local SecOutfit = TabMod:Section({})
-SecOutfit:Header({ Name = WMacLib:Gradient("Kloning Outfit Tersimpan", Color3.fromRGB(240, 100, 200), Color3.fromRGB(150, 80, 255)) })
+SecOutfit:Header({ Name = WMacLib:Gradient("Kloning Outfit Tersimpan", Color3.fromRGB(232,110,170), Color3.fromRGB(168,120,255)) })
 
 SecOutfit:Input({
     Name = "Username Pemilik Outfit",
@@ -6656,7 +6904,7 @@ SecOutfit:Button({
 
 -- SEKSI 3: PEMUAT AKSESORIS CATALOG
 local SecAcc = TabMod:Section({})
-SecAcc:Header({ Name = WMacLib:Gradient("Pemuat Aksesoris Catalog", Color3.fromRGB(50, 220, 150), Color3.fromRGB(70, 180, 255)) })
+SecAcc:Header({ Name = WMacLib:Gradient("Pemuat Aksesoris Catalog", Color3.fromRGB(86,204,158), Color3.fromRGB(120,160,255)) })
 
 local acc_offset_y = 0
 local acc_offset_z = 0
@@ -6781,7 +7029,7 @@ SecAcc:Button({
 
 -- SEKSI 4: KORBLOX & HEADLESS
 local SecBody = TabMod:Section({})
-SecBody:Header({ Name = WMacLib:Gradient("Korblox & Headless", Color3.fromRGB(255, 120, 70), Color3.fromRGB(255, 70, 100)) })
+SecBody:Header({ Name = WMacLib:Gradient("Korblox & Headless", Color3.fromRGB(232,130,110), Color3.fromRGB(200,110,150)) })
 
 local korblox_offset = 0.7
 
@@ -6998,7 +7246,7 @@ SecTheme:Dropdown({
 -- SEKSI 2: WATERMARK & WINDOW
 -- ==============================================================================
 local SecWin = TabConfig:Section({})
-SecWin:Header({ Name = WMacLib:Gradient("Jendela & Kontrol", Color3.fromRGB(255, 160, 60), Color3.fromRGB(255, 80, 120)) })
+SecWin:Header({ Name = WMacLib:Gradient("Jendela & Kontrol", Color3.fromRGB(99,130,255), Color3.fromRGB(168,120,255)) })
 
 -- Toggle log diagnostik.
 -- Matikan = console bersih. Nyalakan = semua detail fitur tampil lagi,
