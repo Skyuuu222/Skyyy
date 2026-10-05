@@ -2295,16 +2295,20 @@ local function zone_anchor_cframe(zone)
     return p.CFrame * CFrame.new(0, offsetY, insetZ)
 end
 
--- Wrapper kompatibilitas: cari gerbang ber-lever (dipakai hanya untuk fallback)
+-- Wrapper kompatibilitas: cari gerbang ber-lever (dipakai hanya untuk fallback).
+-- PENTING: struktur gerbang bisa berupa Model ATAU Folder, jadi jangan hanya
+-- cek Model. `Workspace.Map.Gate` kemungkinan besar Folder, bukan Model.
 local function get_exit_gate()
+    local best = nil
+
     for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("Model") then
+        if obj:IsA("Model") or obj:IsA("Folder") then
             local leverModel = obj:FindFirstChild("ExitLever")
-            if leverModel and leverModel:IsA("Model") then
+            if leverModel then
                 local main = leverModel:FindFirstChild("Main")
-                    or leverModel:FindFirstChildWhichIsA("BasePart")
+                    or (leverModel:IsA("Model") and leverModel:FindFirstChildWhichIsA("BasePart"))
                 if main then
-                    return {
+                    local cand = {
                         model      = obj,
                         leverModel = leverModel,
                         main       = main,
@@ -2317,11 +2321,17 @@ local function get_exit_gate()
                         leftEnd    = obj:FindFirstChild("LeftGate-end"),
                         rightEnd   = obj:FindFirstChild("RightGate-end"),
                     }
+                    -- Prioritaskan gerbang yang punya Box (itu zona keluar aslinya)
+                    if cand.box and not best then
+                        best = cand
+                    elseif not best then
+                        best = cand
+                    end
                 end
             end
         end
     end
-    return nil
+    return best
 end
 
 -- Wrapper kompatibilitas: tetap mengembalikan MeshPart 'Main' dari gerbang aktif
@@ -2867,10 +2877,16 @@ function trigger_instant_escape()
         end
 
         -- ======================================================================
-        -- [TAHAP B] PIN karakter DI DALAM zona.
-        -- Rekaman menunjukkan Touched pada Box -> 2 detik kemudian escaped.
-        -- Jadi kita: (1) masuk zona, (2) picu Touched, (3) TETAP di dalam
-        -- selama server memproses. Tidak ada teleport ke mana pun.
+        -- [TAHAP B] BUKA GERBANG, lalu masuk zona.
+        --
+        -- Bukti rekaman manual (04:28):
+        --   1. Pemain MENARIK TUAS di gerbang  -> gerbang terbuka
+        --   2. Pemain JALAN ke dalam Box         -> Touched terpicu
+        --   3. 2 detik kemudian                 -> CharacterRemoving (escaped)
+        --
+        -- Jadi urutan WAJIB: tuas dulu (gerbang harus terbuka), baru masuk zona.
+        -- Lever harus diambil dari GERBANG YANG SAMA dengan zona terpilih,
+        -- bukan dari gerbang lain di map (terbukti lever Rooftop tidak bekerja).
         -- ======================================================================
         local function pin()
             if currentHrp and currentHrp.Parent and anchorCF then
@@ -2904,7 +2920,58 @@ function trigger_instant_escape()
             end)
         end)
 
-        -- Tahap B1: teleport ke dalam zona (1x), lalu picu Touched
+        -- [B1] BUKA GERBANG: cari LeverEvent + Main dari gerbang yang SAMA
+        --      dengan zona keluar, lalu tekan tuas sampai daun pintu bergeser.
+        local leverEvent = nil
+        local leverMain  = nil
+        pcall(function()
+            if remotes then
+                local exitF = remotes:FindFirstChild("Exit")
+                if exitF then leverEvent = exitF:FindFirstChild("LeverEvent") end
+            end
+        end)
+
+        -- Cocokkan lever dengan zona: cari ExitLever yang jaraknya paling dekat
+        -- ke zona keluar terpilih.
+        if leverEvent then
+            local bestLever, bestDist = nil, math.huge
+            local zonePos = zone and zone.part.Position or (currentHrp and currentHrp.Position)
+            for _, obj in ipairs(workspace:GetDescendants()) do
+                if obj:IsA("Model") or obj:IsA("Folder") then
+                    local lm = obj:FindFirstChild("ExitLever")
+                    if lm then
+                        local m = lm:FindFirstChild("Main")
+                            or (lm:IsA("Model") and lm:FindFirstChildWhichIsA("BasePart"))
+                        if m and m:IsA("BasePart") then
+                            local d = (m.Position - zonePos).Magnitude
+                            if d < bestDist then bestLever, bestDist = m, d end
+                        end
+                    end
+                end
+            end
+            leverMain = bestLever
+            if leverMain then
+                print("[AutoEscape] Lever     :", leverMain:GetFullName(),
+                    "| jarak dari zona:", math.floor(bestDist), "stud")
+            else
+                print("[AutoEscape] PERINGATAN: tidak ada ExitLever ditemukan!")
+            end
+        end
+
+        if leverEvent and leverMain then
+            -- Gerbang harus terbuka: tekan tuas berulang selama ~2 detik.
+            -- Signature server: LeverEvent:FireServer(MeshPart, true|false)
+            for _ = 1, 12 do
+                pcall(function() leverEvent:FireServer(leverMain, true) end)
+                task.wait(0.08)
+                pcall(function() leverEvent:FireServer(leverMain, false) end)
+                task.wait(0.08)
+                if escaped then break end
+            end
+            print("[AutoEscape] Tuas ditekan, gerbang seharusnya terbuka.")
+        end
+
+        -- [B2] MASUK ZONA: pin di dalam Box + picu Touched
         pin()
         task.wait(0.2)
         for _ = 1, 5 do
@@ -2914,9 +2981,9 @@ function trigger_instant_escape()
             if escaped then break end
         end
 
-        -- Tahap B2: TETAP di dalam zona sampai server memproses (maks 6 detik)
+        -- [B3] TETAP di dalam zona sampai server memproses (maks 8 detik)
         local waited = 0
-        while waited < 60 and not escaped do
+        while waited < 80 and not escaped do
             pin()
             touchAll()
             task.wait(0.1)
