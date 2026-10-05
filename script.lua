@@ -1957,29 +1957,28 @@ function is_exit_gate_lever(obj)
     if not obj then return false end
     local name = obj.Name:lower()
     
-    -- Cocokkan nama part / model lever
-    if name == "lever" or name:find("gatelever") or name:find("exitlever") 
-        or name:find("gate_lever") or name:find("exit_lever") 
-        or name == "gateswitch" or name == "exitswitch" then
+    -- Cocokkan nama part / model lever spesifik Violence District
+    if name == "exitlever" or name == "exit_lever" or name == "lever" or name:find("gatelever") 
+        or name:find("exitlever") or name:find("gate_lever") or name == "gateswitch" or name == "exitswitch" then
         return true
     end
     
-    -- Cek ProximityPrompt spesifik membuka gerbang / lever
-    local prompt = obj:FindFirstChildOfClass("ProximityPrompt")
-    if prompt then
-        local act = tostring(prompt.ActionText or ""):lower()
-        local objTxt = tostring(prompt.ObjectText or ""):lower()
-        if act:find("open") or act:find("escape") or act:find("lever") or objTxt:find("lever") or objTxt:find("gate") then
-            return true
-        end
+    -- Cek jika model Gate memiliki ExitLever di dalamnya
+    if obj:IsA("Model") and (name == "gate" or name:find("exitgate")) and obj:FindFirstChild("ExitLever") then
+        return true
     end
+    
     return false
 end
 
 function esp_gate_get_part(obj)
     if obj:IsA("BasePart") then return obj end
     if obj:IsA("Model") then
-        return obj:FindFirstChild("Lever") or obj:FindFirstChild("Switch") 
+        local el = obj.Name:lower() == "exitlever" and obj or obj:FindFirstChild("ExitLever")
+        if el then
+            return el:FindFirstChild("Lever") or el:FindFirstChild("LeverStart") or el:FindFirstChildWhichIsA("BasePart")
+        end
+        return obj:FindFirstChild("Lever") or obj:FindFirstChild("LeverStart") or obj:FindFirstChild("Switch") 
             or obj:FindFirstChild("Handle") or obj.PrimaryPart 
             or obj:FindFirstChildWhichIsA("BasePart")
     end
@@ -2106,17 +2105,17 @@ local autoEscapeConn = nil
 local _isEscaping = false
 
 local function find_escape_target()
-    -- 1. Cari Zone Escape / Trigger
+    -- 1. Cari Part Ujung Gerbang Escape (LeftGate-end / RightGate-end)
     for _, obj in ipairs(workspace:GetDescendants()) do
         if obj:IsA("BasePart") then
             local n = obj.Name:lower()
-            if n == "escapezone" or n == "exitzone" or n == "winzone" or n == "endzone" 
-                or n == "escapetrigger" or n == "escaperegion" or n == "escape" then
-                return obj, "zone"
+            if n == "leftgate-end" or n == "rightgate-end" or n:find("gate-end") or n:find("gate_end")
+                or n == "escapezone" or n == "exitzone" or n == "winzone" then
+                return obj, "end"
             end
         end
     end
-    -- 2. Cari Lever / Gerbang Pintu Keluar (langsung terdeteksi dari awal game)
+    -- 2. Cari ExitLever / Gate (langsung dari awal game)
     for _, obj in ipairs(workspace:GetDescendants()) do
         if is_exit_gate_lever(obj) then
             local part = esp_gate_get_part(obj)
@@ -2174,7 +2173,7 @@ function teleport_to_lobby(hrp)
     return false
 end
 
--- BYPASS AUTO ESCAPE ENGINE (MULTI-LAYER, REAL WIN, DIRECT TO LOBBY)
+-- BYPASS AUTO ESCAPE ENGINE (TAILOR-MADE UNTUK VIOLENCE DISTRICT)
 function trigger_instant_escape()
     if _isEscaping then return false, "Proses escape sedang berjalan..." end
     local char = LocalPlayer and LocalPlayer.Character
@@ -2183,133 +2182,114 @@ function trigger_instant_escape()
 
     _isEscaping = true
     task.spawn(function()
-        -- [LANGKAH 1] Kumpulkan semua Lever Gerbang & Escape Zones
-        local levers = {}
-        local zones = {}
+        -- [LANGKAH 1] Kumpulkan semua Gate, ExitLever, dan Part Ujung Gerbang di Workspace
+        local gates = {}
+        local exitLevers = {}
+        local gateEnds = {}
 
         for _, obj in ipairs(workspace:GetDescendants()) do
-            if is_exit_gate_lever(obj) then
-                local part = esp_gate_get_part(obj)
-                if part then table.insert(levers, { part = part, obj = obj }) end
-            elseif obj:IsA("BasePart") then
-                local n = obj.Name:lower()
-                if n:find("escape") or n:find("exitzone") or n:find("winzone") or n:find("escapetrigger")
-                    or n:find("escaperegion") or n:find("escapebarrier") or n:find("finishline") then
-                    table.insert(zones, obj)
-                end
-            end
-        end
-
-        -- [LANGKAH 2] Tembak SEMUA Remote Events & Functions yang berkaitan Escape / Win
-        -- Scan ReplicatedStorage menyeluruh (termasuk nested)
-        local function try_fire(obj)
             local n = obj.Name:lower()
-            if n:find("escape") or n:find("exit") or n:find("win") or n:find("survivor")
-                or n:find("finish") or n:find("complete") or n:find("endmatch")
-                or n:find("endevent") or n:find("gameover") or n:find("roundend")
-                or n:find("survived") or n:find("success") or n:find("cleared") then
-                if obj:IsA("RemoteEvent") then
-                    pcall(function() obj:FireServer() end)
-                    pcall(function() obj:FireServer(true) end)
-                    pcall(function() obj:FireServer(LocalPlayer) end)
-                    pcall(function() obj:FireServer("Escaped") end)
-                elseif obj:IsA("RemoteFunction") then
-                    pcall(function() obj:InvokeServer() end)
-                    pcall(function() obj:InvokeServer(true) end)
+            if obj:IsA("Model") and (n == "gate" or n:find("exitgate")) then
+                table.insert(gates, obj)
+            elseif obj:IsA("Model") and (n == "exitlever" or n:find("exitlever")) then
+                table.insert(exitLevers, obj)
+            elseif obj:IsA("BasePart") then
+                if n == "leftgate-end" or n == "rightgate-end" or n:find("gate-end") 
+                    or n:find("gate_end") or n == "escapezone" or n == "exitzone" or n == "winzone" then
+                    table.insert(gateEnds, obj)
                 end
             end
         end
 
-        -- Scan semua remote di RS (deep scan)
+        -- [LANGKAH 2] Tembak Remote Spesifik Violence District (Escapetime & LeverEvent)
         pcall(function()
-            for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
-                if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
-                    try_fire(obj)
+            local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+            if remotes then
+                -- 1. Pemicu fase escape game (meskipun gens belum selesai)
+                local genF = remotes:FindFirstChild("Generator")
+                if genF and genF:FindFirstChild("Escapetime") then
+                    pcall(function() genF.Escapetime:FireServer() end)
+                    pcall(function() genF.Escapetime:FireServer(true) end)
                 end
-            end
-        end)
-        -- Scan workspace
-        pcall(function()
-            for _, obj in ipairs(workspace:GetDescendants()) do
-                if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
-                    try_fire(obj)
+
+                -- 2. Tembak LeverEvent & LeverAnim untuk membuka gerbang
+                local exitF = remotes:FindFirstChild("Exit")
+                if exitF then
+                    local lEvent = exitF:FindFirstChild("LeverEvent")
+                    local lAnim = exitF:FindFirstChild("LeverAnim")
+                    for _, g in ipairs(gates) do
+                        local el = g:FindFirstChild("ExitLever") or g:FindFirstChildWhichIsA("Model")
+                        if lEvent then
+                            if el then
+                                pcall(function() lEvent:FireServer(el) end)
+                                pcall(function() lEvent:FireServer(el, true) end)
+                                pcall(function() lEvent:FireServer(el, 100) end)
+                            end
+                            pcall(function() lEvent:FireServer(g) end)
+                            pcall(function() lEvent:FireServer(g, true) end)
+                            pcall(function() lEvent:FireServer(true) end)
+                            pcall(function() lEvent:FireServer(100) end)
+                            pcall(function() lEvent:FireServer() end)
+                        end
+                        if lAnim and el then
+                            pcall(function() lAnim:FireServer(el) end)
+                            pcall(function() lAnim:FireServer(el, true) end)
+                        end
+                    end
                 end
-            end
-        end)
 
-        -- [LANGKAH 3] Buka Lever & Tembus Koridor Escape Gerbang
-        for _, levItem in ipairs(levers) do
-            local levPart = levItem.part
-            local levObj = levItem.obj
-            local parentModel = levObj.Parent or levPart.Parent
-
-            -- Teleport tepat di depan lever
-            hrp.CFrame = levPart.CFrame * CFrame.new(0, 1, 2)
-            task.wait(0.05)
-
-            -- Noclip semua part gerbang agar tidak terhalang pintu fisik
-            if parentModel then
-                for _, p in ipairs(parentModel:GetDescendants()) do
-                    if p:IsA("BasePart") then
-                        pcall(function() p.CanCollide = false end)
+                -- 3. Items Gate remote
+                local itemsF = remotes:FindFirstChild("Items")
+                if itemsF then
+                    local gF = itemsF:FindFirstChild("Gate")
+                    if gF and gF:FindFirstChild("gate") then
+                        pcall(function() gF.gate:FireServer() end)
+                        pcall(function() gF.gate:FireServer(true) end)
                     end
                 end
             end
+        end)
 
-            -- Trigger semua ProximityPrompt pada lever / gerbang (bypass hold & distance)
-            local promptRoot = parentModel or levObj
-            for _, prm in ipairs(promptRoot:GetDescendants()) do
-                if prm:IsA("ProximityPrompt") then
+        -- [LANGKAH 3] Noclip semua pintu fisik gerbang (LeftGate, RightGate, dan sekitarnya)
+        for _, g in ipairs(gates) do
+            for _, p in ipairs(g:GetDescendants()) do
+                if p:IsA("BasePart") then
+                    pcall(function() p.CanCollide = false end)
+                end
+            end
+        end
+
+        -- [LANGKAH 4] Teleport Langsung Menembus ke Ujung Escape (LeftGate-end / RightGate-end)
+        if #gateEnds > 0 then
+            for _, endPart in ipairs(gateEnds) do
+                -- Teleport tepat di part akhir gerbang
+                hrp.CFrame = endPart.CFrame * CFrame.new(0, 2, 0)
+                task.wait(0.08)
+
+                -- Teleport menembus batas luar lorong escape
+                hrp.CFrame = endPart.CFrame * CFrame.new(0, 2, -15)
+                task.wait(0.08)
+                hrp.CFrame = endPart.CFrame * CFrame.new(0, 2, -30)
+                task.wait(0.08)
+
+                if firetouchinterest then
                     pcall(function()
-                        prm.Enabled = true
-                        prm.HoldDuration = 0
-                        prm.MaxActivationDistance = 999
-                        if fireproximityprompt then
-                            pcall(function() fireproximityprompt(prm, 0) end)
-                            pcall(function() fireproximityprompt(prm) end)
-                        end
-                        prm:InputHoldBegin()
-                        task.wait(0.05)
-                        prm:InputHoldEnd()
+                        firetouchinterest(hrp, endPart, 0)
+                        task.wait(0.02)
+                        firetouchinterest(hrp, endPart, 1)
                     end)
                 end
             end
-
-            -- Teleport tepat di depan lever lalu menembus ke dalam lorong escape
-            hrp.CFrame = levPart.CFrame * CFrame.new(0, 1, 2)
-            task.wait(0.08)
-
-            local offsets = { -20, -50, -90, -130, 20, 50, 90, 130 }
-            for _, zOff in ipairs(offsets) do
-                local targetCF = levPart.CFrame * CFrame.new(0, 1, zOff)
-                hrp.CFrame = targetCF
-                task.wait(0.05)
-
-                -- Fire touch ke semua part di sekitar
-                if firetouchinterest and parentModel then
-                    for _, p in ipairs(parentModel:GetDescendants()) do
-                        if p:IsA("BasePart") then
-                            pcall(function()
-                                firetouchinterest(hrp, p, 0)
-                                task.wait(0.01)
-                                firetouchinterest(hrp, p, 1)
-                            end)
-                        end
-                    end
+        else
+            -- Fallback jika gateEnds belum siap, tembus via ExitLever
+            for _, el in ipairs(exitLevers) do
+                local lev = el:FindFirstChild("Lever") or el:FindFirstChildWhichIsA("BasePart")
+                if lev then
+                    hrp.CFrame = lev.CFrame * CFrame.new(0, 2, -35)
+                    task.wait(0.1)
+                    hrp.CFrame = lev.CFrame * CFrame.new(0, 2, -80)
+                    task.wait(0.1)
                 end
-            end
-        end
-
-        -- [LANGKAH 4] Touch semua part zona escape yang terdeteksi di map
-        for _, zone in ipairs(zones) do
-            hrp.CFrame = zone.CFrame * CFrame.new(0, 2, 0)
-            task.wait(0.05)
-            if firetouchinterest then
-                pcall(function()
-                    firetouchinterest(hrp, zone, 0)
-                    task.wait(0.02)
-                    firetouchinterest(hrp, zone, 1)
-                end)
             end
         end
 
