@@ -30,11 +30,12 @@ local apply_korblox, remove_korblox, apply_headless, remove_headless
 -- Modul 6 (Auto Heal)
 local autoHealEnabled = false
 local autoheal_start, autoheal_stop, start_auto_heal, stop_auto_heal
+HEAL_COOLDOWN = 1.5  -- Global, bisa diubah dari UI slider
 
 -- Modul 7 (Killer Radar)
 local killerRadarEnabled = false
 local RADAR_RANGE = 350
-local killerradar_start, killerradar_stop, check_is_killer, radar_is_killer
+local killerradar_start, killerradar_stop, check_is_killer, radar_is_killer, is_local_player_killer
 
 -- Modul 8 & 9 (Fullbright & Custom FOV)
 local fullbrightEnabled = false
@@ -1284,12 +1285,13 @@ do
 autoHealEnabled = false
 local autoHealConn = nil
 local autoHealCooldown = 0
-local HEAL_COOLDOWN = 1.5  -- detik antara heal
+HEAL_COOLDOWN = 1.5  -- detik antara heal (global agar bisa diubah dari UI)
 
 function autoheal_start()
     if autoHealConn then return end
     autoHealConn = RunService.Heartbeat:Connect(function(dt)
         if not autoHealEnabled then return end
+        if is_local_player_killer and is_local_player_killer() then return end
         autoHealCooldown = autoHealCooldown - dt
         if autoHealCooldown > 0 then return end
         pcall(function()
@@ -1574,6 +1576,57 @@ end
 -- Backward compatibility alias
 function radar_is_killer(player, char)
     return check_is_killer(char, player)
+end
+
+-- ==============================================================================
+-- UNIVERSAL LOCALPLAYER ROLE CHECK (KILLER vs SURVIVOR)
+-- ==============================================================================
+function is_local_player_killer()
+    local char = LocalPlayer and LocalPlayer.Character
+    if not char then return false end
+
+    -- 1. Cek objek "Weapon" di karakter (Killer selalu memegang model Weapon)
+    if char:FindFirstChild("Weapon") then return true end
+
+    -- 2. Cek CollectionService Tag "Killer" / "Hunter"
+    local cs = game:GetService("CollectionService")
+    if pcall(function() return cs:HasTag(char, "Killer") end) and cs:HasTag(char, "Killer") then return true end
+    if pcall(function() return cs:HasTag(char, "Hunter") end) and cs:HasTag(char, "Hunter") then return true end
+
+    -- 3. Cek Attribute khas Killer pada model karakter
+    if char:GetAttribute("TerrorRadius") or char:GetAttribute("SuspenseRadius")
+        or char:GetAttribute("Chasemusic") or char:GetAttribute("BloodLust")
+        or char:GetAttribute("IsKiller") or char:GetAttribute("KillerSpeed")
+        or char:GetAttribute("TerrorLevel") or char:GetAttribute("IsHunter") then
+        return true
+    end
+
+    -- 4. Cek Attribute khas Killer pada Player
+    local role = LocalPlayer:GetAttribute("CurrentRole") or LocalPlayer:GetAttribute("Role")
+        or LocalPlayer:GetAttribute("Team") or LocalPlayer:GetAttribute("Side")
+        or LocalPlayer:GetAttribute("CharacterType")
+    if role then
+        local rs = tostring(role):lower()
+        if rs:find("killer") or rs:find("hunter") or rs:find("slasher") or rs:find("monster") or rs == "1" then
+            return true
+        end
+    end
+
+    -- 5. Cek Team Player
+    if LocalPlayer.Team then
+        local tn = tostring(LocalPlayer.Team.Name):lower()
+        if tn:find("kill") or tn:find("hunt") or tn:find("slash") or tn:find("monster") or tn:find("evil") then
+            return true
+        end
+    end
+
+    -- 6. Cek MaxHealth: Killer di game ini HP jauh lebih besar (> 200) dibanding survivor (100)
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum and hum.MaxHealth and hum.MaxHealth > 200 then
+        return true
+    end
+
+    return false
 end
 
 -- DOT POOLING untuk performa tinggi & anti-flicker
@@ -1887,8 +1940,9 @@ local infiniteChargesConn = nil
 
 function infinite_charges_apply()
     pcall(function()
+        if is_local_player_killer and is_local_player_killer() then return end
         local char = LocalPlayer and LocalPlayer.Character
-        if not char then return end
+        if not char or char:FindFirstChild("Weapon") then return end
         -- Patch semua tool di karakter
         for _, obj in ipairs(char:GetChildren()) do
             if obj:IsA("Tool") then
@@ -2103,6 +2157,8 @@ end
 autoEscapeEnabled = false
 local autoEscapeConn = nil
 local _isEscaping = false
+local _escapeCheckTimer = 0
+local _autoEscapeStarted = false
 
 local function find_escape_target()
     -- 1. Cari Part Ujung Gerbang Escape (LeftGate-end / RightGate-end)
@@ -2174,6 +2230,82 @@ function teleport_to_lobby(hrp)
 end
 
 -- BYPASS AUTO ESCAPE ENGINE (TAILOR-MADE UNTUK VIOLENCE DISTRICT)
+-- Helper: Fire semua remote reward (EXP, Screw, Sin, Gears) seperti escape normal
+local function fire_escape_reward_remotes()
+    pcall(function()
+        -- Scan SEMUA remote di ReplicatedStorage untuk mencari yang berkaitan dengan round win/escape reward
+        local function fireRewardRemote(r, ...)
+            local args = {...}
+            if r:IsA("RemoteEvent") then
+                pcall(function() r:FireServer(table.unpack(args)) end)
+            elseif r:IsA("RemoteFunction") then
+                pcall(function() r:InvokeServer(table.unpack(args)) end)
+            end
+        end
+
+        for _, r in ipairs(ReplicatedStorage:GetDescendants()) do
+            local rn = r.Name:lower()
+            -- Remote khusus reward/win round
+            if rn:find("escape") or rn:find("survived") or rn:find("winround") or rn:find("win_round")
+                or rn:find("roundwin") or rn:find("matchend") or rn:find("match_end")
+                or rn:find("giveexp") or rn:find("give_exp") or rn:find("givereward")
+                or rn:find("addexp") or rn:find("addxp") or rn:find("addscrews")
+                or rn:find("addcurrency") or rn:find("roundover") or rn:find("gameend")
+                or rn == "reward" or rn == "win" or rn == "complete" or rn == "finish" then
+                fireRewardRemote(r)
+                fireRewardRemote(r, true)
+                fireRewardRemote(r, "Escaped")
+                fireRewardRemote(r, LocalPlayer)
+                fireRewardRemote(r, true, "Escaped")
+            end
+        end
+
+        -- Fire khusus remote Violence District yang sudah diketahui
+        local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+        if remotes then
+            -- Round / Match folder
+            local roundF = remotes:FindFirstChild("Round") or remotes:FindFirstChild("Match")
+            if roundF then
+                for _, r in ipairs(roundF:GetDescendants()) do
+                    if r:IsA("RemoteEvent") or r:IsA("RemoteFunction") then
+                        fireRewardRemote(r)
+                        fireRewardRemote(r, true)
+                        fireRewardRemote(r, "Escaped")
+                    end
+                end
+            end
+
+            -- Generator Escapetime
+            local genF = remotes:FindFirstChild("Generator")
+            if genF then
+                local et = genF:FindFirstChild("Escapetime")
+                if et then
+                    pcall(function() et:FireServer() end)
+                    pcall(function() et:FireServer(true) end)
+                end
+                -- Generator complete
+                local gc = genF:FindFirstChild("GeneratorComplete") or genF:FindFirstChild("Complete")
+                    or genF:FindFirstChild("GenDone") or genF:FindFirstChild("Done")
+                if gc then
+                    pcall(function() gc:FireServer() end)
+                    pcall(function() gc:FireServer(true) end)
+                end
+            end
+
+            -- Exit folder events
+            local exitF = remotes:FindFirstChild("Exit")
+            if exitF then
+                for _, r in ipairs(exitF:GetDescendants()) do
+                    if r:IsA("RemoteEvent") or r:IsA("RemoteFunction") then
+                        fireRewardRemote(r)
+                        fireRewardRemote(r, true)
+                    end
+                end
+            end
+        end
+    end)
+end
+
 function trigger_instant_escape()
     if _isEscaping then return false, "Proses escape sedang berjalan..." end
     local char = LocalPlayer and LocalPlayer.Character
@@ -2189,30 +2321,36 @@ function trigger_instant_escape()
 
         for _, obj in ipairs(workspace:GetDescendants()) do
             local n = obj.Name:lower()
-            if obj:IsA("Model") and (n == "gate" or n:find("exitgate")) then
+            if obj:IsA("Model") and (n == "gate" or n:find("exitgate") or n == "leftgate" or n == "rightgate") then
                 table.insert(gates, obj)
             elseif obj:IsA("Model") and (n == "exitlever" or n:find("exitlever")) then
                 table.insert(exitLevers, obj)
             elseif obj:IsA("BasePart") then
-                if n == "leftgate-end" or n == "rightgate-end" or n:find("gate-end") 
-                    or n:find("gate_end") or n == "escapezone" or n == "exitzone" or n == "winzone" then
+                if n == "leftgate-end" or n == "rightgate-end" or n:find("gate-end")
+                    or n:find("gate_end") or n == "escapezone" or n == "exitzone" or n == "winzone"
+                    or n == "escapepoint" or n == "exitpoint" or n:find("escape_zone") then
                     table.insert(gateEnds, obj)
                 end
             end
         end
 
-        -- [LANGKAH 2] Tembak Remote Spesifik Violence District (Escapetime & LeverEvent)
+        -- [LANGKAH 2] Noclip semua pintu fisik gerbang terlebih dahulu
+        for _, g in ipairs(gates) do
+            for _, p in ipairs(g:GetDescendants()) do
+                if p:IsA("BasePart") then
+                    pcall(function() p.CanCollide = false end)
+                end
+            end
+        end
+
+        -- [LANGKAH 3] Tembak SEMUA remote escape/reward di awal
+        -- (Penting: fire dulu reward agar server catat stat SEBELUM player keluar)
+        fire_escape_reward_remotes()
+
+        -- [LANGKAH 4] Tembak LeverEvent & LeverAnim untuk membuka gerbang
         pcall(function()
             local remotes = ReplicatedStorage:FindFirstChild("Remotes")
             if remotes then
-                -- 1. Pemicu fase escape game (meskipun gens belum selesai)
-                local genF = remotes:FindFirstChild("Generator")
-                if genF and genF:FindFirstChild("Escapetime") then
-                    pcall(function() genF.Escapetime:FireServer() end)
-                    pcall(function() genF.Escapetime:FireServer(true) end)
-                end
-
-                -- 2. Tembak LeverEvent & LeverAnim untuk membuka gerbang
                 local exitF = remotes:FindFirstChild("Exit")
                 if exitF then
                     local lEvent = exitF:FindFirstChild("LeverEvent")
@@ -2238,7 +2376,7 @@ function trigger_instant_escape()
                     end
                 end
 
-                -- 3. Items Gate remote
+                -- Items Gate remote
                 local itemsF = remotes:FindFirstChild("Items")
                 if itemsF then
                     local gF = itemsF:FindFirstChild("Gate")
@@ -2250,28 +2388,30 @@ function trigger_instant_escape()
             end
         end)
 
-        -- [LANGKAH 3] Noclip semua pintu fisik gerbang (LeftGate, RightGate, dan sekitarnya)
-        for _, g in ipairs(gates) do
-            for _, p in ipairs(g:GetDescendants()) do
-                if p:IsA("BasePart") then
-                    pcall(function() p.CanCollide = false end)
-                end
-            end
-        end
+        -- Tunggu sebentar agar server memproses event sebelum teleport
+        task.wait(0.5)
 
-        -- [LANGKAH 4] Teleport Langsung Menembus ke Ujung Escape (LeftGate-end / RightGate-end)
+        -- [LANGKAH 5] Set attribute Escaped pada character/player
+        pcall(function()
+            if char and char.Parent then
+                char:SetAttribute("Escaped", true)
+                char:SetAttribute("WinState", true)
+                char:SetAttribute("Survived", true)
+                char:SetAttribute("IsEscaping", true)
+            end
+            LocalPlayer:SetAttribute("Escaped", true)
+            LocalPlayer:SetAttribute("WinState", true)
+        end)
+
+        -- [LANGKAH 6] Teleport Langsung ke Ujung Escape (LeftGate-end / RightGate-end)
         if #gateEnds > 0 then
             for _, endPart in ipairs(gateEnds) do
-                -- Teleport tepat di part akhir gerbang
                 hrp.CFrame = endPart.CFrame * CFrame.new(0, 2, 0)
                 task.wait(0.08)
-
-                -- Teleport menembus batas luar lorong escape
                 hrp.CFrame = endPart.CFrame * CFrame.new(0, 2, -15)
                 task.wait(0.08)
                 hrp.CFrame = endPart.CFrame * CFrame.new(0, 2, -30)
                 task.wait(0.08)
-
                 if firetouchinterest then
                     pcall(function()
                         firetouchinterest(hrp, endPart, 0)
@@ -2280,8 +2420,8 @@ function trigger_instant_escape()
                     end)
                 end
             end
-        else
-            -- Fallback jika gateEnds belum siap, tembus via ExitLever
+        elseif #exitLevers > 0 then
+            -- Fallback: tembus via ExitLever
             for _, el in ipairs(exitLevers) do
                 local lev = el:FindFirstChild("Lever") or el:FindFirstChildWhichIsA("BasePart")
                 if lev then
@@ -2289,41 +2429,41 @@ function trigger_instant_escape()
                     task.wait(0.1)
                     hrp.CFrame = lev.CFrame * CFrame.new(0, 2, -80)
                     task.wait(0.1)
+                    if firetouchinterest then
+                        pcall(function()
+                            firetouchinterest(hrp, lev, 0)
+                            task.wait(0.02)
+                            firetouchinterest(hrp, lev, 1)
+                        end)
+                    end
+                end
+            end
+        elseif #gates > 0 then
+            -- Fallback terakhir: tembus langsung lewat gate
+            for _, g in ipairs(gates) do
+                local pp = g.PrimaryPart or g:FindFirstChildWhichIsA("BasePart")
+                if pp then
+                    hrp.CFrame = pp.CFrame * CFrame.new(0, 2, -40)
+                    task.wait(0.1)
+                    hrp.CFrame = pp.CFrame * CFrame.new(0, 2, -100)
+                    task.wait(0.1)
                 end
             end
         end
 
-        -- [LANGKAH 5] Set attribute Escaped pada character/player & fire remotes
-        pcall(function()
-            if char then
-                char:SetAttribute("Escaped", true)
-                char:SetAttribute("WinState", true)
-                char:SetAttribute("Survived", true)
-            end
-            LocalPlayer:SetAttribute("Escaped", true)
-            LocalPlayer:SetAttribute("WinState", true)
-        end)
-        -- Fire semua binding event survivor/escape lagi
-        pcall(function()
-            for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
-                if obj:IsA("RemoteEvent") then
-                    pcall(function() obj:FireServer("Escaped") end)
-                    pcall(function() obj:FireServer(true, "Escaped") end)
-                end
-            end
-        end)
+        -- [LANGKAH 7] Fire reward remotes sekali lagi setelah teleport (double confirm)
+        task.wait(0.3)
+        fire_escape_reward_remotes()
 
-        -- Tunggu agar server game mencatat status Escaped dan memproses XP/reward
-        task.wait(1.0)
-
-        -- [LANGKAH 6] Balik ke Lobby!
+        -- [LANGKAH 8] Balik ke Lobby
+        task.wait(0.5)
         local inLobby = teleport_to_lobby(hrp)
         if not inLobby then
-            -- Fallback: pindahkan ke tempat aman di atas map agar tidak diserang killer
-            pcall(function() hrp.CFrame = CFrame.new(hrp.Position.X, 450, hrp.Position.Z) end)
+            -- Fallback: angkat ke udara agar aman dari killer
+            pcall(function() hrp.CFrame = CFrame.new(hrp.Position.X, 500, hrp.Position.Z) end)
         end
 
-        -- Tembak juga remote leave / lobby jika ada
+        -- Tembak remote leave / lobby jika ada
         pcall(function()
             for _, r in ipairs(ReplicatedStorage:GetDescendants()) do
                 if r:IsA("RemoteEvent") or r:IsA("RemoteFunction") then
@@ -2339,35 +2479,49 @@ function trigger_instant_escape()
             end
         end)
 
-        -- [LANGKAH 7] Kirim Discord Webhook per-match summary
+        -- [LANGKAH 9] Kirim Discord Webhook per-match summary
         pcall(function()
             if webhookNotifyEscape then
-                send_match_summary_webhook("ESCAPED")
+                task.delay(2, function()  -- Delay 2s agar stat sudah diupdate
+                    send_match_summary_webhook("ESCAPED")
+                end)
             end
         end)
 
-        -- Selalu reset state dan matikan loop agar tidak muter-muter
+        -- Reset state
         _isEscaping = false
         autoEscapeEnabled = false
+        _autoEscapeStarted = false
         stop_auto_escape()
 
         Window:Notify({
-            Title = "Escape Sukses!",
-            Description = inLobby and "Berhasil Escape & Balik ke Lobby!" or "Bypass Escape selesai! Hadiah sedang diproses server.",
-            Lifetime = 4
+            Title = "✅ Escape Sukses!",
+            Description = inLobby
+                and "Berhasil Escape & kembali ke Lobby! EXP/Reward sedang diproses."
+                or "Bypass Escape selesai! Reward diproses oleh server.",
+            Lifetime = 5
         })
     end)
 
-    return true, "Memulai Bypass Escape otomatis..."
+    return true, "Memulai Escape bypass..."
 end
 
 function start_auto_escape()
     if autoEscapeConn then autoEscapeConn:Disconnect() end
-    autoEscapeConn = RunService.Heartbeat:Connect(function()
+    _escapeCheckTimer = 0
+    _autoEscapeStarted = true
+    autoEscapeConn = RunService.Heartbeat:Connect(function(dt)
         if not autoEscapeEnabled or _isEscaping then return end
+        if is_local_player_killer and is_local_player_killer() then return end
+        -- Throttle: cek setiap 0.5 detik saja untuk performa
+        _escapeCheckTimer = _escapeCheckTimer + dt
+        if _escapeCheckTimer < 0.5 then return end
+        _escapeCheckTimer = 0
+
+        -- Cek apakah ada gate/lever/escape zone di map
         local targetObj = find_escape_target()
         if targetObj then
-            -- Langsung trigger dan matikan loop agar tidak muter-muter
+            -- Langsung trigger DAN stop loop agar tidak berulang
             autoEscapeEnabled = false
             stop_auto_escape()
             trigger_instant_escape()
@@ -2376,6 +2530,7 @@ function start_auto_escape()
 end
 
 function stop_auto_escape()
+    _autoEscapeStarted = false
     if autoEscapeConn then autoEscapeConn:Disconnect(); autoEscapeConn = nil end
 end
 
@@ -2558,31 +2713,32 @@ function send_match_summary_webhook(resultStatus)
     _matchStartStats = currStats
     _matchStartTime = tick()
 
+    local resultEmoji = resultStatus == "ESCAPED" and "🟢" or (resultStatus == "Manual" and "🔵" or "🟡")
+    local resultLabel = resultStatus == "ESCAPED" and "Escaped" or (resultStatus == "Manual" and "Manual Report" or tostring(resultStatus))
+
     local payload = {
-        username = "Pandu Hub Auto Farming",
+        username = "Sky Hub Notifier",
         avatar_url = "https://cdn-icons-png.flaticon.com/512/3135/3135715.png",
         embeds = {
             {
-                title = "📊 Statistik Auto Farm",
-                color = 0x00E676,  -- Hijau Pandu Hub
+                title = "📊 Sky Hub • Match Summary",
+                color = 0x5865F2,  -- Discord Blurple (Sky Hub style)
+                description = string.format("%s **%s** | Server: `%s` | Match #%d",
+                    resultEmoji, resultLabel, maskedSId, _totalMatchCount),
                 fields = {
-                    { name = "🟢 Status", value = statusStr, inline = true },
-                    { name = "👤 Username", value = maskedName, inline = true },
-                    { name = "​", value = "​", inline = true },
+                    { name = "👤 Player", value = maskedName, inline = true },
+                    { name = "🎮 Map", value = currStats.map or "Unknown Map", inline = true },
+                    { name = "⏱️ Durasi", value = matchTimeStr, inline = true },
                     { name = "🆙 Level", value = levelField, inline = true },
-                    { name = "☠️ Sin", value = sinField, inline = true },
                     { name = "⭐ EXP", value = expField, inline = true },
                     { name = "🔩 Screws", value = screwField, inline = true },
                     { name = "⚙️ Gears", value = gearField, inline = true },
-                    { name = "​", value = "​", inline = true },
-                    { name = "⏱️ Match Time", value = matchTimeStr, inline = true },
-                    { name = "🗺️ Maps", value = currStats.map or "Unknown Map", inline = true },
-                    { name = "​", value = "​", inline = true },
-                    { name = "🏆 Match Total", value = matchTotalStr, inline = true },
-                    { name = "🆔 Server ID", value = "`" .. maskedSId .. "`", inline = true },
-                    { name = "📊 Total Match", value = tostring(_totalMatchCount), inline = true },
+                    { name = "☠️ Sin", value = sinField, inline = true },
+                    { name = "🏆 Match Total", value = tostring(_totalMatchCount), inline = true },
                 },
-                footer = { text = "Pandu Hub Auto Farming • Violence District • " .. os.date("%d/%m/%Y %H:%M") }
+                footer = {
+                    text = "Sky Hub Auto Farming • Violence District • " .. os.date("%d/%m/%Y %H:%M:%S")
+                }
             }
         }
     }
@@ -3376,24 +3532,45 @@ pcall(function()
     end
 end)
 
-LocalPlayer.CharacterAdded:Connect(function()
+LocalPlayer.CharacterAdded:Connect(function(char)
     cachedParryClient = nil
     cachedParryRemote = nil
     isParrying = false
     lastParryTick = 0
     gameParryCooldownEnd = 0
     cleanup_animator_tracks()
+
+    task.delay(1, function()
+        if is_local_player_killer and is_local_player_killer() then
+            cleanup_animator_tracks()
+            isParrying = false
+            pcall(function()
+                Window:Notify({
+                    Title = "⚔️ Mode Killer Terdeteksi",
+                    Description = "Auto Parry dinonaktifkan otomatis. Serangan (M1) & skill kamu 100% lancar!",
+                    Lifetime = 4
+                })
+            end)
+        else
+            if autoParryEnabled then
+                scanAllEntities()
+            end
+        end
+    end)
 end)
 
 local function execute_perfect_parry(killerModel, killerName, reason, dist)
+    -- [CRITICAL FIX KILLER] Jangan pernah parry jika kita sendiri adalah Killer!
+    if is_local_player_killer and is_local_player_killer() then return end
+    local myChar = LocalPlayer.Character
+    if not myChar or killerModel == myChar then return end
+
     local now = tick()
     -- Cek cooldown internal & cooldown dari game
     if isParrying or (now - lastParryTick < PARRY_COOLDOWN) or (now < gameParryCooldownEnd) then
         return
     end
 
-    local myChar = LocalPlayer.Character
-    if not myChar then return end
     local myHrp = myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Torso")
     local killerHrp = killerModel and (killerModel:FindFirstChild("HumanoidRootPart") or killerModel:FindFirstChild("Torso"))
     if not myHrp or not killerHrp then return end
@@ -3422,7 +3599,7 @@ local function execute_perfect_parry(killerModel, killerName, reason, dist)
 
     -- 1. Auto-Face: Hadapkan badan tepat ke arah killer (0ms snap)
     local toKiller = Vector3.new(killerHrp.Position.X - myHrp.Position.X, 0, killerHrp.Position.Z - myHrp.Position.Z)
-    if toKiller.Magnitude > 0 then
+    if toKiller.Magnitude > 0.5 then
         myHrp.CFrame = CFrame.new(myHrp.Position, myHrp.Position + toKiller.Unit)
     end
 
@@ -3464,6 +3641,12 @@ end
 
 local function is_killer_entity(model)
     if not model or not model:IsA("Model") then return false end
+    -- [CRITICAL FIX KILLER] Diri sendiri BUKAN target parry!
+    local myChar = LocalPlayer and LocalPlayer.Character
+    if model == myChar then return false end
+    local p = Players:GetPlayerFromCharacter(model)
+    if p == LocalPlayer then return false end
+
     -- 1. Cek Model "Weapon" di karakter (Killer selalu memegang child Model "Weapon")
     if model:FindFirstChild("Weapon") then return true end
     -- 2. Cek CollectionService Tag "Killer"
@@ -3481,7 +3664,6 @@ local function is_killer_entity(model)
         return true
     end
     -- 4. Cek Player jika entity adalah karakter Player
-    local p = Players:GetPlayerFromCharacter(model)
     if p then
         local role = p:GetAttribute("CurrentRole") or p:GetAttribute("Role")
         if role and tostring(role):lower() == "killer" then return true end
@@ -3493,40 +3675,54 @@ end
 local function monitorAnimator(animator, ownerModel, ownerName)
     if trackedAnimators[animator] then return end
 
+    -- [CRITICAL FIX KILLER] JANGAN PERNAH monitor animator karakter sendiri!
+    local myChar = LocalPlayer and LocalPlayer.Character
+    if not ownerModel or ownerModel == myChar then return end
+    if ownerName == (LocalPlayer.DisplayName or LocalPlayer.Name) or ownerName == LocalPlayer.Name then return end
+
     local conn = animator.AnimationPlayed:Connect(function(track)
         if not autoParryEnabled then return end
-        -- [FIX] Cek SEMUA kondisi cooldown sebelum parry
+        -- [CRITICAL FIX KILLER] Jika kita adalah Killer, jangan pernah tangkis!
+        if is_local_player_killer and is_local_player_killer() then return end
+
+        local curChar = LocalPlayer and LocalPlayer.Character
+        if not curChar or ownerModel == curChar then return end
+
+        -- Cek SEMUA kondisi cooldown sebelum parry
         local now2 = tick()
         if isParrying or (now2 - lastParryTick < PARRY_COOLDOWN) or (now2 < gameParryCooldownEnd) then return end
 
-        -- [FIX] HANYA AUTO PARRY JIKA ENTITY ADALAH KILLER! JANGAN PARRY JIKA SURVIVOR NEMBAK!
+        -- HANYA AUTO PARRY JIKA ENTITY ADALAH KILLER! JANGAN PARRY JIKA SURVIVOR NEMBAK!
         if not is_killer_entity(ownerModel) then
             return
         end
 
-        local myChar = LocalPlayer and LocalPlayer.Character
-        local myHrp = myChar and (myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Torso"))
+        local myHrp = curChar:FindFirstChild("HumanoidRootPart") or curChar:FindFirstChild("Torso")
         local killerHrp = ownerModel and (ownerModel:FindFirstChild("HumanoidRootPart") or ownerModel:FindFirstChild("Torso"))
 
         if not myHrp or not killerHrp then return end
 
-        -- [FIX] Skip jika killer sedang MEMBAWA survivor (bukan menyerang kita)
+        -- Skip jika killer sedang MEMBAWA survivor (bukan menyerang kita)
         local killerIsCarrying = ownerModel:GetAttribute("IsCarrying") or ownerModel:GetAttribute("Carrying")
         if killerIsCarrying and killerIsCarrying ~= false and killerIsCarrying ~= 0 then
             return -- Killer sedang bawa survi, bukan menyerang
         end
         -- Juga cek apakah kita sedang di-carry
-        if myChar:GetAttribute("IsCarried") then
+        if curChar:GetAttribute("IsCarried") then
             return
         end
 
         local dist = (myHrp.Position - killerHrp.Position).Magnitude
-        if dist <= PARRY_DISTANCE then
+        -- Wajib dist > 0.5 agar tidak pernah mendeteksi karakter sendiri
+        if dist <= PARRY_DISTANCE and dist > 0.5 then
             -- DIRECTIONAL CHECK: Hanya tangkis jika killer menghadap kita
             local killerLook = killerHrp.CFrame.LookVector
-            local killerLookFlat = Vector3.new(killerLook.X, 0, killerLook.Z).Unit
+            local killerLookFlat = Vector3.new(killerLook.X, 0, killerLook.Z)
+            if killerLookFlat.Magnitude > 0 then killerLookFlat = killerLookFlat.Unit else killerLookFlat = killerLook end
+
             local toPlayer = (myHrp.Position - killerHrp.Position)
-            local toPlayerFlat = Vector3.new(toPlayer.X, 0, toPlayer.Z).Unit
+            local toPlayerFlat = Vector3.new(toPlayer.X, 0, toPlayer.Z)
+            if toPlayerFlat.Magnitude > 0 then toPlayerFlat = toPlayerFlat.Unit else toPlayerFlat = toPlayer end
 
             local facingAngle = killerLookFlat:Dot(toPlayerFlat)
             if facingAngle < 0.45 then
@@ -3538,13 +3734,13 @@ local function monitorAnimator(animator, ownerModel, ownerName)
             local cleanId = tostring(animId):match("%d+")
             local animName = (track.Name or ""):lower()
 
-            -- [FIX] Skip animasi carry / pickup
+            -- Skip animasi carry / pickup
             local isCarryAnim = animName:find("carry") or animName:find("pickup")
                 or animName:find("pick_up") or animName:find("grab") or animName:find("lift")
                 or animName:find("drop") or animName:find("throw") or animName:find("release")
             if isCarryAnim then return end
 
-            -- [FIX] Skip animasi tembakan senjata api / flare
+            -- Skip animasi tembakan senjata api / flare
             if animName:find("shoot") or animName:find("gun") or animName:find("fire")
                 or animName:find("flare") or animName:find("aim") then
                 return
@@ -3577,11 +3773,13 @@ end
 
 local function scanAllEntities()
     if not autoParryEnabled then return end
+    -- [CRITICAL FIX KILLER] Jika kita adalah Killer, jangan scan & jangan pasang parry!
+    if is_local_player_killer and is_local_player_killer() then return end
     local myChar = LocalPlayer and LocalPlayer.Character
     if not myChar then return end
 
     for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and p.Character and is_killer_entity(p.Character) then
+        if p ~= LocalPlayer and p.Character and p.Character ~= myChar and is_killer_entity(p.Character) then
             local hum = p.Character:FindFirstChildOfClass("Humanoid")
             local anim = hum and hum:FindFirstChildOfClass("Animator")
             if anim then monitorAnimator(anim, p.Character, p.DisplayName or p.Name) end
@@ -3590,9 +3788,12 @@ local function scanAllEntities()
 
     for _, obj in ipairs(workspace:GetChildren()) do
         if obj:IsA("Model") and obj ~= myChar and is_killer_entity(obj) then
-            local hum = obj:FindFirstChildOfClass("Humanoid")
-            local anim = hum and hum:FindFirstChildOfClass("Animator")
-            if anim then monitorAnimator(anim, obj, obj.Name) end
+            local p = Players:GetPlayerFromCharacter(obj)
+            if p ~= LocalPlayer then
+                local hum = obj:FindFirstChildOfClass("Humanoid")
+                local anim = hum and hum:FindFirstChildOfClass("Animator")
+                if anim then monitorAnimator(anim, obj, obj.Name) end
+            end
         end
     end
 end
@@ -3601,6 +3802,10 @@ local autoParryDescConn = nil
 
 function autoparry_start()
     if autoParryConn then return end
+    -- [CRITICAL FIX KILLER] Jika kita Killer, jangan mulai
+    if is_local_player_killer and is_local_player_killer() then
+        return
+    end
     isParrying = false
     lastParryTick = 0
     gameParryCooldownEnd = 0
@@ -3609,10 +3814,15 @@ function autoparry_start()
     -- Event-driven: pasang listener saat ada child/descendant baru di workspace
     autoParryDescConn = workspace.DescendantAdded:Connect(function(desc)
         if not autoParryEnabled then return end
+        if is_local_player_killer and is_local_player_killer() then return end
         if desc:IsA("Animator") then
             local ownerModel = desc.Parent and desc.Parent.Parent
-            if ownerModel and is_killer_entity(ownerModel) then
-                monitorAnimator(desc, ownerModel, ownerModel.Name)
+            local myChar = LocalPlayer and LocalPlayer.Character
+            if ownerModel and ownerModel ~= myChar and is_killer_entity(ownerModel) then
+                local p = Players:GetPlayerFromCharacter(ownerModel)
+                if p ~= LocalPlayer then
+                    monitorAnimator(desc, ownerModel, ownerModel.Name)
+                end
             end
         end
     end)
@@ -3620,8 +3830,13 @@ function autoparry_start()
     local scanTimer2 = 0
     autoParryConn = RunService.Heartbeat:Connect(function(dt)
         if not autoParryEnabled then return end
+        if is_local_player_killer and is_local_player_killer() then
+            -- Jika kita berubah jadi Killer di tengah match, bersihkan semua listener parry
+            cleanup_animator_tracks()
+            return
+        end
         scanTimer2 = scanTimer2 + dt
-        if scanTimer2 >= 3 then  -- re-scan setiap 3 detik, bukan setiap frame
+        if scanTimer2 >= 3 then
             scanTimer2 = 0
             scanAllEntities()
         end
@@ -3640,6 +3855,18 @@ function autoparry_stop()
     isParrying = false
     cleanup_animator_tracks()
 end
+
+-- Watcher: jika peran berubah menjadi Killer di tengah permainan, bersihkan tracking segera
+pcall(function()
+    local function onRoleChanged()
+        if is_local_player_killer and is_local_player_killer() then
+            cleanup_animator_tracks()
+            isParrying = false
+        end
+    end
+    LocalPlayer:GetAttributeChangedSignal("CurrentRole"):Connect(onRoleChanged)
+    LocalPlayer:GetAttributeChangedSignal("Role"):Connect(onRoleChanged)
+end)
 
 
 end
@@ -3797,47 +4024,21 @@ local function start_fly()
     end)
 end
 
--- Anti-AFK (Robust: Idled event + periodic VirtualUser heartbeat + mouse move)
+-- Anti-AFK (Standard & Safe: Idled event, tidak membajak controller/mouse)
 local VirtualUser = cloneref and cloneref(game:GetService("VirtualUser")) or game:GetService("VirtualUser")
 local antiAfkConn = nil
-local antiAfkHbConn = nil
 local antiAfkEnabled = false
 
 local function toggle_anti_afk(enabled)
     antiAfkEnabled = enabled
     if antiAfkConn then antiAfkConn:Disconnect(); antiAfkConn = nil end
-    if antiAfkHbConn then antiAfkHbConn:Disconnect(); antiAfkHbConn = nil end
     if enabled then
-        -- Layer 1: Roblox Idled event (utama)
         pcall(function()
             antiAfkConn = LocalPlayer.Idled:Connect(function()
-                VirtualUser:CaptureController()
-                VirtualUser:Button2Down(Vector2.new(200, 200), workspace.CurrentCamera.CFrame)
-                task.wait(0.1)
-                VirtualUser:Button2Up(Vector2.new(200, 200), workspace.CurrentCamera.CFrame)
-                VirtualUser:CaptureController()
-                VirtualUser:ClickButton2(Vector2.new())
+                VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+                task.wait(0.5)
+                VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
             end)
-        end)
-        -- Layer 2: Periodic heartbeat setiap 45 detik agar tidak idle
-        local afkTimer = 0
-        antiAfkHbConn = RunService.Heartbeat:Connect(function(dt)
-            if not antiAfkEnabled then return end
-            afkTimer = afkTimer + dt
-            if afkTimer >= 45 then
-                afkTimer = 0
-                pcall(function()
-                    VirtualUser:CaptureController()
-                    VirtualUser:ClickButton2(Vector2.new())
-                    -- Simulasi keystroke kecil
-                    game:GetService("VirtualInputManager"):SendKeyEvent(true, Enum.KeyCode.W, false, game)
-                    task.delay(0.05, function()
-                        pcall(function()
-                            game:GetService("VirtualInputManager"):SendKeyEvent(false, Enum.KeyCode.W, false, game)
-                        end)
-                    end)
-                end)
-            end
         end)
     end
 end
@@ -3995,6 +4196,14 @@ SecAutoParry:Toggle({
     Callback = function(enabled)
         autoParryEnabled = enabled
         if enabled then
+            if is_local_player_killer and is_local_player_killer() then
+                Window:Notify({
+                    Title = "Auto Parry",
+                    Description = "Kamu sedang bermain sebagai Killer! Auto Parry ditangguhkan agar serangan & skill kamu lancar.",
+                    Lifetime = 4
+                })
+                return
+            end
             autoparry_start()
             Window:Notify({ Title = "Auto Parry", Description = "Aktif! Menangkis serangan killer otomatis.", Lifetime = 3 })
         else
@@ -4063,12 +4272,34 @@ SecAutoEscape:Toggle({
 })
 
 SecAutoEscape:Button({
-    Name = "Escape Sekarang!",
+    Name = "Escape Sekarang! (Bypass)",
     Callback = function()
         local ok, msg = trigger_instant_escape()
         Window:Notify({
             Title = ok and "Escape!" or "Gagal",
-            Description = msg or "Tidak ada zona escape di map ini.",
+            Description = msg or "Error saat escape.",
+            Lifetime = 3
+        })
+    end
+})
+
+SecAutoEscape:Button({
+    Name = "Escape Instan (Skip Gate Check)",
+    Callback = function()
+        -- Escape langsung tanpa cek gate -- berguna dari awal game
+        local char = LocalPlayer and LocalPlayer.Character
+        local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
+        if not hrp then
+            Window:Notify({ Title = "Gagal", Description = "Karakter tidak ditemukan!", Lifetime = 3 })
+            return
+        end
+        -- Override: paksa escape tanpa menunggu gate
+        local saved = autoEscapeEnabled
+        autoEscapeEnabled = false  -- matikan loop dulu
+        local ok, msg = trigger_instant_escape()
+        Window:Notify({
+            Title = ok and "Escape!" or "Gagal",
+            Description = msg or "Error saat escape.",
             Lifetime = 3
         })
     end
@@ -5534,7 +5765,7 @@ SecWHUrl:Button({
 })
 
 local SecWHSummary = TabWebhook:Section({})
-SecWHSummary:Header({ Name = WMacLib:Gradient("Per-Match Summary (Pandu Hub Style)", Color3.fromRGB(0, 230, 118), Color3.fromRGB(0, 180, 216)) })
+SecWHSummary:Header({ Name = WMacLib:Gradient("Per-Match Summary (Sky Hub Style)", Color3.fromRGB(88, 101, 242), Color3.fromRGB(57, 197, 187)) })
 
 SecWHSummary:Toggle({
     Name = "Auto Kirim Summary Per-Match",
@@ -5562,8 +5793,8 @@ SecWHSummary:Button({
     end
 })
 
-SecWHSummary:Label({ Name = "Format Pandu Hub: Green Embed, Delta (+/-) Level, Sin, EXP, Screws, Gears." })
-SecWHSummary:Label({ Name = "Summary dikirim per-match (bukan spam live update) saat match selesai / escape." })
+SecWHSummary:Label({ Name = "Format Sky Hub: Discord Blurple, Delta (+/-) Level, EXP, Screws, Gears, Sin." })
+SecWHSummary:Label({ Name = "Summary dikirim per-match (bukan live update) saat match selesai / escape." })
 
 local SecWHInfo = TabWebhook:Section({})
 SecWHInfo:Header({ Name = WMacLib:Gradient("Cara Pakai Webhook", Color3.fromRGB(150, 150, 255), Color3.fromRGB(100, 200, 255)) })
