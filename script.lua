@@ -2417,7 +2417,7 @@ local function collect_exit_zones()
     -- Bukti rekaman 05:06: pada detik 67.66 karakter menyentuh Gate.Box,
     -- lalu pada detik 68.70 masuk area Fininshline,
     -- dan pada detik 69.91 karakter dihapus (= ESCAPE).
-    -- Jadi Fininshline itutrigger aslinya, bukan Gate.Box.
+    -- Jadi Fininshline itu trigger aslinya, bukan Gate.Box.
     for _, fp in ipairs(find_finish_parts()) do
         local fpSize = fp.Size
         table.insert(zones, {
@@ -2872,10 +2872,14 @@ function trigger_instant_escape()
         local zone = find_escape_zone()
         local anchorCF = zone_anchor_cframe(zone)
 
+        -- Semua zona keluar. Dipanggil SATU KALI saja supaya baris
+        -- diagnostik "Arah keluar" tidak tercetak dua kali.
+        local allZones = collect_exit_zones()
+
         -- Part yang perlu disentuh: zona itu sendiri + semua kandidat lain
         -- (beberapa zona mungkin aktif bersamaan, jadi sentuh semuanya).
         local zoneParts = {}
-        for _, z in ipairs(collect_exit_zones()) do
+        for _, z in ipairs(allZones) do
             if z.part then table.insert(zoneParts, z.part) end
         end
 
