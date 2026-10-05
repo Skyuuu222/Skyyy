@@ -8,6 +8,8 @@ local HttpService = game:GetService("HttpService")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CoreGui = pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui") or nil
+
 local LocalPlayer = Players.LocalPlayer
 if not LocalPlayer then
     pcall(function()
@@ -1708,11 +1710,14 @@ end
 -- ==============================================================================
 -- Snapshot ScreenGui yang ada sebelum WMacLib dibuat
 local _preExistingGuis = {}
-for _, sg in ipairs(CoreGui:GetChildren()) do
-    if sg:IsA("ScreenGui") then _preExistingGuis[sg] = true end
-end
 pcall(function()
-    if gethui then
+    local targetCore = CoreGui or (gethui and gethui())
+    if targetCore then
+        for _, sg in ipairs(targetCore:GetChildren()) do
+            if sg:IsA("ScreenGui") then _preExistingGuis[sg] = true end
+        end
+    end
+    if gethui and gethui() ~= targetCore then
         for _, sg in ipairs(gethui():GetChildren()) do
             if sg:IsA("ScreenGui") then _preExistingGuis[sg] = true end
         end
@@ -2000,26 +2005,25 @@ end)
 local wmacGui = nil
 task.wait() -- tunggu satu frame agar WMacLib selesai setup GUI-nya
 local function findWmacGui()
-    -- Cari di CoreGui
-    for _, sg in ipairs(CoreGui:GetChildren()) do
-        if sg:IsA("ScreenGui") and not _preExistingGuis[sg] then
-            wmacGui = sg
-            return
-        end
-    end
-    -- Cari di gethui() jika executor mendukung
     pcall(function()
-        if gethui then
-            for _, sg in ipairs(gethui():GetChildren()) do
+        local containers = {}
+        if gethui then table.insert(containers, gethui()) end
+        if CoreGui then table.insert(containers, CoreGui) end
+        if LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui") then
+            table.insert(containers, LocalPlayer.PlayerGui)
+        end
+
+        for _, container in ipairs(containers) do
+            for _, sg in ipairs(container:GetChildren()) do
                 if sg:IsA("ScreenGui") and not _preExistingGuis[sg] then
                     wmacGui = sg
+                    return
                 end
             end
         end
     end)
 end
 findWmacGui()
--- Fallback: coba lagi setelah 1 detik jika masih belum ketemu
 if not wmacGui then
     task.delay(1, findWmacGui)
 end
