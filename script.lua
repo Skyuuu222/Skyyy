@@ -4228,26 +4228,33 @@ local function agen_tick()
     local offset = (lineRot - goalRot) % 360
     local speed  = math.abs(rawSpeed)
 
-    -- Keputusan hit adaptif anti-miss (mendukung speed tinggi King's Scourge):
-    -- Zona putih Violence District: offset ~104° s/d 113° (center ~108°)
+    -- Keputusan hit PRESISI: tekan saat jarum PAS di TENGAH zona putih.
+    -- Zona putih Violence District: offset 104.5 s/d 112.5, center 108.5
+    -- (baseline lama: zona 103-114). Versi lama menekan begitu masuk 103
+    -- (pinggir zona) => sering miss. Sekarang tekan hanya di jendela
+    -- tengah 105.0-112.0 supaya selalu dekat center. Tune CENTER_HALF
+    -- kalau masih kurang pas (makin kecil = makin tengah, risiko kelewat).
     local shouldHit = false
-    local ZONE_MIN = 103.0
-    local ZONE_MAX = 114.0
     local ZONE_CENTER = 108.5
+    local CENTER_HALF = 2.5
+    local JENDELA_MIN = ZONE_CENTER - CENTER_HALF -- 106.0
+    local JENDELA_MAX = ZONE_CENTER + CENTER_HALF -- 111.0
     if rawSpeed >= 0 then
         -- Searah jarum jam (Normal & Fast King's Scourge CW):
-        -- 1. Posisi jarum saat ini berada di dalam zona putih
-        if offset >= ZONE_MIN and offset <= ZONE_MAX then
+        -- 1. Jarum sudah berada di jendela tengah -> tekan sekarang
+        if offset >= JENDELA_MIN and offset <= JENDELA_MAX then
             shouldHit = true
-        -- 2. Kecepatan tinggi: prediksi apakah jarum masuk zona di frame ini
-        elseif offset < ZONE_MIN and (offset + speed * 1.2) >= ZONE_MIN then
+        -- 2. Kecepatan ekstrem: frame berikutnya melompat MELEWATI jendela
+        --    (tidak akan ada frame yang mendarat di tengah) -> tekan di
+        --    pinggir supaya tidak miss total saat speed sangat tinggi.
+        elseif offset < JENDELA_MIN and (offset + speed * 1.2) > JENDELA_MAX then
             shouldHit = true
         end
     else
         -- Berlawanan jarum jam (Hex / CCW):
-        if offset >= ZONE_MIN and offset <= ZONE_MAX then
+        if offset >= JENDELA_MIN and offset <= JENDELA_MAX then
             shouldHit = true
-        elseif offset > ZONE_MAX and (offset - speed * 1.2) <= ZONE_MAX then
+        elseif offset > JENDELA_MAX and (offset - speed * 1.2) < JENDELA_MIN then
             shouldHit = true
         end
     end
