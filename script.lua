@@ -4058,15 +4058,11 @@ AGEN_MAX_ATTEMPTS = 3
 AGEN_PRESS_COOLDOWN = 0.05
 
 -- Rentang zona putih (derajat offset dari goal).
--- DARI DATA REKAMAN:
---   - Zona VISUAL (arc Goal) : lebar 76.5 derajat, pusat offset 0
---     (321.75 s/d 38.25, melintasi 0)
---   - Tapi zona HIT server kemungkinan lebih sempit dari visual.
---     Game menilai perfect di sekitar goal (offset 0).
---   - Dipakai zona hit: 340 s/d 20 (lebar 40, pusat 0).
---     Sempit tapi presisi, dan toleransi adaptif menutup frame drop.
-agenZoneMin = 340.0
-agenZoneMax = 20.0
+-- GAYA LAMA YANG TERBUKTI PAS:
+--   Jendela tipis ±10 derajat di sekitar goal (offset 350..10).
+--   Sempit = presisi. Toleransi statis 4 menutup frame drop.
+agenZoneMin = 350.0
+agenZoneMax = 10.0
 
 -- Penghitung percobaan untuk minigame yang sedang berjalan.
 hitAttempts = 0
@@ -4083,7 +4079,7 @@ lastStatusTick = 0
 -- Zona putih direpresentasikan sebagai LEBAR plus POSISI (titik tengah).
 -- Ini jauh lebih enak diubah manual daripada min/max yang bisa saling
 -- bertabrakan kalau keduanya digeser.
-agenZoneWidth  = 40.0  -- lebar zona HIT (bukan visual 76.5), pusat offset 0
+agenZoneWidth  = 20.0   -- lebar zona HIT ±10 dari goal (presisi)
 agenZoneCenter = 0.0
 
 -- Terapkan lebar + posisi menjadi interval min/max yang dipakai logika hit.
@@ -4205,13 +4201,9 @@ end
 -- Jalur presisi: SkillCheckPromptGui -> Check -> (Line, Goal, Space)
 --
 -- CATATAN PERFORMANCE (FPS DROP):
--- Versi lama memanggil PlayerGui:GetDescendants() di setiap frame
--- RenderStepped. GetDescendants menscan SELURUH PlayerGui yang bisa
--- berisi puluhan ribu elemen -> bikin stutter saat skill check muncul.
---
--- Sekarang referensi Line/Goal/Space di-cache. Scan sekali saja,
--- lalu reuse. Scan ulang hanya terjadi kalau referensi hilang
--- (misal skill check ditutup / game ganti scene).
+-- Pemakaian PlayerGui:GetDescendants() per frame adalah biang stutter.
+-- Sekarang UI dideteksi lewat EVENT (ChildAdded), bukan polling.
+-- Per-frame path = O(1), tanpa scan apa pun.
 local cachedLine, cachedGoal, cachedSpace, cachedCheck = nil, nil, nil, nil
 
 local function cache_from_line(v)
@@ -4230,14 +4222,65 @@ local function cache_from_line(v)
     return false
 end
 
+-- Scan ulang UI HANYA dipanggil dari event (ChildAdded / DescendantAdded),
+-- jadi tidak pernah berjalan di loop per-frame.
+local rescanScheduled = false
+local function schedule_rescan(delay)
+    if rescanScheduled then return end
+    rescanScheduled = true
+    task.delay(delay or 0.1, function()
+        rescanScheduled = false
+        cachedLine, cachedGoal, cachedSpace, cachedCheck = nil, nil, nil, nil
+        -- Cek jalur cepat dulu
+        local scpGui = PlayerGui:FindFirstChild("SkillCheckPromptGui")
+        if scpGui and scpGui.Enabled then
+            local check = scpGui:FindFirstChild("Check")
+            if check and check.Visible then
+                local line = check:FindFirstChild("Line")
+                local goal = check:FindFirstChild("Goal")
+                if line and goal and line.Visible and goal.Visible then
+                    cachedLine, cachedGoal = line, goal
+                    cachedSpace = check:FindFirstChild("Space")
+                    cachedCheck = check
+                    return
+                end
+            end
+        end
+        -- Cek fallback (terjadi sangat jarang)
+        for _, v in ipairs(PlayerGui:GetDescendants()) do
+            if v:IsA("GuiObject") and v.Name == "Line" and is_gui_visible(v) then
+                if cache_from_line(v) then return end
+            end
+        end
+    end)
+end
+
+-- Event-driven: tahu kapan SkillCheckPromptGui muncul/ditutup.
+local uiWatchConn = nil
+if not uiWatchConn then
+    uiWatchConn = PlayerGui.ChildAdded:Connect(function(child)
+        if child.Name == "SkillCheckPromptGui" then
+            schedule_rescan(0)
+        end
+    end)
+    -- Juga pantau munculnya "Check" di dalam GUI skill.
+    for _, g in ipairs(PlayerGui:GetChildren()) do
+        if g.Name == "SkillCheckPromptGui" then
+            g.ChildAdded:Connect(function()
+                schedule_rescan(0)
+            end)
+        end
+    end
+end
+
 local function agen_get_skillcheck_ui()
-    -- 1. Pakai cache kalau masih valid (jalur O(1) per frame).
+    -- 1. Pakai cache kalau masih valid (O(1) per frame, NOL scan).
     if cachedLine and cachedLine.Parent and cachedGoal and cachedGoal.Parent
         and cachedLine.Visible and cachedGoal.Visible then
         return cachedLine, cachedGoal, cachedSpace, cachedCheck
     end
 
-    -- 2. Jalur langsung berkecepatan tinggi O(1)
+    -- 2. Jalur langsung O(1) - tetap dicek ringan tiap frame.
     local scpGui = PlayerGui:FindFirstChild("SkillCheckPromptGui")
     if scpGui and scpGui.Enabled then
         local check = scpGui:FindFirstChild("Check")
@@ -4252,16 +4295,9 @@ local function agen_get_skillcheck_ui()
         end
     end
 
-    -- 3. Fallback scan HANYA kalau cache & jalur cepat gagal.
-    --    Ini jarang terjadi; scan ulang dilakukan maksimal beberapa
-    --    kali sampai ketemu, lalu di-cache lagi.
-    for _, v in ipairs(PlayerGui:GetDescendants()) do
-        if v:IsA("GuiObject") and v.Name == "Line" and is_gui_visible(v) then
-            if cache_from_line(v) then
-                return cachedLine, cachedGoal, cachedSpace, cachedCheck
-            end
-        end
-    end
+    -- 3. Kalau masih belum ketemu (skip cast / UI baru), jangan scan
+    --    per frame - jadwalkan scan ulang via event.
+    schedule_rescan(0.25)
     return nil, nil, nil, nil
 end
 
@@ -4539,11 +4575,11 @@ local function agen_tick()
     -- bergerak; berguna untuk memastikan zona yang dipakai sesuai.
     if nowTick - lastStatusTick >= 1.0 then
         lastStatusTick = nowTick
-        log("[AutoGen] Jarum %.1f | Goal %.1f | Offset %.1f | Zona %.1f-%.1f | Jarak %.1f | Tol %.1f",
-            lineRot, goalRot, offset, zoneMin, zoneMax, distToZone, hitTolerance)
+        log("[AutoGen] Jarum %.1f | Goal %.1f | Offset %.1f | Zona %.1f-%.1f | Jarak %.1f",
+            lineRot, goalRot, offset, zoneMin, zoneMax, distToZone)
     end
 
-    -- Tekan dengan jeda pendek antar percobaan supaya tidak spam.
+    -- Tekan SATU KALI per minigame (guard hasHitCurrentMinigame di atas).
     if shouldHit and (nowTick - lastHitTick) >= AGEN_PRESS_COOLDOWN then
         hasHitCurrentMinigame = true
         lastHitTick           = nowTick
@@ -4552,19 +4588,8 @@ local function agen_tick()
         agen_press(spaceObj)
 
         -- Detail hanya tampil kalau SKY_DEBUG = true.
-        --
-        -- Angka "Jarak" dan "Toleransi" itu penting untuk diagnosa:
-        --   Jarak > Toleransi  -> jangan mungkin terjadi (tidak masuk if)
-        --   Jarak ~ Toleransi  -> menekan pas di batas, prone meleset
-        --   Jarak jauh kecil   -> menekan terlalu dini, terlalu longgar
-        --   Jarak 0            -> tepat di tengah zona, hasil terbaik
-        --
-        -- Kecepatan jarum (Vel) juga penting: kalau ini besar sekali
-        -- (ratusan derajat per detik), itu artifact King's Scourge.
-        log("[AutoGen] PERFECT HIT! Jarum %.1f | Goal %.1f | Offset %.1f "
-            .. "| Jarak %.1f | Toleransi %.1f | Vel %.0f | Percobaan %d",
-            lineRot, goalRot, offset, distToZone, hitTolerance,
-            angularVel, hitAttempts)
+        log("[AutoGen] PERFECT HIT! Jarum %.1f | Goal %.1f | Offset %.1f | Jarak %.1f",
+            lineRot, goalRot, offset, distToZone)
     end
 end
 
@@ -5400,7 +5425,7 @@ SecAutoGen:Toggle({
 -- dengan angka asli dari game (misal 76 derajat), bukan lagi tebakan.
 SecAutoGen:Slider({
     Name = "Lebar Zona (derajat)",
-    Default = 40,
+    Default = 20,
     Minimum = 5,
     Maximum = 180,
     Increment = 0.5,
