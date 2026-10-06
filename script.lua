@@ -4265,13 +4265,6 @@ local function agen_tick()
         autoGenHitCount       = autoGenHitCount + 1
         agen_press(spaceObj)
 
-        -- Feedback console (F9)
-        pcall(function()
-            print(string.format(
-                "[AutoGen] PERFECT HIT! Jarum: %.1f° | Goal: %.1f° | Offset: %.1f° | Speed: %.2f°/f",
-                lineRot, goalRot, offset, speed
-            ))
-        end)
     end
 end
 
@@ -5043,80 +5036,6 @@ SecAutoGen:Toggle({
     end
 })
 
--- Kalibrasi otomatis.
--- Mode ini hanya MENGAMATI jarum selama satu putaran dan mencari
--- sendiri di mana zona putih berada, lalu menyimpannya otomatis.
--- Gunanya kalau update game memindahkan zona, atau kalau zona tiap
--- generator ternyata punya lebar yang berbeda-beda.
-SecAutoGen:Toggle({
-    Name = "Mode Kalibrasi (Deteksi Zona)",
-    Default = false,
-    Callback = function(enabled)
-        agenCalibrating = enabled
-        if enabled then
-            calibZoneWidth = nil
-            Window:Notify({
-                Title = "Kalibrasi Zona",
-                Description = "Aktif. Munculkan skill check, lalu "
-                    .. "matikan kalibrasi untuk menyimpan hasil pengukuran.",
-                Lifetime = 4
-            })
-        else
-            if calibZoneWidth then
-                Window:Notify({
-                    Title = "Kalibrasi Selesai",
-                    Description = string.format(
-                        "Lebar zona %.1f derajat. Zona: %.1f sampai %.1f.",
-                        calibZoneWidth, agenZoneMin, agenZoneMax),
-                    Lifetime = 5
-                })
-            else
-                Window:Notify({
-                    Title = "Kalibrasi Gagal",
-                    Description = "Ukuran Goal tidak terbaca. Coba lagi saat skill check tampil.",
-                    Lifetime = 4
-                })
-            end
-        end
-    end
-})
-
--- Slider Lebar Zona.
--- Ini yang paling penting. Setelah kalibrasi, lebar terisi otomatis
--- dengan angka asli dari game (misal 76 derajat), bukan lagi tebakan.
-SecAutoGen:Slider({
-    Name = "Lebar Zona (derajat)",
-    Default = 20,
-    Minimum = 5,
-    Maximum = 180,
-    Increment = 0.5,
-    DisplayMethod = "Decimal",
-    Precision = 1,
-    Callback = function(val)
-        -- Simpan sebagai lebar, lalu terapkan ke min/max di bawah.
-        agenZoneWidth = val
-        apply_zone_center(agenZoneCenter)
-    end
-})
-
--- Slider Posisi Zona.
--- Titik tengah zona relatif terhadap Goal. Kalau jarum meleset tapi
--- lebarnya sudah benar, geser slider ini sampai waktunya pas.
-SecAutoGen:Slider({
-    Name = "Posisi Zona (derajat)",
-    Default = 0,
-    Minimum = -180,
-    Maximum = 180,
-    Increment = 0.5,
-    DisplayMethod = "Decimal",
-    Precision = 1,
-    Callback = function(val)
-        agenZoneCenter = val
-        apply_zone_center(val)
-    end
-})
-
-SecAutoGen:Label({ Name = "Lebar zona diisi otomatis oleh Mode Kalibrasi." })
 
 local SecAutoParry = TabMain:Section({})
 SecAutoParry:Header({ Name = WMacLib:Gradient("Auto Parry", Color3.fromRGB(232,120,140), Color3.fromRGB(168,120,255)) })
