@@ -56,9 +56,8 @@ local start_esp_gate, stop_esp_gate, is_exit_gate_lever, esp_gate_get_part
 local autoEscapeEnabled = false
 local start_auto_escape, stop_auto_escape, trigger_instant_escape, teleport_to_lobby
 
--- Modul 13 (Discord Webhook Notifier)
+-- Modul 13 (Discord Webhook Notifier) -- kirim summary HANYA saat match selesai
 local webhookUrl = ""
-local webhookNotifyEscape = true
 local webhookNotifyMatch = true
 local send_discord_webhook, start_webhook_live_monitor, stop_webhook_live_monitor, get_player_stats, send_match_summary_webhook
 
@@ -1388,8 +1387,7 @@ do
 killerRadarEnabled = false
 local killerRadarGui = nil
 local killerRadarConn = nil
-local RADAR_SIZE = 160
-RADAR_RANGE = 350  -- stud radius
+local RADAR_SIZE = 168
 
 local function radar_create_gui()
     if killerRadarGui then pcall(function() killerRadarGui:Destroy() end) end
@@ -1419,56 +1417,113 @@ local function radar_create_gui()
             sg.Parent = LocalPlayer and LocalPlayer:WaitForChild("PlayerGui", 3)
         end)
     end
-    killerRadarGui = sg
 
-    -- Background radar
+    -- Palet premium (dark glassmorphism)
+    local COL_BG      = Color3.fromRGB(12, 15, 24)
+    local COL_CARD    = Color3.fromRGB(20, 24, 38)
+    local COL_BORDER  = Color3.fromRGB(54, 62, 88)
+    local COL_ACCENT  = Color3.fromRGB(0, 200, 255)
+    local COL_ACCENT2 = Color3.fromRGB(130, 120, 255)
+    local COL_GRID    = Color3.fromRGB(42, 50, 74)
+    local COL_SELF    = Color3.fromRGB(70, 240, 140)
+
+    -- Kartu utama
     local radarBg = Instance.new("Frame")
     radarBg.Name = "RadarBg"
     radarBg.AnchorPoint = Vector2.new(1, 1)
-    radarBg.Position = UDim2.new(1, -15, 1, -15)
-    radarBg.Size = UDim2.fromOffset(RADAR_SIZE + 20, RADAR_SIZE + 40)
-    radarBg.BackgroundColor3 = Color3.fromRGB(8, 10, 18)
-    radarBg.BackgroundTransparency = 0.15
+    radarBg.Position = UDim2.new(1, -18, 1, -18)
+    radarBg.Size = UDim2.fromOffset(RADAR_SIZE + 28, RADAR_SIZE + 64)
+    radarBg.BackgroundColor3 = COL_CARD
+    radarBg.BackgroundTransparency = 0.10
     radarBg.BorderSizePixel = 0
     radarBg.Parent = sg
+
     local bgCorner = Instance.new("UICorner")
-    bgCorner.CornerRadius = UDim.new(0, 14)
+    bgCorner.CornerRadius = UDim.new(0, 18)
     bgCorner.Parent = radarBg
 
-    -- Header label
+    local bgStroke = Instance.new("UIStroke")
+    bgStroke.Color = COL_BORDER
+    bgStroke.Thickness = 1
+    bgStroke.Transparency = 0.25
+    bgStroke.Parent = radarBg
+
+    local bgGrad = Instance.new("UIGradient")
+    bgGrad.Color = ColorSequence.new(COL_CARD, COL_BG)
+    bgGrad.Rotation = 90
+    bgGrad.Parent = radarBg
+
+    -- Bar aksen atas
+    local topBar = Instance.new("Frame")
+    topBar.Size = UDim2.new(1, -28, 0, 3)
+    topBar.Position = UDim2.new(0, 14, 0, 12)
+    topBar.BackgroundColor3 = COL_ACCENT
+    topBar.BorderSizePixel = 0
+    topBar.ZIndex = 3
+    topBar.Parent = radarBg
+    local tbCorner = Instance.new("UICorner")
+    tbCorner.CornerRadius = UDim.new(1, 0)
+    tbCorner.Parent = topBar
+    local tbGrad = Instance.new("UIGradient")
+    tbGrad.Color = ColorSequence.new(COL_ACCENT, COL_ACCENT2)
+    tbGrad.Parent = topBar
+
+    -- Header
     local hdr = Instance.new("TextLabel")
-    hdr.Size = UDim2.new(1, 0, 0, 22)
+    hdr.Size = UDim2.new(1, -28, 0, 18)
+    hdr.Position = UDim2.new(0, 14, 0, 22)
     hdr.BackgroundTransparency = 1
-    hdr.Text = "👀 PLAYER RADAR"
-    hdr.TextColor3 = Color3.fromRGB(255, 80, 80)
-    hdr.TextScaled = true
+    hdr.Text = "PLAYER RADAR"
+    hdr.TextColor3 = Color3.fromRGB(238, 242, 250)
+    hdr.TextXAlignment = Enum.TextXAlignment.Left
+    hdr.TextSize = 13
     hdr.Font = Enum.Font.GothamBold
-    hdr.ZIndex = 2
+    hdr.ZIndex = 4
     hdr.Parent = radarBg
 
-    -- Radar circle
+    -- Titik live (indikator aktif)
+    local liveDot = Instance.new("Frame")
+    liveDot.AnchorPoint = Vector2.new(1, 0.5)
+    liveDot.Position = UDim2.new(1, -14, 0, 31)
+    liveDot.Size = UDim2.fromOffset(7, 7)
+    liveDot.BackgroundColor3 = Color3.fromRGB(70, 240, 140)
+    liveDot.BorderSizePixel = 0
+    liveDot.ZIndex = 4
+    liveDot.Parent = radarBg
+    local ldCorner = Instance.new("UICorner")
+    ldCorner.CornerRadius = UDim.new(1, 0)
+    ldCorner.Parent = liveDot
+
+    -- Ring radar (lingkaran)
     local radarCircle = Instance.new("Frame")
     radarCircle.Name = "RadarCircle"
     radarCircle.AnchorPoint = Vector2.new(0.5, 0)
-    radarCircle.Position = UDim2.new(0.5, 0, 0, 24)
+    radarCircle.Position = UDim2.new(0.5, 0, 0, 48)
     radarCircle.Size = UDim2.fromOffset(RADAR_SIZE, RADAR_SIZE)
-    radarCircle.BackgroundColor3 = Color3.fromRGB(10, 18, 12)
-    radarCircle.BackgroundTransparency = 0.1
+    radarCircle.BackgroundColor3 = Color3.fromRGB(8, 11, 20)
+    radarCircle.BackgroundTransparency = 0.05
     radarCircle.BorderSizePixel = 0
+    radarCircle.ClipsDescendants = true
     radarCircle.ZIndex = 2
     radarCircle.Parent = radarBg
     local circleCorner = Instance.new("UICorner")
     circleCorner.CornerRadius = UDim.new(0.5, 0)
     circleCorner.Parent = radarCircle
 
+    local circleStroke = Instance.new("UIStroke")
+    circleStroke.Color = COL_GRID
+    circleStroke.Thickness = 1.5
+    circleStroke.Transparency = 0.15
+    circleStroke.Parent = radarCircle
+
     -- Lingkaran grid dekoratif
-    for _, r in ipairs({0.33, 0.66}) do
+    for _, r in ipairs({0.32, 0.62, 0.88}) do
         local ring = Instance.new("Frame")
         ring.AnchorPoint = Vector2.new(0.5, 0.5)
         ring.Position = UDim2.fromScale(0.5, 0.5)
         ring.Size = UDim2.fromScale(r, r)
         ring.BackgroundTransparency = 1
-        ring.BorderColor3 = Color3.fromRGB(0, 80, 20)
+        ring.BorderColor3 = COL_GRID
         ring.BorderSizePixel = 1
         ring.ZIndex = 3
         ring.Parent = radarCircle
@@ -1482,13 +1537,14 @@ local function radar_create_gui()
         local line = Instance.new("Frame")
         line.AnchorPoint = Vector2.new(0.5, 0.5)
         line.Position = UDim2.fromScale(0.5, 0.5)
-        line.BackgroundColor3 = Color3.fromRGB(0, 80, 20)
+        line.BackgroundColor3 = COL_GRID
+        line.BackgroundTransparency = 0.35
         line.BorderSizePixel = 0
         line.ZIndex = 3
         if axis == "H" then
-            line.Size = UDim2.new(1, 0, 0, 1)
+            line.Size = UDim2.new(0.94, 0, 0, 1)
         else
-            line.Size = UDim2.new(0, 1, 1, 0)
+            line.Size = UDim2.new(0, 1, 0.94, 0)
         end
         line.Parent = radarCircle
     end
@@ -1498,29 +1554,19 @@ local function radar_create_gui()
     selfDot.Name = "SelfDot"
     selfDot.AnchorPoint = Vector2.new(0.5, 0.5)
     selfDot.Position = UDim2.fromScale(0.5, 0.5)
-    selfDot.Size = UDim2.fromOffset(10, 10)
-    selfDot.BackgroundColor3 = Color3.fromRGB(80, 255, 120)
+    selfDot.Size = UDim2.fromOffset(12, 12)
+    selfDot.BackgroundColor3 = Color3.fromRGB(70, 240, 140)
     selfDot.BorderSizePixel = 0
     selfDot.ZIndex = 10
     selfDot.Parent = radarCircle
     local selfCorner = Instance.new("UICorner")
-    selfCorner.CornerRadius = UDim.new(0.5, 0)
+    selfCorner.CornerRadius = UDim.new(1, 0)
     selfCorner.Parent = selfDot
-
-    -- Label "YOU"
-    local selfLbl = Instance.new("TextLabel")
-    selfLbl.AnchorPoint = Vector2.new(0.5, 1)
-    selfLbl.Position = UDim2.new(0.5, 0, 0, -2)
-    selfLbl.Size = UDim2.fromOffset(30, 12)
-    selfLbl.BackgroundTransparency = 1
-    selfLbl.Text = "YOU"
-    selfLbl.TextColor3 = Color3.fromRGB(80, 255, 120)
-    selfLbl.TextStrokeColor3 = Color3.new(0,0,0)
-    selfLbl.TextStrokeTransparency = 0
-    selfLbl.TextScaled = true
-    selfLbl.Font = Enum.Font.GothamBold
-    selfLbl.ZIndex = 11
-    selfLbl.Parent = selfDot
+    local selfRing = Instance.new("UIStroke")
+    selfRing.Color = Color3.new(1, 1, 1)
+    selfRing.Thickness = 1.5
+    selfRing.Transparency = 0.25
+    selfRing.Parent = selfDot
 
     return sg, radarCircle
 end
@@ -1800,7 +1846,7 @@ local function radar_update(radarCircle)
 
             dot.Visible = true
             dot.Position = UDim2.fromScale(screenX, screenY)
-            dot.Size = UDim2.fromOffset(isKiller and 14 or 8, isKiller and 14 or 8)
+            dot.Size = UDim2.fromOffset(isKiller and 13 or 9, isKiller and 13 or 9)
             dot.BackgroundColor3 = isKiller and Color3.fromRGB(255, 35, 35) or Color3.fromRGB(50, 190, 255)
             dot.ZIndex = isKiller and 14 or 9
 
@@ -3175,14 +3221,8 @@ function trigger_instant_escape()
         fire_escape_reward_remotes()
         task.wait(0.5)
 
-        -- [LANGKAH 8] Webhook summary
-        pcall(function()
-            if webhookNotifyEscape and webhookUrl and webhookUrl ~= "" then
-                task.delay(1.5, function()
-                    pcall(function() send_match_summary_webhook("ESCAPED") end)
-                end)
-            end
-        end)
+        -- [LANGKAH 8] Webhook summary dikirim oleh pemantau akhir match
+        -- (start_webhook_live_monitor) supaya hanya SATU laporan per match.
 
         -- Reset state
         _isEscaping = false
@@ -3242,40 +3282,33 @@ end
 
 -- ==============================================================================
 do
--- MODUL 13: DISCORD WEBHOOK NOTIFIER (PER-MATCH SUMMARY)
+-- MODUL 13: DISCORD WEBHOOK NOTIFIER (MATCH SUMMARY SAAT MATCH SELESAI)
 -- ==============================================================================
 webhookUrl = ""
-webhookNotifyEscape = true
 webhookNotifyMatch = true
 
 -- Session stats baseline (diisi saat match mulai)
 local _matchStartStats = nil
 local _matchStartTime = 0
-local _totalMatchCount = 0
+local _matchEndFired = false
 
 -- Helper: scan leaderstats, attributes, dan values dari sebuah instance root
 local _statsRef = nil
 
 local function _scan_stats_from(root)
     if not root or not _statsRef then return end
-    local stats = _statsRef
 
     pcall(function()
-        local folders = { root, root:FindFirstChild("leaderstats"), root:FindFirstChild("Stats"), root:FindFirstChild("Data"), root:FindFirstChild("Values"), root:FindFirstChild("Currencies") }
-        for _, f in ipairs(folders) do
-            if f then
-                for _, v in ipairs(f:GetChildren()) do
-                    local n = v.Name:lower()
-                    local val = nil
-                    if v:IsA("ValueBase") then val = v.Value end
-                    if val ~= nil then
-                        if n:find("level") or n == "lv" or n == "lvl" or n:find("rank") then stats.level = val end
-                        if n:find("exp") or n:find("xp") or n:find("experience") then stats.exp = val end
-                        if n:find("screw") then stats.screw = val end
-                        if n:find("gold") or n:find("coin") or n:find("cash") or n:find("money") or n:find("gear") or n:find("token") then stats.gold = val end
-                        if n:find("sin") or n:find("reputation") or n:find("evil") or n:find("kill") or n:find("slay") then stats.sin = val end
-                    end
-                end
+        local ls = root:FindFirstChild("leaderstats")
+        if ls then
+            for _, v in ipairs(ls:GetChildren()) do
+                local n = tostring(v.Name):lower()
+                local val = tonumber(tostring(v.Value)) or v.Value
+                if n:find("level") or n == "lv" or n == "lvl" then _statsRef.level = val end
+                if n:find("exp") or n:find("xp") then _statsRef.exp = val end
+                if n:find("screw") then _statsRef.screw = val end
+                if n:find("gold") or n:find("coin") or n:find("gear") or n:find("token") then _statsRef.gold = val end
+                if n:find("sin") or n:find("reputation") or n:find("evil") or n:find("kill") or n:find("slay") then _statsRef.sin = val end
             end
         end
     end)
@@ -3285,12 +3318,12 @@ local function _scan_stats_from(root)
             local ks = tostring(k):lower()
             local vn = tonumber(tostring(v))
             if vn then
-                if ks:find("level") or ks == "lv" or ks == "lvl" then stats.level = vn end
-                if ks:find("exp") or ks:find("xp") then stats.exp = vn end
-                if ks:find("screw") then stats.screw = vn end
-                if ks:find("gold") or ks:find("coin") or ks:find("gear") or ks:find("token") then stats.gold = vn end
-                if ks:find("sin") or ks:find("reputation") then stats.sin = vn end
-                if ks:find("role") or ks:find("team") or ks:find("side") then stats.role = tostring(v) end
+                if ks:find("level") or ks == "lv" or ks == "lvl" then _statsRef.level = vn end
+                if ks:find("exp") or ks:find("xp") then _statsRef.exp = vn end
+                if ks:find("screw") then _statsRef.screw = vn end
+                if ks:find("gold") or ks:find("coin") or ks:find("gear") or ks:find("token") then _statsRef.gold = vn end
+                if ks:find("sin") or ks:find("reputation") then _statsRef.sin = vn end
+                if ks:find("role") or ks:find("team") or ks:find("side") then _statsRef.role = tostring(v) end
             end
         end
     end)
@@ -3346,13 +3379,14 @@ function get_player_stats()
     return stats
 end
 
--- Helper: Mask username (contoh: Sk*** untuk nama 5+ karakter)
+-- Helper: Mask username -> 2 huruf pertama + "***" (contoh: "Ab***")
 local function mask_username(name)
-    if not name or #name <= 2 then return name or "?" end
-    return name:sub(1, 2) .. string.rep("*", math.min(#name - 2, 3))
+    local n = tostring(name or "?")
+    if #n <= 2 then return n end
+    return n:sub(1, 2) .. "***"
 end
 
--- Helper: Format delta dengan tanda +/-
+-- Helper: Format nilai stats + delta (+/-)
 local function fmt_delta(before, after)
     local bNum = tonumber(tostring(before)) or 0
     local aNum = tonumber(tostring(after)) or 0
@@ -3362,7 +3396,7 @@ local function fmt_delta(before, after)
     elseif delta < 0 then
         return tostring(aNum) .. " (" .. delta .. ")"
     else
-        return tostring(aNum) .. " (+0)"
+        return tostring(aNum)
     end
 end
 
@@ -3370,12 +3404,17 @@ end
 local function start_match_tracking()
     _matchStartStats = get_player_stats()
     _matchStartTime = tick()
+    _matchEndFired = false
 end
 
--- Kirim MATCH SUMMARY per-match (setelah escape/match end) - Zypherax Hub Premium Style
-function send_match_summary_webhook(resultStatus)
+-- Kirim MATCH SUMMARY (dipanggil saat match selesai atau manual)
+-- force = true dipakai tombol manual agar tetap bisa kirim kapan saja.
+function send_match_summary_webhook(resultStatus, force)
     if not webhookUrl or webhookUrl == "" or not webhookUrl:find("discord.com/api/webhooks") then
         return false, "Webhook URL belum diisi!"
+    end
+    if not force and _matchEndFired then
+        return false, "Summary match ini sudah dikirim."
     end
 
     local req = (syn and syn.request) or (http and http.request) or http_request or request or (fluxus and fluxus.request)
@@ -3386,7 +3425,6 @@ function send_match_summary_webhook(resultStatus)
 
     local currStats = get_player_stats()
     local baseStats = _matchStartStats or currStats
-    _totalMatchCount = _totalMatchCount + 1
 
     -- Durasi match
     local matchDuration = math.max(0, tick() - (_matchStartTime or tick()))
@@ -3394,14 +3432,10 @@ function send_match_summary_webhook(resultStatus)
     local secs = math.floor(matchDuration % 60)
     local matchTimeStr = mins > 0 and string.format("%dm %ds", mins, secs) or string.format("%ds", secs)
 
-    -- Nama player (masked)
+    -- Nama player (masked: 2 huruf pertama + ***)
     local pName = tostring(LocalPlayer and LocalPlayer.Name or "?")
     local pDisplay = tostring(LocalPlayer and LocalPlayer.DisplayName or pName)
     local maskedName = mask_username(pDisplay)
-
-    -- Server ID (masked)
-    local sId = tostring(game.JobId or "")
-    local maskedSId = sId ~= "" and (sId:sub(1, 6) .. "...") or "Private"
 
     -- Delta fields
     local expDelta   = (tonumber(tostring(currStats.exp))   or 0) - (tonumber(tostring(baseStats.exp))   or 0)
@@ -3412,9 +3446,9 @@ function send_match_summary_webhook(resultStatus)
 
     local function fmtStat(val, delta)
         local s = tostring(val)
-        if delta > 0 then return s .. " **(+" .. delta .. ")**"
-        elseif delta < 0 then return s .. " **(" .. delta .. ")**"
-        else return s .. " *(±0)*" end
+        if delta > 0 then return s .. "  (+" .. delta .. ")"
+        elseif delta < 0 then return s .. "  (" .. delta .. ")"
+        else return s .. "  (0)" end
     end
 
     local expField   = fmtStat(tonumber(tostring(currStats.exp))   or 0, expDelta)
@@ -3423,68 +3457,32 @@ function send_match_summary_webhook(resultStatus)
     local gearField  = fmtStat(tonumber(tostring(currStats.gold))  or 0, gearDelta)
     local levelField = fmtStat(tonumber(tostring(currStats.level)) or 0, lvlDelta)
 
-    -- Status & Color
-    local resultEmoji, resultLabel, embedColor
-    if resultStatus == "ESCAPED" then
-        resultEmoji = "🟢"
-        resultLabel = "Escaped!"
-        embedColor  = 0x2ECC71  -- hijau
-    elseif resultStatus == "Match Ended" then
-        resultEmoji = "🔵"
-        resultLabel = "Match Ended"
-        embedColor  = 0x3498DB  -- biru
-    elseif resultStatus == "Manual" then
-        resultEmoji = "📋"
-        resultLabel = "Manual Report"
-        embedColor  = 0x9B59B6  -- ungu
-    else
-        resultEmoji = "⚡"
-        resultLabel = tostring(resultStatus or "Auto Farm")
-        embedColor  = 0xF39C12  -- oranye
-    end
-
-    -- Hitung total gain
-    local gainParts = {}
-    if expDelta   > 0 then table.insert(gainParts, "+" .. expDelta   .. " EXP")   end
-    if screwDelta > 0 then table.insert(gainParts, "+" .. screwDelta .. " Screw")  end
-    if sinDelta   > 0 then table.insert(gainParts, "+" .. sinDelta   .. " Sin")    end
-    if gearDelta  > 0 then table.insert(gainParts, "+" .. gearDelta  .. " Gear")   end
-    local gainStr = #gainParts > 0 and table.concat(gainParts, "  •  ") or "Tidak ada perubahan stats"
-
-    -- Reset baseline untuk match berikutnya
+    -- Baseline untuk match berikutnya + tandai sudah terkirim
     _matchStartStats = currStats
     _matchStartTime  = tick()
-
-    local descLine = string.format(
-        "%s **%s** — Match #**%d** | Server: `%s`",
-        resultEmoji, resultLabel, _totalMatchCount, maskedSId
-    )
+    _matchEndFired   = true
 
     local payload = {
         username   = "Zypherax Hub Notifier",
         avatar_url = "https://cdn-icons-png.flaticon.com/512/6295/6295417.png",
         embeds = {
             {
-                title       = "🏆 Zypherax Hub  •  Match Summary",
-                color       = embedColor,
-                description = descLine .. "\n\n> " .. gainStr,
+                title       = "Match Ended - Zypherax Hub",
+                color       = 5793266, -- Discord Blurple (0x5865F2)
+                description = "Ringkasan hasil match di Violence District.",
                 thumbnail   = { url = "https://cdn-icons-png.flaticon.com/512/3135/3135715.png" },
                 fields = {
-                    -- Row 1: identitas
-                    { name = "👤  Player",      value = maskedName,                           inline = true },
-                    { name = "🗺️  Map",          value = currStats.map or "Unknown Map",       inline = true },
-                    { name = "⏱️  Durasi",       value = matchTimeStr,                         inline = true },
-                    -- Row 2: currency utama
-                    { name = "⭐  EXP",          value = expField,                             inline = true },
-                    { name = "🔩  Screws",       value = screwField,                           inline = true },
-                    { name = "☠️  Sin",          value = sinField,                             inline = true },
-                    -- Row 3: sekunder
-                    { name = "⚙️  Gears",        value = gearField,                            inline = true },
-                    { name = "🆙  Level",        value = levelField,                           inline = true },
-                    { name = "🎮  Total Match",  value = "Match ke-**" .. _totalMatchCount .. "**", inline = true },
+                    { name = "Player",  value = maskedName,                 inline = true },
+                    { name = "Map",     value = currStats.map or "Unknown",  inline = true },
+                    { name = "Durasi",  value = matchTimeStr,                inline = true },
+                    { name = "Level",   value = levelField,                  inline = true },
+                    { name = "EXP",     value = expField,                    inline = true },
+                    { name = "Screws",  value = screwField,                  inline = true },
+                    { name = "Gears",   value = gearField,                   inline = true },
+                    { name = "Sin",     value = sinField,                    inline = true },
                 },
                 footer = {
-                    text     = "Zypherax Hub  •  Violence District Ultimate Script",
+                    text     = "Zypherax Hub  |  Violence District",
                     icon_url = "https://cdn-icons-png.flaticon.com/512/3135/3135715.png"
                 },
                 timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
@@ -3503,7 +3501,7 @@ function send_match_summary_webhook(resultStatus)
     return ok, res
 end
 
--- Fungsi lama (compatibility - untuk tombol test)
+-- Fungsi test sederhana (dipakai tombol test)
 function send_discord_webhook(embedTitle, embedDesc, colorHex)
     if not webhookUrl or webhookUrl == "" or not webhookUrl:find("discord.com/api/webhooks") then
         return false, "Webhook URL belum diisi atau tidak valid!"
@@ -3511,73 +3509,102 @@ function send_discord_webhook(embedTitle, embedDesc, colorHex)
     local req = (syn and syn.request) or (http and http.request) or http_request or request or (fluxus and fluxus.request)
     if not req then return false, "Executor tidak mendukung HTTP request!" end
 
-    local stats = get_player_stats()
     local payload = {
-        username = "Tes mpruy • Zypherax Hub",
-        avatar_url = "https://cdn-icons-png.flaticon.com/512/3135/3135715.png",
+        username   = "Zypherax Hub Notifier",
+        avatar_url = "https://cdn-icons-png.flaticon.com/512/6295/6295417.png",
         embeds = {
             {
-                title = embedTitle or "Notifikasi Match",
+                title       = embedTitle or "Test Webhook",
                 description = embedDesc or "",
-                color = tonumber(colorHex or "5865F2", 16) or 5793266,
-                fields = {
-                    { name = "Pemain", value = (LocalPlayer.DisplayName or LocalPlayer.Name) .. " (@" .. LocalPlayer.Name .. ")", inline = true },
-                    { name = "Level", value = tostring(stats.level), inline = true },
-                    { name = "EXP", value = tostring(stats.exp), inline = true },
-                    { name = "Screw", value = tostring(stats.screw), inline = true },
-                    { name = "Gear/Gold", value = tostring(stats.gold), inline = true },
-                    { name = "Sin", value = tostring(stats.sin), inline = true },
-                    { name = "Map", value = stats.map, inline = true },
-                    { name = "Waktu", value = os.date("%Y-%m-%d %H:%M:%S"), inline = true }
-                },
-                footer = { text = "Zypherax Hub Notifier • Violence District" }
+                color       = tonumber(colorHex or "5865F2", 16) or 5793266,
+                footer      = { text = "Zypherax Hub - Violence District" },
+                timestamp   = os.date("!%Y-%m-%dT%H:%M:%SZ")
             }
         }
     }
     local ok, res = pcall(function()
         return req({
-            Url = webhookUrl,
-            Method = "POST",
+            Url     = webhookUrl,
+            Method  = "POST",
             Headers = { ["Content-Type"] = "application/json" },
-            Body = HttpService:JSONEncode(payload)
+            Body    = HttpService:JSONEncode(payload)
         })
     end)
     return ok, res
 end
 
--- Live Stats Monitor (legacy compat - sekarang hanya track, tidak auto-send)
+-- ==============================================================================
+-- Pemantau akhir match: kirim SATU summary setiap match berakhir.
+-- ==============================================================================
 local _webhookLiveConn = nil
-local _lastLiveStats = {}
+local _matchActive = false
+local _endCheckTimer = 0
+
+local function _read_game_state()
+    local gs = workspace:GetAttribute("GameState") or workspace:GetAttribute("State")
+        or workspace:GetAttribute("RoundState")
+        or ReplicatedStorage:GetAttribute("GameState") or ReplicatedStorage:GetAttribute("State")
+    return gs and tostring(gs):lower() or nil
+end
+
+local function _is_lobby_state(gs)
+    if not gs then return false end
+    return gs == "lobby" or gs == "waiting" or gs == "intermission"
+        or gs == "end" or gs == "ended" or gs == "results" or gs == "post"
+        or gs == "gameover" or gs == "finished"
+end
+
+local function _character_alive()
+    local char = LocalPlayer and LocalPlayer.Character
+    if not char then return false end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return false end
+    return hum.Health > 0
+end
 
 function start_webhook_live_monitor()
-    if _webhookLiveConn then _webhookLiveConn:Disconnect() end
-    -- Auto-track match start
+    if _webhookLiveConn then _webhookLiveConn:Disconnect(); _webhookLiveConn = nil end
     start_match_tracking()
-    -- Deteksi akhir match (via attribute atau event)
-    local _liveTimer = 0
+    _matchActive = true
+    _matchEndFired = false
+
     _webhookLiveConn = RunService.Heartbeat:Connect(function(dt)
         if not webhookUrl or webhookUrl == "" then return end
-        _liveTimer = _liveTimer + dt
-        -- Cek setiap 30 detik apakah match sudah berakhir berdasarkan state game
-        if _liveTimer >= 30 then
-            _liveTimer = 0
-            pcall(function()
-                local gameState = workspace:GetAttribute("GameState") or workspace:GetAttribute("State")
-                    or ReplicatedStorage:GetAttribute("GameState") or ReplicatedStorage:GetAttribute("State")
-                if gameState then
-                    local gs = tostring(gameState):lower()
-                    if gs == "lobby" or gs == "waiting" or gs == "intermission" or gs == "end" then
-                        send_match_summary_webhook("Match Ended")
-                        start_match_tracking()
-                    end
+        _endCheckTimer = _endCheckTimer + dt
+        if _endCheckTimer < 1 then return end
+        _endCheckTimer = 0
+
+        local gs = _read_game_state()
+        local alive = _character_alive()
+
+        -- Tandai match aktif kembali saat karakter hidup di luar lobby
+        if alive and not _is_lobby_state(gs) then
+            if not _matchActive then
+                _matchActive = true
+                _matchEndFired = false
+                start_match_tracking()
+            end
+            return
+        end
+
+        -- Deteksi akhir match: kembali ke lobby ATAU karakter mati/hilang.
+        local ended = _is_lobby_state(gs) or (not alive)
+        if ended and _matchActive then
+            _matchActive = false
+            if not _matchEndFired then
+                if webhookNotifyMatch then
+                    task.spawn(function() pcall(function() send_match_summary_webhook("Match Ended") end) end)
                 end
-            end)
+                -- Mulai pelacakan untuk match berikutnya
+                task.delay(3, function() start_match_tracking() end)
+            end
         end
     end)
 end
 
 function stop_webhook_live_monitor()
     if _webhookLiveConn then _webhookLiveConn:Disconnect(); _webhookLiveConn = nil end
+    _matchActive = false
 end
 
 -- Auto-inisialisasi tracking saat script mulai
@@ -3663,8 +3690,12 @@ do
             if not fn then error("loadstring gagal") end
             return fn()
         end)
-        if ok and type(res) == "table" then return res end
-        warn("[Zypherax Hub] Gagal memuat dari GitHub, memakai salinan lokal. " .. tostring(res))
+        -- Hanya pakai versi GitHub kalau build-nya sudah versi 3.6 (berisi perbaikan
+        -- tata letak). Kalau masih build lama, pakai salinan lokal yang sudah diperbaiki.
+        if ok and type(res) == "table" and tostring(res.Version or ""):find("3.6") then
+            return res
+        end
+        warn("[Zypherax Hub] Memakai salinan lokal ZypheraxUI (GitHub belum versi terbaru).")
 
         -- (2) Salinan lokal (cadangan)
         return (function()
@@ -3682,7 +3713,7 @@ do
 -- ==============================================================================
 
 local ZypheraxUI = {}
-ZypheraxUI.Version = "Enterprise 3.5.0"
+ZypheraxUI.Version = "Enterprise 3.6.0"
 ZypheraxUI.Flags = {}
 ZypheraxUI.Controls = {}
 
@@ -3905,6 +3936,21 @@ function U.New(class, props)
             pcall(function() inst[k] = v end)
         end
     end
+    -- // ANTI-OVERFLOW SAFETY NET \ --
+    -- Label satu baris otomatis dipotong rapi (AtEnd) agar tulisan tidak
+    -- pernah menabrak elemen lain atau keluar dari kotaknya. Label yang
+    -- memang multibaris (AutomaticSize.Y + TextWrapped) dibiarkan utuh.
+    pcall(function()
+        if class == "TextLabel" or class == "TextButton" or class == "TextBox" then
+            local autoY   = props and (props.AutomaticSize == Enum.AutomaticSize.Y or props.AutomaticSize == Enum.AutomaticSize.XY)
+            local wrapped = props and props.TextWrapped == true
+            local scaled  = props and props.TextScaled == true
+            local hasTrunc = props and props.TextTruncate ~= nil
+            if not autoY and not wrapped and not scaled and not hasTrunc then
+                inst.TextTruncate = Enum.TextTruncate.AtEnd
+            end
+        end
+    end)
     if props and props.Parent then inst.Parent = props.Parent end
     return inst
 end
@@ -3986,9 +4032,10 @@ local function ensureNotifGui()
     local container = U.New("Frame", {
         Name = "Container",
         AnchorPoint = Vector2.new(1, 1),
-        Size = UDim2.new(0, 340, 1, -24),
+        Size = UDim2.new(0, 330, 1, -24),
         Position = UDim2.new(1, -16, 1, -16),
         BackgroundTransparency = 1,
+        ClipsDescendants = false,
         Parent = NotifGui
     })
     U.New("UIListLayout", {
@@ -4089,7 +4136,8 @@ function ZypheraxUI:Notify(cfg)
     })
 
     local head = U.New("Frame", {
-        Size = UDim2.new(1, 0, 0, 16),
+        Name = "Head",
+        Size = UDim2.new(1, 0, 0, 18),
         BackgroundTransparency = 1,
         LayoutOrder = 1,
         Parent = body
@@ -4109,9 +4157,10 @@ function ZypheraxUI:Notify(cfg)
         TextSize = 13,
         TextColor3 = T.Text,
         BackgroundTransparency = 1,
-        Position = UDim2.new(0, 16, 0, 0),
-        Size = UDim2.new(1, -16, 1, 0),
+        Position = UDim2.new(0, 18, 0, 0),
+        Size = UDim2.new(1, -18, 1, 0),
         TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Center,
         TextTruncate = Enum.TextTruncate.AtEnd,
         Parent = head
     })
@@ -4128,6 +4177,8 @@ function ZypheraxUI:Notify(cfg)
             AutomaticSize = Enum.AutomaticSize.Y,
             TextWrapped = true,
             TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = Enum.TextYAlignment.Top,
+            TextTruncate = Enum.TextTruncate.None,
             LayoutOrder = 2,
             Parent = body
         })
@@ -8305,7 +8356,7 @@ SecESPPlayer:Toggle({
     end
 })
 
-local SecESPGen = TabESP:Section({ Name = "ESP Generator", Side = 2 })
+local SecESPGen = TabESP:Section({ Name = "ESP Generator", Side = 1 })
 SecESPGen:Header({ Name = ZypheraxLib:Gradient("ESP Generator", Color3.fromRGB(86,204,158), Color3.fromRGB(99,130,255)) })
 
 SecESPGen:Toggle({
@@ -8325,7 +8376,7 @@ SecESPGen:Toggle({
 
 
 -- SEKSI ESP EXIT GATE (tambah ke TabESP)
-local SecESPGate = TabESP:Section({ Name = "ESP Gate & Exit", Side = 1 })
+local SecESPGate = TabESP:Section({ Name = "ESP Gate & Exit", Side = 2 })
 SecESPGate:Header({ Name = ZypheraxLib:Gradient("ESP Pintu Keluar (Exit Gate)", Color3.fromRGB(240,190,100), Color3.fromRGB(232,150,110)) })
 
 SecESPGate:Toggle({
@@ -8343,6 +8394,46 @@ SecESPGate:Toggle({
     end
 })
 
+
+-- SEKSI KILLER RADAR (digabung dari tab Radar)
+local SecRadar = TabESP:Section({ Name = "Radar Killer", Side = 1 })
+SecRadar:Header({ Name = ZypheraxLib:Gradient("Killer Radar (Mini-Map)", Color3.fromRGB(232,100,120), Color3.fromRGB(200,120,180)) })
+
+SecRadar:Toggle({
+    Name = "Aktifkan Killer Radar",
+    Default = false,
+    Callback = function(enabled)
+        killerRadarEnabled = enabled
+        if enabled then
+            killerradar_start()
+            Window:Notify({ Title = "Killer Radar", Description = "Merah=Killer | Biru=Survivor. Radar aktif!", Lifetime = 3 })
+        else
+            killerradar_stop()
+            Window:Notify({ Title = "Killer Radar", Description = "Radar dimatikan.", Lifetime = 2 })
+        end
+    end
+})
+
+SecRadar:Slider({
+    Name = "Jangkauan Radar (Studs)",
+    Default = 350,
+    Minimum = 50,
+    Maximum = 1000,
+    DisplayMethod = "Round",
+    Precision = 0,
+    Callback = function(val)
+        RADAR_RANGE = val
+    end
+})
+
+SecRadar:Label({ Name = "Tampil otomatis: Hijau = Kamu, Merah = Killer, Biru = Survivor." })
+
+local SecRadarInfo = TabESP:Section({ Name = "Info Radar", Side = 2 })
+SecRadarInfo:Header({ Name = ZypheraxLib:Gradient("Cara Baca Radar", Color3.fromRGB(140,152,190), Color3.fromRGB(120,170,200)) })
+SecRadarInfo:Label({ Name = "Titik Hijau = Kamu sendiri" })
+SecRadarInfo:Label({ Name = "Titik Merah = Killer (ukuran besar)" })
+SecRadarInfo:Label({ Name = "Titik Biru = Survivor (ukuran kecil)" })
+SecRadarInfo:Label({ Name = "Radar mengikuti arah kamera kamu." })
 
 end -- [End TabESP]
 
@@ -8417,50 +8508,6 @@ SecFov:Button({
 })
 end -- [End TabView]
 
--- ==============================================================================
--- TAB: KILLER RADAR
--- ==============================================================================
-do
-local TabRadar = tabGroup:Tab({ Name = "Radar", Image = "lucide/radio" })
-
-local SecRadar = TabRadar:Section({ Name = "Radar Killer", Side = 1 })
-SecRadar:Header({ Name = ZypheraxLib:Gradient("Killer Radar (Mini-Map)", Color3.fromRGB(232,100,120), Color3.fromRGB(200,120,180)) })
-
-SecRadar:Toggle({
-    Name = "Aktifkan Killer Radar",
-    Default = false,
-    Callback = function(enabled)
-        killerRadarEnabled = enabled
-        if enabled then
-            killerradar_start()
-            Window:Notify({ Title = "Killer Radar", Description = "Merah=Killer | Biru=Survivor. Radar aktif!", Lifetime = 3 })
-        else
-            killerradar_stop()
-            Window:Notify({ Title = "Killer Radar", Description = "Radar dimatikan.", Lifetime = 2 })
-        end
-    end
-})
-
-SecRadar:Slider({
-    Name = "Jangkauan Radar (Studs)",
-    Default = 350,
-    Minimum = 50,
-    Maximum = 1000,
-    DisplayMethod = "Round",
-    Precision = 0,
-    Callback = function(val)
-        RADAR_RANGE = val
-    end
-})
-
-local SecRadarInfo = TabRadar:Section({ Name = "Info Radar", Side = 2 })
-SecRadarInfo:Header({ Name = ZypheraxLib:Gradient("Cara Baca Radar", Color3.fromRGB(140,152,190), Color3.fromRGB(120,170,200)) })
-SecRadarInfo:Label({ Name = "🟢 Titik Hijau = Kamu sendiri" })
-SecRadarInfo:Label({ Name = "🔴 Titik Merah = Killer (besar)" })
-SecRadarInfo:Label({ Name = "🔵 Titik Biru = Survivor (kecil)" })
-SecRadarInfo:Label({ Name = "Radar mengikuti arah kamera kamu!" })
-
-end -- [End TabRadar]
 
 -- ==============================================================================
 -- TAB: DISCORD WEBHOOK NOTIFIER
@@ -8481,18 +8528,17 @@ SecWHUrl:Input({
 })
 
 SecWHUrl:Toggle({
-    Name = "Notifikasi saat Escape",
-    Default = true,
-    Callback = function(enabled)
-        webhookNotifyEscape = enabled
-    end
-})
-
-SecWHUrl:Toggle({
-    Name = "Notifikasi saat Match Mulai",
+    Name = "Kirim Summary Saat Match Selesai",
     Default = true,
     Callback = function(enabled)
         webhookNotifyMatch = enabled
+        if enabled then
+            start_webhook_live_monitor()
+            Window:Notify({ Title = "Webhook", Description = "Aktif! Ringkasan dikirim setiap match selesai.", Lifetime = 3 })
+        else
+            stop_webhook_live_monitor()
+            Window:Notify({ Title = "Webhook", Description = "Notifikasi match dimatikan.", Lifetime = 2 })
+        end
     end
 })
 
@@ -8502,7 +8548,7 @@ SecWHUrl:Button({
         local ok, res = send_discord_webhook(
             "Test Webhook",
             "**Zypherax Hub** terhubung ke Discord kamu! Webhook berfungsi dengan baik.",
-            "00b0f4"
+            "5865F2"
         )
         Window:Notify({
             Title = ok and "Webhook Terkirim!" or "Gagal",
@@ -8512,47 +8558,13 @@ SecWHUrl:Button({
     end
 })
 
-SecWHUrl:Button({
-    Name = "Kirim: Match Dimulai",
-    Callback = function()
-        if not webhookNotifyMatch then
-            Window:Notify({ Title = "Webhook", Description = "Notifikasi match dimatikan.", Lifetime = 2 })
-            return
-        end
-        local ok, res = send_discord_webhook(
-            "Match Dimulai!",
-            "**" .. (LocalPlayer.DisplayName or LocalPlayer.Name) .. "** bergabung match baru di Violence District.",
-            "57f287"
-        )
-        Window:Notify({
-            Title = ok and "Notifikasi Terkirim!" or "Gagal",
-            Description = ok and "Notifikasi match dikirim ke Discord." or tostring(res),
-            Lifetime = 3
-        })
-    end
-})
-
 local SecWHSummary = TabWebhook:Section({ Name = "Match Summary", Side = 2 })
-SecWHSummary:Header({ Name = ZypheraxLib:Gradient("Per-Match Summary (Zypherax Hub Style)", Color3.fromRGB(99,130,255), Color3.fromRGB(72,214,200)) })
-
-SecWHSummary:Toggle({
-    Name = "Auto Kirim Summary Per-Match",
-    Default = true,
-    Callback = function(enabled)
-        if enabled then
-            start_webhook_live_monitor()
-            Window:Notify({ Title = "Match Tracker", Description = "Aktif! Summary otomatis dikirim setiap selesai match / escape.", Lifetime = 3 })
-        else
-            stop_webhook_live_monitor()
-            Window:Notify({ Title = "Match Tracker", Description = "Tracker match dimatikan.", Lifetime = 2 })
-        end
-    end
-})
+SecWHSummary:Header({ Name = ZypheraxLib:Gradient("Per-Match Summary", Color3.fromRGB(99,130,255), Color3.fromRGB(72,214,200)) })
 
 SecWHSummary:Button({
-    Name = "Kirim Summary Match Sekarang (Manual)",
+    Name = "Kirim Summary Match (Manual)",
     Callback = function()
-        local ok, res = send_match_summary_webhook("Manual")
+        local ok, res = send_match_summary_webhook("Manual", true)
         Window:Notify({
             Title = ok and "Summary Terkirim!" or "Gagal",
             Description = ok and "Statistik match berhasil dikirim ke Discord!" or tostring(res),
@@ -8561,13 +8573,14 @@ SecWHSummary:Button({
     end
 })
 
-SecWHSummary:Label({ Name = "Format Zypherax Hub: Discord Blurple, Delta (+/-) Level, EXP, Screws, Gears, Sin." })
-SecWHSummary:Label({ Name = "Summary dikirim per-match (bukan live update) saat match selesai / escape." })
+SecWHSummary:Label({ Name = "Webhook mengirim ringkasan satu kali setiap match selesai." })
+SecWHSummary:Label({ Name = "Isi: Player (2 huruf + ***), Map, Durasi, Level, EXP, Screws, Gears, Sin." })
+SecWHSummary:Label({ Name = "Status yang dikirim selalu: Match Ended." })
 
 local SecWHInfo = TabWebhook:Section({ Name = "Petunjuk Webhook", Side = 1 })
 SecWHInfo:Header({ Name = ZypheraxLib:Gradient("Cara Pakai Webhook", Color3.fromRGB(140,152,190), Color3.fromRGB(120,170,200)) })
 SecWHInfo:Label({ Name = "Salin URL dari: Server Discord > Edit Channel > Integrations > Webhooks" })
-SecWHInfo:Label({ Name = "Delta (+/-) dihitung otomatis dari awal match hingga kamu berhasil escape." })
+SecWHInfo:Label({ Name = "Username disensor: hanya 2 huruf awal yang tampil." })
 SecWHInfo:Label({ Name = "Pastikan Executor mendukung HTTP Request (Synapse X, Fluxus, Delta, dll)." })
 
 end -- [End TabWebhook]
