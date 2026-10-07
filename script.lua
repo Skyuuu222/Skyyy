@@ -3668,6 +3668,15 @@ do
           "U.New(\"UIListLayout\", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8), Parent = secContainer })" },
         { "            Size                   = UDim2.new(1, 0, 0, 40),\n            BackgroundColor3       = T.Surface2,\n            BackgroundTransparency = 1,\n            ZIndex                 = 4,\n            Parent                 = tabList",
           "            Size                   = UDim2.new(1, 0, 0, 42),\n            BackgroundColor3       = T.Surface2,\n            BackgroundTransparency = 1,\n            ZIndex                 = 4,\n            Parent                 = tabList" },
+        -- Hilangkan bayangan (drop-shadow) di belakang jendela ZypheraxUI.
+        { "    -- Drop shadow (Softer and larger blur)\n    local shadow = U.New(\"ImageLabel\", {\n        Image = \"rbxassetid://1316045217\", -- Softer shadow asset\n        ImageColor3 = Color3.new(0, 0, 0),\n        ImageTransparency = 0.6,",
+          "    -- Wadah transparan (bayangan dihilangkan, tetap dipakai untuk drag jendela).\n    local shadow = U.New(\"ImageLabel\", {\n        Image = \"\",\n        ImageColor3 = Color3.new(0, 0, 0),\n        ImageTransparency = 1," },
+        -- Cegah label tab terpotong/overlap: pakai TextTruncate.
+        { "            Text                   = tabName,\n            Font                   = T.FontRegular,\n            TextSize               = 13,\n            TextColor3             = T.TextMuted,",
+          "            Text                   = tabName,\n            Font                   = T.FontRegular,\n            TextSize               = 13,\n            TextColor3             = T.TextMuted,\n            TextTruncate           = Enum.TextTruncate.AtEnd," },
+        -- Judul section: kecilkan sedikit + TextTruncate agar tidak menabrak.
+        { "                Text = string.upper(secName),\n                Font = T.Font,\n                TextSize = 12,\n                TextColor3 = T.TextMuted,",
+          "                Text = string.upper(secName),\n                Font = T.Font,\n                TextSize = 11,\n                TextColor3 = T.TextMuted,\n                TextTruncate = Enum.TextTruncate.AtEnd," },
     }
 
     local function _zy_patch(src)
@@ -4274,17 +4283,14 @@ function ZypheraxUI:CreateWindow(config)
         Parent = core
     })
 
-    -- Drop shadow (Softer and larger blur)
-    local shadow = U.New("ImageLabel", {
-        Image = "rbxassetid://1316045217", -- Softer shadow asset
-        ImageColor3 = Color3.new(0, 0, 0),
-        ImageTransparency = 0.6,
+    -- Wadah transparan: bayangan (drop-shadow) di belakang jendela dihilangkan.
+    -- Tetap dipakai sebagai induk jendela agar fitur drag tetap berfungsi normal.
+    local shadow = U.New("Frame", {
         BackgroundTransparency = 1,
-        Size = UDim2.new(0, size.X.Offset + 80, 0, size.Y.Offset + 80),
+        BorderSizePixel = 0,
+        Size = size,
         Position = UDim2.new(0.5, 0, 0.5, 0),
         AnchorPoint = Vector2.new(0.5, 0.5),
-        ScaleType = Enum.ScaleType.Slice,
-        SliceCenter = Rect.new(10, 10, 118, 118),
         ZIndex = 0,
         Parent = gui
     })
@@ -5828,17 +5834,24 @@ return ZypheraxUI
     -- Helper: cari ScreenGui bawaan ZypheraxUI berdasarkan awalan nama.
     local function _zy_find_gui(prefix)
         local found
-        pcall(function()
-            local lp = game:GetService("Players").LocalPlayer
-            local pg = lp and lp:FindFirstChild("PlayerGui")
-            if pg then
-                for _, sg in ipairs(pg:GetChildren()) do
+        -- Cek gethui() dan CoreGui juga (executor memakai gethui), bukan hanya PlayerGui,
+        -- supaya jendela benar-benar bisa disembunyikan saat loading screen berjalan.
+        local function scan(container)
+            if found or not container then return end
+            pcall(function()
+                for _, sg in ipairs(container:GetChildren()) do
                     if type(sg.Name) == "string" and sg.Name:sub(1, #prefix) == prefix then
                         found = sg
                         return
                     end
                 end
-            end
+            end)
+        end
+        pcall(function() if gethui then scan(gethui()) end end)
+        pcall(function() scan(game:GetService("CoreGui")) end)
+        pcall(function()
+            local lp = game:GetService("Players").LocalPlayer
+            scan(lp and lp:FindFirstChild("PlayerGui"))
         end)
         return found
     end
@@ -6100,7 +6113,7 @@ do
             local overlay = Instance.new("Frame")
             overlay.Size = UDim2.fromScale(1, 1)
             overlay.BackgroundColor3 = Color3.fromRGB(6, 8, 14)
-            overlay.BackgroundTransparency = 1
+            overlay.BackgroundTransparency = 0
             overlay.BorderSizePixel = 0
             overlay.ZIndex = 1
             overlay.Parent = SG
@@ -6245,7 +6258,7 @@ do
             status.Parent = card
 
             -- Animasi masuk.
-            TweenService:Create(overlay, TweenInfo.new(0.35), { BackgroundTransparency = 0.35 }):Play()
+            TweenService:Create(overlay, TweenInfo.new(0.35), { BackgroundTransparency = 0 }):Play()
             TweenService:Create(blur, TweenInfo.new(0.35), { Size = 16 }):Play()
             TweenService:Create(card,
                 TweenInfo.new(0.45, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
@@ -7566,11 +7579,18 @@ local tofUpdateConn        = nil
 local tofResultEvent       = nil
 local tofFireEvent         = nil
 local tofGunTable          = nil
-local tofRepatchInterval   = 0.25
+local tofRepatchInterval   = 1.5    -- dinaikkan (dulu 0.25s) agar tidak memicu drop FPS
 local tofMetaHooked        = false
 local tofOrigNamecall      = nil
 local tofOrigRenvRandom    = nil
 local tofRenvHooked        = false
+-- Buffer argumen tanpa alokasi tabel baru tiap panggilan (hemat GC -> anti drop FPS)
+local tofTmpArgs           = {}
+local tofTmpN              = 0
+-- Cache tool & interval khusus scan getgc() (scan berat -> lebih jarang)
+local tofTool              = nil
+local tofGcTimer           = 999
+local tofCharConn          = nil
 
 -- [Layer 1 Remote Finder]
 local function tof_get_remotes()
@@ -7623,7 +7643,12 @@ local function tof_hook_namecall()
         local _orig
         _orig = hookmetamethod(game, "__namecall", function(self, ...)
             local method = getnamecallmethod and getnamecallmethod() or ""
-            local args   = {...}
+
+            if not tofAntiMissEnabled then
+                return _orig(self, ...)
+            end
+
+            local args = {...}
 
             local isResult = (tofResultEvent and self == tofResultEvent)
                 or (self.Name == "Result" and self.Parent and self.Parent.Name == "Twist of Fate")
@@ -7635,42 +7660,52 @@ local function tof_hook_namecall()
                 if #args == 0 then
                     return _orig and _orig(self, true)
                 end
+                tofTmpN = 0
                 for i = 1, #args do
-                    if tof_is_miss_arg(args[i]) then
-                        if type(args[i]) == "boolean" then
-                            args[i] = true
-                        elseif type(args[i]) == "string" then
-                            args[i] = "hit"
-                        elseif type(args[i]) == "number" then
-                            args[i] = 1
-                        elseif type(args[i]) == "table" then
-                            for tk, _ in pairs(args[i]) do
-                                local tks = tostring(tk):lower()
-                                if tks:find("miss") or tks:find("fail") then
-                                    args[i][tk] = false
-                                elseif tks:find("hit") or tks:find("success") then
-                                    args[i][tk] = true
-                                end
+                    local v  = args[i]
+                    local tv = type(v)
+                    if tv ~= "table" and tof_is_miss_arg(v) then
+                        if tv == "boolean" then
+                            v = true
+                        elseif tv == "string" then
+                            v = "hit"
+                        elseif tv == "number" then
+                            v = 1
+                        end
+                    elseif tv == "table" and tof_is_miss_arg(v) then
+                        for tk in pairs(v) do
+                            local tks = tostring(tk):lower()
+                            if tks:find("miss") or tks:find("fail") then
+                                v[tk] = false
+                            elseif tks:find("hit") or tks:find("success") then
+                                v[tk] = true
                             end
                         end
                     end
+                    tofTmpN = tofTmpN + 1
+                    tofTmpArgs[tofTmpN] = v
                 end
-                return _orig and _orig(self, table.unpack(args))
+                return _orig(self, table.unpack(tofTmpArgs, 1, tofTmpN))
             end
 
             -- Intercept RemoteEvent Fire:FireServer(...) -> pastikan tidak ada flag miss
-            if tofAntiMissEnabled and isFire and (method == "FireServer" or method == "fireserver") then
+            if isFire and (method == "FireServer" or method == "fireserver") then
+                tofTmpN = 0
                 for i = 1, #args do
-                    if type(args[i]) == "boolean" and args[i] == false then
-                        args[i] = true
-                    elseif type(args[i]) == "string" then
-                        local s = args[i]:lower()
+                    local v  = args[i]
+                    local tv = type(v)
+                    if tv == "boolean" and v == false then
+                        v = true
+                    elseif tv == "string" then
+                        local s = v:lower()
                         if s:find("miss") or s:find("fail") or s:find("self") then
-                            args[i] = "hit"
+                            v = "hit"
                         end
                     end
+                    tofTmpN = tofTmpN + 1
+                    tofTmpArgs[tofTmpN] = v
                 end
-                return _orig and _orig(self, table.unpack(args))
+                return _orig(self, table.unpack(tofTmpArgs, 1, tofTmpN))
             end
 
             if _orig then
@@ -7797,6 +7832,10 @@ local function tof_patch_gun_table()
     if tofGunTable then return end
 
     if not getgc then return end
+    -- Scan getgc() berat -> jalankan hanya tiap ~5 detik (fungsi tetap sama).
+    tofGcTimer = tofGcTimer + tofRepatchInterval
+    if tofGcTimer < 5 then return end
+    tofGcTimer = 0
     pcall(function()
         for _, v in pairs(getgc(true)) do
             if type(v) == "table" then
@@ -7832,13 +7871,27 @@ local function tof_patch_character_attrs()
         for _, k in ipairs(hitKeys) do
             if char:GetAttribute(k) ~= nil then char:SetAttribute(k, 100) end
         end
-        for _, child in ipairs(char:GetChildren()) do
-            if child:IsA("Tool") and child.Name:lower():find("twist") then
-                for _, k in ipairs(missKeys) do
-                    if child:GetAttribute(k) ~= nil then child:SetAttribute(k, 0) end
-                end
-                for _, k in ipairs(hitKeys) do
-                    if child:GetAttribute(k) ~= nil then child:SetAttribute(k, 100) end
+        local tool = tofTool
+        if tool and tool.Parent ~= char then tofTool = nil; tool = nil end
+        if tool then
+            -- Pakai cache: tidak perlu GetChildren tiap tick (hemat CPU).
+            for _, k in ipairs(missKeys) do
+                if tool:GetAttribute(k) ~= nil then tool:SetAttribute(k, 0) end
+            end
+            for _, k in ipairs(hitKeys) do
+                if tool:GetAttribute(k) ~= nil then tool:SetAttribute(k, 100) end
+            end
+        else
+            for _, child in ipairs(char:GetChildren()) do
+                if child:IsA("Tool") and child.Name:lower():find("twist") then
+                    tofTool = child
+                    for _, k in ipairs(missKeys) do
+                        if child:GetAttribute(k) ~= nil then child:SetAttribute(k, 0) end
+                    end
+                    for _, k in ipairs(hitKeys) do
+                        if child:GetAttribute(k) ~= nil then child:SetAttribute(k, 100) end
+                    end
+                    break
                 end
             end
         end
@@ -7852,6 +7905,13 @@ function tof_start()
     tof_scan_item_modules()     -- [L3] Scan module item di ReplicatedStorage
     tof_patch_gun_table()       -- [L4] getgc() scan & patch
     tof_patch_character_attrs() -- [L5] Attribute Character & Tool patch
+
+    -- Reset cache tool saat karakter respawn (agar tool baru tetap terpantau)
+    local lp = game:GetService("Players").LocalPlayer
+    if tofCharConn then tofCharConn:Disconnect() end
+    if lp then
+        tofCharConn = lp.CharacterAdded:Connect(function() tofTool = nil end)
+    end
 
     if tofUpdateConn then tofUpdateConn:Disconnect() end
     local tofTimer = 0
@@ -7873,6 +7933,11 @@ function tof_stop()
         tofUpdateConn:Disconnect()
         tofUpdateConn = nil
     end
+    if tofCharConn then
+        tofCharConn:Disconnect()
+        tofCharConn = nil
+    end
+    tofTool     = nil
     tofGunTable = nil
 end
 
@@ -7927,57 +7992,8 @@ SecCross:Dropdown({
     end
 })
 
-SecCross:Slider({
-    Name = "Ukuran Crosshair",
-    Default = 20,
-    Minimum = 5,
-    Maximum = 80,
-    DisplayMethod = "Round",
-    Precision = 0,
-    Callback = function(val)
-        crosshairSize = val
-        update_crosshair()
-    end
-})
-
-SecCross:Slider({
-    Name = "Ketebalan / Ukuran Titik",
-    Default = 2,
-    Minimum = 1,
-    Maximum = 10,
-    DisplayMethod = "Round",
-    Precision = 0,
-    Callback = function(val)
-        crosshairThickness = val
-        update_crosshair()
-    end
-})
-
-SecCross:Slider({
-    Name = "Celah Tengah (Gap) - Hanya Plus",
-    Default = 5,
-    Minimum = 0,
-    Maximum = 30,
-    DisplayMethod = "Round",
-    Precision = 0,
-    Callback = function(val)
-        crosshairGap = val
-        update_crosshair()
-    end
-})
-
-SecCross:Slider({
-    Name = "Opacity / Transparansi",
-    Default = 10,
-    Minimum = 1,
-    Maximum = 10,
-    DisplayMethod = "Round",
-    Precision = 0,
-    Callback = function(val)
-        crosshairOpacity = val / 10
-        update_crosshair()
-    end
-})
+-- Ukuran, ketebalan, celah, dan opacity dibuat default (size = 20) dan tidak diubah.
+-- Hanya posisi X & Y yang bisa diatur.
 
 -- Posisi X (kiri/kanan dari tengah layar)
 SecCross:Slider({
