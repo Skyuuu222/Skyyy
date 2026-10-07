@@ -3513,7 +3513,7 @@ function send_discord_webhook(embedTitle, embedDesc, colorHex)
 
     local stats = get_player_stats()
     local payload = {
-        username = "Zypherax Hub • Violence District",
+        username = "Tes mpruy • Zypherax Hub",
         avatar_url = "https://cdn-icons-png.flaticon.com/512/3135/3135715.png",
         embeds = {
             {
