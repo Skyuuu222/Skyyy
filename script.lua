@@ -1900,7 +1900,11 @@ function killerradar_stop()
         if d.dot then pcall(function() d.dot:Destroy() end) end
     end
     _radarDotPool = {}
-    if killerRadarGui then pcall(function() killerRadarGui:Destroy() end); killerRadarGui = nil end
+    if killerRadarGui then
+        pcall(function() killerRadarGui.Enabled = false end)
+        pcall(function() killerRadarGui:Destroy() end)
+        killerRadarGui = nil
+    end
     killerRadarCircle = nil
 end
 
@@ -3221,8 +3225,14 @@ function trigger_instant_escape()
         fire_escape_reward_remotes()
         task.wait(0.5)
 
-        -- [LANGKAH 8] Webhook summary dikirim oleh pemantau akhir match
-        -- (start_webhook_live_monitor) supaya hanya SATU laporan per match.
+        -- [LANGKAH 8] Kirim Match Summary setelah berhasil Escape
+        pcall(function()
+            if webhookUrl and webhookUrl ~= "" then
+                task.delay(1.2, function()
+                    pcall(function() send_match_summary_webhook("ESCAPED", true) end)
+                end)
+            end
+        end)
 
         -- Reset state
         _isEscaping = false
@@ -8534,7 +8544,7 @@ SecWHUrl:Toggle({
         webhookNotifyMatch = enabled
         if enabled then
             start_webhook_live_monitor()
-            Window:Notify({ Title = "Webhook", Description = "Aktif! Ringkasan dikirim setiap match selesai.", Lifetime = 3 })
+            Window:Notify({ Title = "Webhook", Description = "Aktif! Ringkasan dikirim setiap match selesai (termasuk setelah ESCAPED).", Lifetime = 3 })
         else
             stop_webhook_live_monitor()
             Window:Notify({ Title = "Webhook", Description = "Notifikasi match dimatikan.", Lifetime = 2 })
@@ -8558,32 +8568,16 @@ SecWHUrl:Button({
     end
 })
 
-local SecWHSummary = TabWebhook:Section({ Name = "Match Summary", Side = 2 })
-SecWHSummary:Header({ Name = ZypheraxLib:Gradient("Per-Match Summary", Color3.fromRGB(99,130,255), Color3.fromRGB(72,214,200)) })
-
-SecWHSummary:Button({
-    Name = "Kirim Summary Match (Manual)",
-    Callback = function()
-        local ok, res = send_match_summary_webhook("Manual", true)
-        Window:Notify({
-            Title = ok and "Summary Terkirim!" or "Gagal",
-            Description = ok and "Statistik match berhasil dikirim ke Discord!" or tostring(res),
-            Lifetime = 4
-        })
-    end
-})
-
-SecWHSummary:Label({ Name = "Webhook mengirim ringkasan satu kali setiap match selesai." })
-SecWHSummary:Label({ Name = "Isi: Player (2 huruf + ***), Map, Durasi, Level, EXP, Screws, Gears, Sin." })
-SecWHSummary:Label({ Name = "Status yang dikirim selalu: Match Ended." })
-
-local SecWHInfo = TabWebhook:Section({ Name = "Petunjuk Webhook", Side = 1 })
+local SecWHInfo = TabWebhook:Section({ Name = "Petunjuk Webhook", Side = 2 })
 SecWHInfo:Header({ Name = ZypheraxLib:Gradient("Cara Pakai Webhook", Color3.fromRGB(140,152,190), Color3.fromRGB(120,170,200)) })
 SecWHInfo:Label({ Name = "Salin URL dari: Server Discord > Edit Channel > Integrations > Webhooks" })
-SecWHInfo:Label({ Name = "Username disensor: hanya 2 huruf awal yang tampil." })
-SecWHInfo:Label({ Name = "Pastikan Executor mendukung HTTP Request (Synapse X, Fluxus, Delta, dll)." })
+SecWHInfo:Label({ Name = "Webhook dikirim SATU KALI saat match selesai / berhasil ESCAPED." })
+SecWHInfo:Label({ Name = "Username user: 2 huruf depan + *** (sensor)." })
+SecWHInfo:Label({ Name = "Data: Level, EXP, Screws, Gears, Sin, Map, Durasi Match." })
+SecWHInfo:Label({ Name = "Status: Match Ended / Escaped!" })
 
 end -- [End TabWebhook]
+
 
 -- ==============================================================================
 -- TAB 4: MODIFIKASI (VERTIKAL SCROLL KE BAWAH)
