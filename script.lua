@@ -1,5 +1,5 @@
 -- ==============================================================================
--- UNIVERSAL AVATAR & OUTFIT STUDIO HUB (POWERED BY ZypheraxUI)
+-- UNIVERSAL AVATAR & OUTFIT STUDIO HUB (POWERED BY ZYPHERAXUI)
 -- Modern MacOS-style UI with Acrylic Blur, Tabs & Animations
 -- ==============================================================================
 
@@ -85,32 +85,32 @@ local start_esp_gen, stop_esp_gen, start_esp_generator, stop_esp_generator
 -- DILETAKAN secara default, supaya console Roblox tidak dipenuhi
 -- baris yang tidak perlu.
 --
--- Set SKY_DEBUG = true di konsol kalau mau melihat semua detail:
---     SKY_DEBUG = true
--- Kalau belum di-set ulang, ketik SKY_DEBUG = false untuk mematikan lagi.
+-- Set ZYPHERAX_DEBUG = true di konsol kalau mau melihat semua detail:
+--     ZYPHERAX_DEBUG = true
+-- Kalau belum di-set ulang, ketik ZYPHERAX_DEBUG = false untuk mematikan lagi.
 --
 -- Notifikasi lewat Window:Notify() TIDAK terpengaruh switch ini,
 -- jadi user tetap selalu melihat feedback utama dari setiap fitur.
 -- ==============================================================================
 -- Dua variabel ini sengaja dibuat global (tanpa local) supaya bisa diubah
--- dari konsol kapan saja: SKY_DEBUG = true / SKY_LOG_BUFFER = ""
-SKY_DEBUG = false
+-- dari konsol kapan saja: ZYPHERAX_DEBUG = true / ZYPHERAX_LOG_BUFFER = ""
+ZYPHERAX_DEBUG = false
 
 -- Buffer log, supaya bisa disalin dari UI tanpa harus buka console.
 -- Hanya 400 baris terakhir yang disimpan supaya tidak makan memory.
-SKY_LOG_BUFFER = ""
+ZYPHERAX_LOG_BUFFER = ""
 
 local function log(msg, ...)
-    if not SKY_DEBUG then return end
+    if not ZYPHERAX_DEBUG then return end
     local ok, text = pcall(string.format, tostring(msg), ...)
     local line = ok and text or tostring(msg)
     print("[Zypherax] " .. line)
 
-    SKY_LOG_BUFFER = SKY_LOG_BUFFER .. line .. "\n"
-    local _, count = SKY_LOG_BUFFER:gsub("\n", "")
+    ZYPHERAX_LOG_BUFFER = ZYPHERAX_LOG_BUFFER .. line .. "\n"
+    local _, count = ZYPHERAX_LOG_BUFFER:gsub("\n", "")
     if count > 400 then
-        local cut = SKY_LOG_BUFFER:find("\n", SKY_LOG_BUFFER:find("\n") + 1)
-        if cut then SKY_LOG_BUFFER = SKY_LOG_BUFFER:sub(cut + 1) end
+        local cut = ZYPHERAX_LOG_BUFFER:find("\n", ZYPHERAX_LOG_BUFFER:find("\n") + 1)
+        if cut then ZYPHERAX_LOG_BUFFER = ZYPHERAX_LOG_BUFFER:sub(cut + 1) end
     end
 end
 
@@ -2440,7 +2440,7 @@ local function collect_exit_zones()
     local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
     local myPos = (hrp and hrp.Position) or origin
 
-    -- Diagnostik arah keluar. Hanya muncul kalau SKY_DEBUG = true.
+    -- Diagnostik arah keluar. Hanya muncul kalau ZYPHERAX_DEBUG = true.
     if dir then
         log("[AutoEscape] arah keluar: %.2f, 0, %.2f | lorong: %d stud",
             dir.X, dir.Z, math.floor(corridorLen or 0))
@@ -2870,7 +2870,7 @@ function trigger_instant_escape()
     local hrp = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
     if not hrp then return false, "Karakter tidak ditemukan!" end
 
-    -- Penanda versi ini hanya muncul kalau SKY_DEBUG = true,
+    -- Penanda versi ini hanya muncul kalau ZYPHERAX_DEBUG = true,
     -- supaya tidak mengganggu console.
     log("[AutoEscape] VERSI 3: deteksi garis finish (Fininshline)")
 
@@ -3243,7 +3243,7 @@ function trigger_instant_escape()
             statusMsg = "Zona disentuh tapi server belum memproses. Coba ulangi."
         end
         -- Hasil akhir tetap dicetak karena ini yang paling penting.
-        -- Detail diagnostik lain sudah disembunyikan lewat SKY_DEBUG.
+        -- Detail diagnostik lain sudah disembunyikan lewat ZYPHERAX_DEBUG.
         print("[Escape] " .. statusMsg)
         safe_notify({
             Title = escaped and "Escape Berhasil" or "Auto Escape",
@@ -3652,11 +3652,35 @@ do
     local NEEDLE = "local tw = TweenService:Create(obj, TweenInfo.new(t, style, dir), props)"
     local INJECT = "do local __c = {} for __k, __v in pairs(props or {}) do if typeof(__v) == \"EnumItem\" then pcall(function() obj[__k] = __v end) else __c[__k] = __v end end props = __c end\n        " .. NEEDLE
 
+    -- Penyempurnaan tampilan (dipakai untuk jalur GitHub maupun salinan lokal).
+    local TWEAKS = {
+        { "Accent           = Color3.fromRGB(0, 180, 255),   -- primary accent",
+          "Accent           = Color3.fromRGB(0, 200, 255),   -- primary accent" },
+        { "AccentGradient   = Color3.fromRGB(30, 140, 220),  -- subtle gradient end",
+          "AccentGradient   = Color3.fromRGB(130, 120, 255), -- subtle gradient end" },
+        { "CornerLg         = UDim.new(0, 10),",
+          "CornerLg         = UDim.new(0, 12)," },
+        { "            local secHeader = U.New(\"Frame\", {\n                Size = UDim2.new(1, 0, 0, 26),",
+          "            local secHeader = U.New(\"Frame\", {\n                Size = UDim2.new(1, 0, 0, 30)," },
+        { "                Text = string.upper(secName),\n                Font = T.Font,\n                TextSize = 11,",
+          "                Text = string.upper(secName),\n                Font = T.Font,\n                TextSize = 12," },
+        { "U.New(\"UIListLayout\", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 7), Parent = secContainer })",
+          "U.New(\"UIListLayout\", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8), Parent = secContainer })" },
+        { "            Size                   = UDim2.new(1, 0, 0, 40),\n            BackgroundColor3       = T.Surface2,\n            BackgroundTransparency = 1,\n            ZIndex                 = 4,\n            Parent                 = tabList",
+          "            Size                   = UDim2.new(1, 0, 0, 42),\n            BackgroundColor3       = T.Surface2,\n            BackgroundTransparency = 1,\n            ZIndex                 = 4,\n            Parent                 = tabList" },
+    }
+
     local function _zy_patch(src)
         if type(src) ~= "string" then return src end
         local at = src:find(NEEDLE, 1, true)
         if at then
             src = src:sub(1, at - 1) .. INJECT .. src:sub(at + #NEEDLE)
+        end
+        for _, tw in ipairs(TWEAKS) do
+            local pos = src:find(tw[1], 1, true)
+            if pos then
+                src = src:sub(1, pos - 1) .. tw[2] .. src:sub(pos + #tw[1])
+            end
         end
         return src
     end
@@ -3717,9 +3741,9 @@ ZypheraxUI.Theme = {
     Surface3         = Color3.fromRGB(28, 30, 38),    -- elevated controls (dropdowns)
 
     -- Accent — controlled, high-end cyan
-    Accent           = Color3.fromRGB(0, 180, 255),   -- primary accent
+    Accent           = Color3.fromRGB(0, 200, 255),   -- primary accent
     AccentDark       = Color3.fromRGB(0, 110, 180),   -- pressed/dark active state
-    AccentGradient   = Color3.fromRGB(30, 140, 220),  -- subtle gradient end
+    AccentGradient   = Color3.fromRGB(130, 120, 255), -- subtle gradient end
 
     -- Typography — precise contrast levels
     Text             = Color3.fromRGB(240, 240, 245), -- high emphasis
@@ -3744,7 +3768,7 @@ ZypheraxUI.Theme = {
     -- Corner Radius System (Tight & Professional)
     CornerSm         = UDim.new(0, 4),                -- small elements (checkboxes, tags)
     CornerMd         = UDim.new(0, 6),                -- medium elements (buttons, inputs)
-    CornerLg         = UDim.new(0, 10),               -- large containers (panels, main UI)
+    CornerLg         = UDim.new(0, 12),               -- large containers (panels, main UI)
     -- Revert ke Gotham untuk scaling yang lebih konsisten & rapi di Roblox
     Font             = Enum.Font.GothamBold,
     FontRegular      = Enum.Font.GothamMedium,
@@ -4779,7 +4803,7 @@ function ZypheraxUI:CreateWindow(config)
         local tabIcon = type(nameOrCfg) == "table" and (nameOrCfg.Icon or nameOrCfg.Logo) or icon
 
         local tabBtn = U.New("Frame", {
-            Size                   = UDim2.new(1, 0, 0, 40),
+            Size                   = UDim2.new(1, 0, 0, 42),
             BackgroundColor3       = T.Surface2,
             BackgroundTransparency = 1,
             ZIndex                 = 4,
@@ -4958,7 +4982,7 @@ function ZypheraxUI:CreateWindow(config)
 
             -- Section Header
             local secHeader = U.New("Frame", {
-                Size = UDim2.new(1, 0, 0, 26),
+                Size = UDim2.new(1, 0, 0, 30),
                 BackgroundColor3 = T.SectionHeader,
                 ZIndex = 5,
                 Parent = sectionBox
@@ -4980,7 +5004,7 @@ function ZypheraxUI:CreateWindow(config)
             U.New("TextLabel", {
                 Text = string.upper(secName),
                 Font = T.Font,
-                TextSize = 11,
+                TextSize = 12,
                 TextColor3 = T.TextMuted,
                 BackgroundTransparency = 1,
                 Position = UDim2.new(0, 10, 0, 0),
@@ -4999,7 +5023,7 @@ function ZypheraxUI:CreateWindow(config)
                 ZIndex = 5,
                 Parent = sectionBox
             })
-            U.New("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 7), Parent = secContainer })
+            U.New("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8), Parent = secContainer })
             U.New("UIPadding", { PaddingBottom = UDim.new(0, 10), Parent = secContainer })
 
             local Section = {}
@@ -5797,9 +5821,35 @@ return ZypheraxUI
     local _zwin = ZypheraxUI:CreateWindow({
         Title       = "Zypherax Hub",
         Description = "Violence District",
-        Size        = UDim2.fromOffset(660, 480),
+        Size        = UDim2.fromOffset(700, 560),
         Keybind     = Enum.KeyCode.RightControl,
     })
+
+    -- Helper: cari ScreenGui bawaan ZypheraxUI berdasarkan awalan nama.
+    local function _zy_find_gui(prefix)
+        local found
+        pcall(function()
+            local lp = game:GetService("Players").LocalPlayer
+            local pg = lp and lp:FindFirstChild("PlayerGui")
+            if pg then
+                for _, sg in ipairs(pg:GetChildren()) do
+                    if type(sg.Name) == "string" and sg.Name:sub(1, #prefix) == prefix then
+                        found = sg
+                        return
+                    end
+                end
+            end
+        end)
+        return found
+    end
+
+    -- Sembunyikan jendela + tombol melayang dulu agar Loading Screen tampil dulu.
+    pcall(function()
+        local app = _zy_find_gui("ZypheraxApp")
+        if app then app.Enabled = false end
+        local fb = _zy_find_gui("ZypheraxFloatingToggle")
+        if fb then fb.Enabled = false end
+    end)
 
     local BridgeTabGroup = { _zwin = _zwin }
 
@@ -5963,6 +6013,16 @@ return ZypheraxUI
     function BridgeLib:GetThemes() return { "Dark", "Light", "Midnight", "Rose" } end
     function BridgeLib:SetTheme(_) end
     function BridgeLib:Watermark(_) return BridgeWatermark end
+    -- Dipakai Loading Screen untuk membuka jendela setelah selesai memuat.
+    function BridgeLib:_Reveal()
+        pcall(function()
+            local app = _zy_find_gui("ZypheraxApp")
+            if app then app.Enabled = true end
+            local fb = _zy_find_gui("ZypheraxFloatingToggle")
+            if fb then fb.Enabled = true end
+            _zwin:ToggleVisibility(true)
+        end)
+    end
 
     -- --------------------------------------------------------------------------
     -- Publikasikan sebagai global supaya seluruh kode di bawah bisa memakainya.
@@ -5974,6 +6034,258 @@ end
 
 -- Modul2 yang ditulis sebelum UI memakai global 'ZypheraxWindow' untuk Notify.
 ZypheraxWindow = Window
+
+
+-- ==============================================================================
+-- LOADING SCREEN (ZYPHERAX HUB) -- tampil dulu, lalu membuka menu ZypheraxUI
+-- ==============================================================================
+-- Desain glassmorphism, palet cyan gelap yang serasi dengan ZypheraxUI.
+-- ==============================================================================
+do
+    local Players = game:GetService("Players")
+    local TweenService = game:GetService("TweenService")
+    local LocalPlayer = Players.LocalPlayer
+
+    -- Wadah ScreenGui (cari container yang aman)
+    local function _containers()
+        local t = {}
+        pcall(function() if gethui then table.insert(t, gethui()) end end)
+        pcall(function() local plr = game:GetService("Players").LocalPlayer
+            if plr and plr:FindFirstChild("PlayerGui") then table.insert(t, plr.PlayerGui) end end)
+        pcall(function() local r = game:GetService("RunService") end)
+        return t
+    end
+
+    -- Palet selaras tema ZypheraxUI (dark + cyan premium).
+    local P = {
+        bgCard    = Color3.fromRGB(16, 18, 24),
+        bgChip    = Color3.fromRGB(28, 31, 40),
+        border    = Color3.fromRGB(45, 50, 66),
+        textMain  = Color3.fromRGB(240, 242, 248),
+        textMuted = Color3.fromRGB(150, 156, 172),
+        accentA   = Color3.fromRGB(0, 180, 255),
+        accentB   = Color3.fromRGB(30, 140, 220),
+        accentC   = Color3.fromRGB(140, 120, 255),
+    }
+
+    local function _round(p, r)
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0, r)
+        c.Parent = p
+        return c
+    end
+    local function _grad(p, c1, c2, rot)
+        local g = Instance.new("UIGradient")
+        g.Color = ColorSequence.new(c1, c2)
+        g.Rotation = rot or 0
+        g.Parent = p
+        return g
+    end
+
+    task.spawn(function()
+        local ok = pcall(function()
+            local SG = Instance.new("ScreenGui")
+            SG.Name = "ZypheraxWelcome"
+            SG.ResetOnSpawn = false
+            SG.IgnoreGuiInset = true
+            SG.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+            SG.DisplayOrder = 10000
+            for _, c in ipairs({ (gethui and gethui()) or nil, (getgenv and getgenv().CoreGui) or nil,
+                                 game:GetService("Players").LocalPlayer.PlayerGui }) do
+                if c and not SG.Parent then pcall(function() SG.Parent = c end) end
+            end
+            if not SG.Parent then return end
+
+            -- Backdrop gelap + blur.
+            local overlay = Instance.new("Frame")
+            overlay.Size = UDim2.fromScale(1, 1)
+            overlay.BackgroundColor3 = Color3.fromRGB(6, 8, 14)
+            overlay.BackgroundTransparency = 1
+            overlay.BorderSizePixel = 0
+            overlay.ZIndex = 1
+            overlay.Parent = SG
+
+            local blur = Instance.new("BlurEffect")
+            blur.Size = 0
+            blur.Parent = game:GetService("Lighting")
+
+            -- Kartu glassmorphism.
+            local card = Instance.new("Frame")
+            card.AnchorPoint = Vector2.new(0.5, 0.5)
+            card.Position = UDim2.fromScale(0.5, 0.54)
+            card.Size = UDim2.fromOffset(430, 250)
+            card.BackgroundColor3 = P.bgCard
+            card.BackgroundTransparency = 1
+            card.BorderSizePixel = 0
+            card.ZIndex = 5
+            card.Parent = SG
+            _round(card, 16)
+
+            local cardStroke = Instance.new("UIStroke")
+            cardStroke.Color = P.border
+            cardStroke.Thickness = 1
+            cardStroke.Transparency = 0.15
+            cardStroke.Parent = card
+
+            -- Logo kotak gradien.
+            local logo = Instance.new("Frame")
+            logo.Size = UDim2.fromOffset(56, 56)
+            logo.Position = UDim2.new(0.5, -28, 0, 26)
+            logo.BackgroundColor3 = Color3.new(1, 1, 1)
+            logo.BorderSizePixel = 0
+            logo.ZIndex = 6
+            logo.Parent = card
+            _round(logo, 14)
+            _grad(logo, P.accentA, P.accentC, 135)
+
+            local logoText = Instance.new("TextLabel")
+            logoText.Size = UDim2.fromScale(1, 1)
+            logoText.BackgroundTransparency = 1
+            logoText.Text = "Z"
+            logoText.Font = Enum.Font.GothamBold
+            logoText.TextSize = 30
+            logoText.TextColor3 = Color3.new(1, 1, 1)
+            logoText.ZIndex = 7
+            logoText.Parent = logo
+
+            -- Judul + subjudul.
+            local title = Instance.new("TextLabel")
+            title.AnchorPoint = Vector2.new(0.5, 0)
+            title.Position = UDim2.new(0.5, 0, 0, 96)
+            title.Size = UDim2.new(1, -40, 0, 26)
+            title.BackgroundTransparency = 1
+            title.Text = "ZYPHERAX HUB"
+            title.Font = Enum.Font.GothamBold
+            title.TextSize = 24
+            title.TextColor3 = Color3.new(1, 1, 1)
+            title.ZIndex = 6
+            title.Parent = card
+            _grad(title, P.accentA, P.accentC, 20)
+
+            local sub = Instance.new("TextLabel")
+            sub.AnchorPoint = Vector2.new(0.5, 0)
+            sub.Position = UDim2.new(0.5, 0, 0, 126)
+            sub.Size = UDim2.new(1, -40, 0, 16)
+            sub.BackgroundTransparency = 1
+            sub.Text = "Violence District"
+            sub.Font = Enum.Font.GothamMedium
+            sub.TextSize = 13
+            sub.TextColor3 = P.textMuted
+            sub.ZIndex = 6
+            sub.Parent = card
+
+            -- Chip fitur.
+            local chips = { "Auto Gen", "Auto Parry", "Auto Heal", "ESP", "Escape" }
+            local row = Instance.new("Frame")
+            row.AnchorPoint = Vector2.new(0.5, 0)
+            row.Position = UDim2.new(0.5, 0, 0, 154)
+            row.Size = UDim2.new(1, -30, 0, 26)
+            row.BackgroundTransparency = 1
+            row.ZIndex = 6
+            row.Parent = card
+
+            local layout = Instance.new("UIListLayout")
+            layout.FillDirection = Enum.FillDirection.Horizontal
+            layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+            layout.VerticalAlignment = Enum.VerticalAlignment.Center
+            layout.Padding = UDim.new(0, 6)
+            layout.Parent = row
+
+            for _, name in ipairs(chips) do
+                local chip = Instance.new("Frame")
+                chip.Size = UDim2.fromOffset(78, 24)
+                chip.BackgroundColor3 = P.accentA
+                chip.BackgroundTransparency = 0.9
+                chip.BorderSizePixel = 0
+                chip.ZIndex = 7
+                chip.Parent = row
+                _round(chip, 7)
+
+                local t = Instance.new("TextLabel")
+                t.Size = UDim2.fromScale(1, 1)
+                t.BackgroundTransparency = 1
+                t.Text = name
+                t.Font = Enum.Font.GothamMedium
+                t.TextSize = 11
+                t.TextColor3 = P.textMain
+                t.ZIndex = 8
+                t.Parent = chip
+            end
+
+            -- Progress bar.
+            local barBg = Instance.new("Frame")
+            barBg.AnchorPoint = Vector2.new(0.5, 1)
+            barBg.Position = UDim2.new(0.5, 0, 1, -44)
+            barBg.Size = UDim2.new(0.8, 0, 0, 4)
+            barBg.BackgroundColor3 = Color3.fromRGB(38, 42, 56)
+            barBg.BorderSizePixel = 0
+            barBg.ZIndex = 6
+            barBg.Parent = card
+            _round(barBg, 2)
+
+            local barFill = Instance.new("Frame")
+            barFill.Size = UDim2.fromScale(0, 1)
+            barFill.BackgroundColor3 = Color3.new(1, 1, 1)
+            barFill.BorderSizePixel = 0
+            barFill.ZIndex = 7
+            barFill.Parent = barBg
+            _round(barFill, 2)
+            _grad(barFill, P.accentA, P.accentB, 0)
+
+            local status = Instance.new("TextLabel")
+            status.AnchorPoint = Vector2.new(0.5, 1)
+            status.Position = UDim2.new(0.5, 0, 1, -20)
+            status.Size = UDim2.new(1, -30, 0, 14)
+            status.BackgroundTransparency = 1
+            status.Text = "Menyiapkan antarmuka..."
+            status.Font = Enum.Font.Gotham
+            status.TextSize = 12
+            status.TextColor3 = P.textMuted
+            status.ZIndex = 6
+            status.Parent = card
+
+            -- Animasi masuk.
+            TweenService:Create(overlay, TweenInfo.new(0.35), { BackgroundTransparency = 0.35 }):Play()
+            TweenService:Create(blur, TweenInfo.new(0.35), { Size = 16 }):Play()
+            TweenService:Create(card,
+                TweenInfo.new(0.45, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+                { Position = UDim2.fromScale(0.5, 0.5), BackgroundTransparency = 0.05 }):Play()
+
+            TweenService:Create(barFill,
+                TweenInfo.new(2.3, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+                { Size = UDim2.fromScale(1, 1) }):Play()
+
+            task.spawn(function()
+                local steps = {
+                    { 0.5, "Memuat antarmuka..." },
+                    { 0.9, "Menyiapkan fitur..." },
+                    { 0.9, "Hampir selesai..." },
+                }
+                for _, s in ipairs(steps) do
+                    task.wait(s[1])
+                    if status and status.Parent then status.Text = s[2] end
+                end
+            end)
+
+            task.wait(2.4)
+
+            TweenService:Create(card,
+                TweenInfo.new(0.4, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
+                { Position = UDim2.fromScale(0.5, 0.47), BackgroundTransparency = 1 }):Play()
+            TweenService:Create(overlay, TweenInfo.new(0.4), { BackgroundTransparency = 1 }):Play()
+            TweenService:Create(blur, TweenInfo.new(0.4), { Size = 0 }):Play()
+            task.wait(0.42)
+
+            pcall(function() blur:Destroy() end)
+            pcall(function() SG:Destroy() end)
+        end)
+
+        -- Apapun yang terjadi (berhasil/gagal), buka menu utama.
+        if ZypheraxLib and ZypheraxLib._Reveal then
+            pcall(function() ZypheraxLib:_Reveal() end)
+        end
+    end)
+end
 
 
 -- State Variabel Form
@@ -6483,7 +6795,7 @@ local function execute_perfect_parry(killerModel, killerName, reason, dist)
         end)
     end
 
-    -- Hanya tampil kalau SKY_DEBUG = true, karena ini bisa sangat sering.
+    -- Hanya tampil kalau ZYPHERAX_DEBUG = true, karena ini bisa sangat sering.
     log("[AutoParry] PERFECT PARRY! Killer: %s | Jarak: %.1f studs | %s",
         tostring(killerName), dist or 0, reason)
 
@@ -9059,7 +9371,7 @@ SecWin:Toggle({
     Name = "Log Detail (Debug)",
     Default = false,
     Callback = function(enabled)
-        SKY_DEBUG = enabled
+        ZYPHERAX_DEBUG = enabled
         Window:Notify({
             Title = "Log Detail",
             Description = enabled
@@ -9076,7 +9388,7 @@ SecWin:Toggle({
 SecWin:Button({
     Name = "Salin Log Terakhir",
     Callback = function()
-        if not SKY_DEBUG then
+        if not ZYPHERAX_DEBUG then
             Window:Notify({
                 Title = "Log Kosong",
                 Description = "Nyalakan Log Detail (Debug) dulu supaya ada yang bisa disalin.",
@@ -9085,7 +9397,7 @@ SecWin:Button({
             return
         end
         pcall(function()
-            setclipboard(SKY_LOG_BUFFER)
+            setclipboard(ZYPHERAX_LOG_BUFFER)
         end)
         Window:Notify({
             Title = "Log Disalin",
@@ -9163,7 +9475,7 @@ Window:Notify({
     Lifetime = 4
 })
 
--- Hanya muncul kalau SKY_DEBUG = true
+-- Hanya muncul kalau ZYPHERAX_DEBUG = true
 log("Zypherax Hub (Violence District - 8 Tabs) berhasil dijalankan")
 end -- [End TabConfig]
 
@@ -9181,16 +9493,16 @@ infcharges_start = infinite_charges_start
 infcharges_stop = infinite_charges_stop
 
 -- Ekspor ke environment executor supaya bisa diakses dari konsol.
--- Contoh: SKY_DEBUG = true   -> nyalakan log detail
---         SKY_DEBUG = false  -> matikan lagi
+-- Contoh: ZYPHERAX_DEBUG = true   -> nyalakan log detail
+--         ZYPHERAX_DEBUG = false  -> matikan lagi
 --         cetakLog()         -> tampilkan log yang tersimpan di clipboard
 pcall(function()
     local env = (getgenv and getgenv()) or _G
-    env.SKY_DEBUG = SKY_DEBUG
-    env.SKY_LOG_BUFFER = SKY_LOG_BUFFER
-    env.SKY = {
-        setDebug = function(v) SKY_DEBUG = v end,
-        getLog   = function() return SKY_LOG_BUFFER end,
-        clearLog = function() SKY_LOG_BUFFER = "" end,
+    env.ZYPHERAX_DEBUG = ZYPHERAX_DEBUG
+    env.ZYPHERAX_LOG_BUFFER = ZYPHERAX_LOG_BUFFER
+    env.ZYPHERAX = {
+        setDebug = function(v) ZYPHERAX_DEBUG = v end,
+        getLog   = function() return ZYPHERAX_LOG_BUFFER end,
+        clearLog = function() ZYPHERAX_LOG_BUFFER = "" end,
     }
 end)
