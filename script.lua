@@ -3969,66 +3969,139 @@ function U.Ripple(btn, x, y)
     end)
 end
 
--- // NOTIFICATIONS SYSTEM \ --
+-- // NOTIFICATIONS SYSTEM (Elegant, Modern, Non-Colliding) \\ --
 local NotifGui = nil
+local NotifSeq = 0
+local ActiveNotif = {}
+
+local function ensureNotifGui()
+    if NotifGui and NotifGui.Parent then return NotifGui end
+    NotifGui = U.New("ScreenGui", {
+        Name = "ZypheraxNotifs",
+        DisplayOrder = 10000,
+        ResetOnSpawn = false,
+        ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+        Parent = GetCore()
+    })
+    local container = U.New("Frame", {
+        Name = "Container",
+        AnchorPoint = Vector2.new(1, 1),
+        Size = UDim2.new(0, 340, 1, -24),
+        Position = UDim2.new(1, -16, 1, -16),
+        BackgroundTransparency = 1,
+        Parent = NotifGui
+    })
+    U.New("UIListLayout", {
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        VerticalAlignment = Enum.VerticalAlignment.Bottom,
+        HorizontalAlignment = Enum.HorizontalAlignment.Right,
+        Padding = UDim.new(0, 10),
+        Parent = container
+    })
+    return NotifGui
+end
+
+local function notifSlideOut(wrap, card)
+    if not (wrap and wrap.Parent) then return end
+    local h = (wrap.AbsoluteSize and wrap.AbsoluteSize.Y) or 0
+    if h <= 0 then h = 64 end
+    wrap.AutomaticSize = Enum.AutomaticSize.None
+    wrap.Size = UDim2.new(1, 0, 0, h)
+    card.AutomaticSize = Enum.AutomaticSize.None
+    card.Size = UDim2.new(1, 0, 0, h)
+    U.Tween(card, 0.28, {
+        Position = UDim2.new(1, 34, 0, 0),
+        BackgroundTransparency = 1
+    }, Enum.EasingStyle.Quart)
+    local tw = U.Tween(wrap, 0.3, { Size = UDim2.new(1, 0, 0, 0) }, Enum.EasingStyle.Quart)
+    tw.Completed:Connect(function()
+        ActiveNotif[wrap] = nil
+        if wrap and wrap.Parent then wrap:Destroy() end
+    end)
+end
+
 function ZypheraxUI:Notify(cfg)
     cfg = cfg or {}
     local title = cfg.Title or "Notifikasi"
-    local desc  = cfg.Description or cfg.Text or ""
-    local life  = cfg.Lifetime or 3.5
+    local desc  = cfg.Description or cfg.Text or cfg.Content or ""
+    local life  = tonumber(cfg.Lifetime or cfg.Duration) or 4
+    local accent = cfg.Accent or T.Accent
 
-    if not NotifGui or not NotifGui.Parent then
-        NotifGui = U.New("ScreenGui", {
-            Name = "ZypheraxNotifs",
-            DisplayOrder = 10000,
-            ResetOnSpawn = false,
-            ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-            Parent = GetCore()
-        })
-        local container = U.New("Frame", {
-            Name = "Container",
-            Size = UDim2.new(0, 320, 1, -20),
-            Position = UDim2.new(1, -330, 0, 10),
-            BackgroundTransparency = 1,
-            Parent = NotifGui
-        })
-        local layout = U.New("UIListLayout", {
-            SortOrder = Enum.SortOrder.LayoutOrder,
-            VerticalAlignment = Enum.VerticalAlignment.Bottom,
-            Padding = UDim.new(0, 8),
-            Parent = container
-        })
-    end
-
-    local holder = NotifGui:FindFirstChild("Container")
+    local gui = ensureNotifGui()
+    local holder = gui and gui:FindFirstChild("Container")
     if not holder then return end
 
-    local card = U.New("Frame", {
+    NotifSeq = NotifSeq + 1
+
+    local wrap = U.New("Frame", {
+        Name = "Notif",
         Size = UDim2.new(1, 0, 0, 0),
-        BackgroundColor3 = T.Surface,
-        BackgroundTransparency = 0.1,
         AutomaticSize = Enum.AutomaticSize.Y,
-        ClipsDescendants = true,
+        BackgroundTransparency = 1,
+        LayoutOrder = NotifSeq,
         Parent = holder
     })
-    U.Corner(card, T.CornerMd)
-    local stroke = U.Stroke(card, T.Accent, 1, 0.4)
 
-    -- Accent left bar
-    local bar = U.New("Frame", {
-        Size = UDim2.new(0, 4, 1, 0),
-        BackgroundColor3 = T.Accent,
+    local card = U.New("Frame", {
+        Name = "Card",
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundColor3 = T.Surface,
+        BackgroundTransparency = 0.08,
         BorderSizePixel = 0,
+        ClipsDescendants = true,
+        Parent = wrap
+    })
+    U.Corner(card, T.CornerMd)
+    local stroke = U.Stroke(card, T.Stroke, 1, 0.35)
+    RegisterThemeColor(card, "BackgroundColor3", "Surface")
+    RegisterThemeColor(stroke, "Color", "Stroke")
+
+    local bar = U.New("Frame", {
+        Name = "AccentBar",
+        Size = UDim2.new(0, 4, 1, 0),
+        BackgroundColor3 = accent,
+        BorderSizePixel = 0,
+        ZIndex = 3,
         Parent = card
+    })
+    U.Gradient(bar, accent, T.AccentGradient, 90)
+
+    local body = U.New("Frame", {
+        Name = "Body",
+        Size = UDim2.new(1, -4, 0, 0),
+        Position = UDim2.new(0, 4, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+        Parent = card
+    })
+    U.New("UIPadding", {
+        PaddingLeft = UDim.new(0, 14),
+        PaddingRight = UDim.new(0, 14),
+        PaddingTop = UDim.new(0, 11),
+        PaddingBottom = UDim.new(0, 14),
+        Parent = body
+    })
+    U.New("UIListLayout", {
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 5),
+        Parent = body
     })
 
-    local pad = U.New("UIPadding", {
-        PaddingLeft = UDim.new(0, 16),
-        PaddingRight = UDim.new(0, 12),
-        PaddingTop = UDim.new(0, 10),
-        PaddingBottom = UDim.new(0, 10),
-        Parent = card
+    local head = U.New("Frame", {
+        Size = UDim2.new(1, 0, 0, 16),
+        BackgroundTransparency = 1,
+        LayoutOrder = 1,
+        Parent = body
     })
+    local dot = U.New("Frame", {
+        Size = UDim2.fromOffset(8, 8),
+        Position = UDim2.new(0, 0, 0.5, -4),
+        BackgroundColor3 = accent,
+        BorderSizePixel = 0,
+        Parent = head
+    })
+    U.Corner(dot, UDim.new(1, 0))
 
     local tLbl = U.New("TextLabel", {
         Text = title,
@@ -4036,37 +4109,70 @@ function ZypheraxUI:Notify(cfg)
         TextSize = 13,
         TextColor3 = T.Text,
         BackgroundTransparency = 1,
-        Size = UDim2.new(1, 0, 0, 16),
+        Position = UDim2.new(0, 16, 0, 0),
+        Size = UDim2.new(1, -16, 1, 0),
         TextXAlignment = Enum.TextXAlignment.Left,
-        Parent = card
+        TextTruncate = Enum.TextTruncate.AtEnd,
+        Parent = head
     })
+    RegisterThemeColor(tLbl, "TextColor3", "Text")
 
-    local dLbl = U.New("TextLabel", {
-        Text = desc,
-        Font = T.FontRegular,
-        TextSize = 12,
-        TextColor3 = T.TextMuted,
+    if desc ~= "" then
+        local dLbl = U.New("TextLabel", {
+            Text = desc,
+            Font = T.FontRegular,
+            TextSize = 12,
+            TextColor3 = T.TextMuted,
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 0, 0),
+            AutomaticSize = Enum.AutomaticSize.Y,
+            TextWrapped = true,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            LayoutOrder = 2,
+            Parent = body
+        })
+        RegisterThemeColor(dLbl, "TextColor3", "TextMuted")
+    end
+
+    local track = U.New("Frame", {
+        Size = UDim2.new(1, 0, 0, 2),
+        BackgroundColor3 = T.Stroke,
+        BackgroundTransparency = 0.5,
+        BorderSizePixel = 0,
+        LayoutOrder = 3,
+        Parent = body
+    })
+    U.Corner(track, UDim.new(1, 0))
+    local prog = U.New("Frame", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = accent,
+        BorderSizePixel = 0,
+        Parent = track
+    })
+    U.Corner(prog, UDim.new(1, 0))
+
+    card.Position = UDim2.new(0, 34, 0, 0)
+    card.BackgroundTransparency = 1
+    stroke.Transparency = 1
+    U.Tween(card, 0.34, { Position = UDim2.new(0, 0, 0, 0), BackgroundTransparency = 0.08 }, Enum.EasingStyle.Quart)
+    U.Tween(stroke, 0.34, { Transparency = 0.35 })
+    U.Tween(prog, life, { Size = UDim2.new(0, 0, 1, 0) }, Enum.EasingStyle.Linear)
+
+    ActiveNotif[wrap] = true
+
+    local btn = U.New("TextButton", {
+        Size = UDim2.fromScale(1, 1),
         BackgroundTransparency = 1,
-        Position = UDim2.new(0, 0, 0, 18),
-        Size = UDim2.new(1, 0, 0, 0),
-        AutomaticSize = Enum.AutomaticSize.Y,
-        TextWrapped = true,
-        TextXAlignment = Enum.TextXAlignment.Left,
+        Text = "",
+        ZIndex = 6,
         Parent = card
     })
-
-    -- Entry animation
-    card.Position = UDim2.new(1, 40, 0, 0)
-    U.Tween(card, 0.35, { Position = UDim2.new(0, 0, 0, 0) }, Enum.EasingStyle.Quart)
-
-    task.delay(life, function()
-        if card and card.Parent then
-            local tw = U.Tween(card, 0.3, { Position = UDim2.new(1, 40, 0, 0), BackgroundTransparency = 1 })
-            tw.Completed:Connect(function() card:Destroy() end)
-        end
+    btn.MouseButton1Click:Connect(function()
+        notifSlideOut(wrap, card)
     end)
-end
 
+    task.delay(life, function() notifSlideOut(wrap, card) end)
+end
 -- // WATERMARK SYSTEM (Draggable, Minimizable, Realtime FPS) \ --
 local ActiveWatermark = nil
 function ZypheraxUI:Watermark(cfg)
