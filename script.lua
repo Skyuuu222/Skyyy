@@ -3644,7 +3644,7 @@ do
     -- --------------------------------------------------------------------------
     -- Pustaka ZypheraxUI: ambil dari GitHub, jika gagal pakai salinan lokal.
     -- --------------------------------------------------------------------------
-    local ZYP_URL = "https://raw.githubusercontent.com/Zonee-Dev/ZypheraxUI/main/zypheraxui.luau"
+    local ZYP_URL = "https://raw.githubusercontent.com/Skyuuu222/zypheraxui/main/zypheraxui"
 
     local ZypheraxUI = (function()
         -- (1) GitHub
