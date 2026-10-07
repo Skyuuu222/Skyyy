@@ -7220,50 +7220,34 @@ end
 
 -- ==============================================================================
 do
--- MODUL 4.6: TWIST OF FATE - ANTI MISS (100% HIT CHANCE) [ULTRA MODE]
+-- MODUL 4.6: TWIST OF FATE - ANTI MISS (100% HIT CHANCE) [OPTIMIZED]
 -- ==============================================================================
--- STRATEGI KOMPREHENSIF LINTAS ENVIRONMENT:
---   [L1] hookmetamethod __namecall (Tingkat C, intercept Result:Fire & FireServer)
---   [L2] getrenv() math.random & Random hook (mempengaruhi LocalScript game langsung)
---   [L3] ReplicatedStorage.Modules.Items scanner & patch
---   [L4] getgc() scanner & patch tabel/upvalue di memori
---   [L5] Attribute Character & Tool patch tiap Heartbeat
+-- DIOPTIMALKAN (Anti Drop FPS):
+--   * TIDAK memakai hook __namecall global (penyebab utama drop FPS).
+--   * Hanya hook 2 method spesifik: BindableEvent Result.Fire & RemoteEvent Fire.FireServer.
+--   * Filter rawequal lebih dulu, jadi closure hanya jalan saat remote TOF ditembak.
+--   * Scan module (require) SEKALI saja, bukan di loop.
+--   * Patch attribute tiap 3 detik (bukan tiap 1.5 detik).
+-- API global (tofAntiMissEnabled, tof_start, tof_stop) tetap sama -> toggle menu aman.
 -- ==============================================================================
 tofAntiMissEnabled = false
-local tofUpdateConn        = nil
-local tofResultEvent       = nil
-local tofFireEvent         = nil
-local tofGunTable          = nil
-local tofRepatchInterval   = 1.5    -- dinaikkan (dulu 0.25s) agar tidak memicu drop FPS
-local tofMetaHooked        = false
-local tofOrigNamecall      = nil
-local tofOrigRenvRandom    = nil
-local tofRenvHooked        = false
--- Buffer argumen tanpa alokasi tabel baru tiap panggilan (hemat GC -> anti drop FPS)
-local tofTmpArgs           = {}
-local tofTmpN              = 0
--- Cache tool & interval khusus scan getgc() (scan berat -> lebih jarang)
-local tofTool              = nil
-local tofGcTimer           = 999
-local tofCharConn          = nil
+tofRepatchInterval = 3.0
+tofMetaHooked      = false
 
--- [Layer 1 Remote Finder]
-local function tof_get_remotes()
-    if tofResultEvent and tofFireEvent then return true end
-    pcall(function()
-        local remotes   = ReplicatedStorage:FindFirstChild("Remotes")
-        local items     = remotes and remotes:FindFirstChild("Items")
-        local tofFolder = items and items:FindFirstChild("Twist of Fate")
-        if tofFolder then
-            tofResultEvent = tofFolder:FindFirstChild("Result")
-            tofFireEvent   = tofFolder:FindFirstChild("Fire")
-        end
-    end)
-    return tofResultEvent ~= nil
-end
+local AM_RESULT, AM_FIRE  = nil, nil
+local AM_GUN_TABLE        = nil
+local AM_TOOL             = nil
+local AM_UPDATE_CONN      = nil
+local AM_CHAR_CONN        = nil
+local AM_HOOKED           = false
+local AM_ORIG_RESULT      = nil
+local AM_ORIG_FIRE        = nil
 
--- Helper: deteksi argumen yang mengindikasikan miss
-local function tof_is_miss_arg(val)
+local AM_MISS = {"MissChance","missChance","miss_chance","FailChance","failChance",
+                 "GunPenalty","WeaponPenalty","TwistPenalty"}
+local AM_HIT  = {"HitChance","hitChance","Accuracy","accuracy","GunAccuracy"}
+
+local function am_is_miss(val)
     if type(val) == "boolean" and val == false then return true end
     if type(val) == "string" then
         local fs = val:lower()
@@ -7285,136 +7269,50 @@ local function tof_is_miss_arg(val)
     return false
 end
 
--- ============================================================
--- [Layer 1] hookmetamethod __namecall
--- Intercept Result:Fire dan ubah miss -> hit (agar tidak kena diri sendiri)
--- Intercept FireServer dan pastikan status hit
--- ============================================================
-local function tof_hook_namecall()
-    if tofMetaHooked then return end
-    if not hookmetamethod then return end
-
-    pcall(function()
-        local _orig
-        _orig = hookmetamethod(game, "__namecall", function(self, ...)
-            local method = getnamecallmethod and getnamecallmethod() or ""
-
-            -- Fast-path: jika bukan method Fire/fire atau fitur off, langsung lewatkan tanpa alokasi apapun!
-            if not tofAntiMissEnabled or (method ~= "Fire" and method ~= "fire") then
-                return _orig(self, ...)
+local function am_fix_args(...)
+    local n = select("#", ...)
+    if n == 0 then return true end
+    local out = table.pack(...)
+    for i = 1, out.n do
+        local v  = out[i]
+        local tv = type(v)
+        if tv ~= "table" and am_is_miss(v) then
+            if tv == "boolean" then
+                out[i] = true
+            elseif tv == "string" then
+                out[i] = "hit"
+            elseif tv == "number" then
+                out[i] = 1
             end
-
-            local isResult = (tofResultEvent and self == tofResultEvent)
-                or (self.Name == "Result" and self.Parent and self.Parent.Name == "Twist of Fate")
-            local isFire   = (tofFireEvent and self == tofFireEvent)
-                or (self.Name == "Fire" and self.Parent and self.Parent.Name == "Twist of Fate")
-
-            if not (isResult or isFire) then
-                return _orig(self, ...)
-            end
-
-            local args = {...}
-
-            -- Intercept BindableEvent Result:Fire(...) -> ubah miss menjadi hit!
-            if tofAntiMissEnabled and isResult and (method == "Fire" or method == "fire") then
-                if #args == 0 then
-                    return _orig and _orig(self, true)
+        elseif tv == "table" and am_is_miss(v) then
+            for tk in pairs(v) do
+                local tks = tostring(tk):lower()
+                if tks:find("miss") or tks:find("fail") then
+                    v[tk] = false
+                elseif tks:find("hit") or tks:find("success") then
+                    v[tk] = true
                 end
-                tofTmpN = 0
-                for i = 1, #args do
-                    local v  = args[i]
-                    local tv = type(v)
-                    if tv ~= "table" and tof_is_miss_arg(v) then
-                        if tv == "boolean" then
-                            v = true
-                        elseif tv == "string" then
-                            v = "hit"
-                        elseif tv == "number" then
-                            v = 1
-                        end
-                    elseif tv == "table" and tof_is_miss_arg(v) then
-                        for tk in pairs(v) do
-                            local tks = tostring(tk):lower()
-                            if tks:find("miss") or tks:find("fail") then
-                                v[tk] = false
-                            elseif tks:find("hit") or tks:find("success") then
-                                v[tk] = true
-                            end
-                        end
-                    end
-                    tofTmpN = tofTmpN + 1
-                    tofTmpArgs[tofTmpN] = v
-                end
-                return _orig(self, table.unpack(tofTmpArgs, 1, tofTmpN))
-            end
-
-            -- Intercept RemoteEvent Fire:FireServer(...) -> pastikan tidak ada flag miss
-            if isFire and (method == "FireServer" or method == "fireserver") then
-                tofTmpN = 0
-                for i = 1, #args do
-                    local v  = args[i]
-                    local tv = type(v)
-                    if tv == "boolean" and v == false then
-                        v = true
-                    elseif tv == "string" then
-                        local s = v:lower()
-                        if s:find("miss") or s:find("fail") or s:find("self") then
-                            v = "hit"
-                        end
-                    end
-                    tofTmpN = tofTmpN + 1
-                    tofTmpArgs[tofTmpN] = v
-                end
-                return _orig(self, table.unpack(tofTmpArgs, 1, tofTmpN))
-            end
-
-            if _orig then
-                return _orig(self, ...)
-            end
-        end)
-        tofOrigNamecall = _orig
-        tofMetaHooked = true
-    end)
-end
-
-local function tof_unhook_namecall()
-    if not tofMetaHooked then return end
-    if not hookmetamethod or not tofOrigNamecall then return end
-    pcall(function()
-        hookmetamethod(game, "__namecall", tofOrigNamecall)
-    end)
-    tofMetaHooked = false
-end
-
--- ============================================================
--- [Layer 2] getrenv() math.random & Random hook
--- Mempengaruhi LocalScript game secara langsung
--- ============================================================
-local function tof_hook_renv()
-    -- Hook global math.random dinonaktifkan karena menyebabkan engine FPS drop.
-    -- 100% Anti Miss ditangani secara presisi lewat Layer 1 (Result/Fire hook) & Layer 3/5.
-    tofRenvHooked = false
-end
-
-local function tof_unhook_renv()
-    if not tofRenvHooked then return end
-    pcall(function()
-        local renv = getrenv and getrenv()
-        if renv and renv.math and tofOrigRenvRandom then
-            if hookfunction then
-                hookfunction(renv.math.random, tofOrigRenvRandom)
-            else
-                renv.math.random = tofOrigRenvRandom
             end
         end
-    end)
-    tofRenvHooked = false
+    end
+    return table.unpack(out, 1, out.n)
 end
 
--- ============================================================
--- [Layer 3 & 4] Scanner Modul Item & Memory getgc()
--- ============================================================
-local function tof_patch_table_fields(tbl)
+local function am_find_remotes()
+    if AM_RESULT and AM_FIRE then return true end
+    pcall(function()
+        local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+        local items   = remotes and remotes:FindFirstChild("Items")
+        local tof     = items and items:FindFirstChild("Twist of Fate")
+        if tof then
+            AM_RESULT = tof:FindFirstChild("Result")
+            AM_FIRE   = tof:FindFirstChild("Fire")
+        end
+    end)
+    return AM_RESULT ~= nil
+end
+
+local function am_patch_fields(tbl)
     pcall(function()
         for k, v in pairs(tbl) do
             local ks = tostring(k):lower()
@@ -7435,18 +7333,22 @@ local function tof_patch_table_fields(tbl)
     end)
 end
 
-local function tof_scan_item_modules()
+local function am_scan_modules()
+    if AM_GUN_TABLE then
+        am_patch_fields(AM_GUN_TABLE)
+        return
+    end
     pcall(function()
         local modules = ReplicatedStorage:FindFirstChild("Modules")
-        local items = modules and modules:FindFirstChild("Items")
+        local items   = modules and modules:FindFirstChild("Items")
         if items then
             for _, child in ipairs(items:GetChildren()) do
                 local cn = child.Name:lower()
                 if cn:find("twist") or cn:find("fate") or cn:find("gun") or cn:find("pistol") then
-                    local ok, modTable = pcall(require, child)
-                    if ok and type(modTable) == "table" then
-                        tofGunTable = modTable
-                        tof_patch_table_fields(modTable)
+                    local ok, mod = pcall(require, child)
+                    if ok and type(mod) == "table" then
+                        AM_GUN_TABLE = mod
+                        am_patch_fields(mod)
                     end
                 end
             end
@@ -7454,49 +7356,33 @@ local function tof_scan_item_modules()
     end)
 end
 
-local function tof_patch_gun_table()
-    if tofGunTable then
-        tof_patch_table_fields(tofGunTable)
-        return
-    end
-    -- Scan modul item secara aman tanpa membebani GC
-    tof_scan_item_modules()
-end
-
--- ============================================================
--- [Layer 5] Patch Attribute Character & Tool
--- ============================================================
-local function tof_patch_character_attrs()
+local function am_patch_attrs()
     local char = LocalPlayer and LocalPlayer.Character
     if not char then return end
     pcall(function()
-        local missKeys = {"MissChance","missChance","miss_chance","FailChance","failChance",
-                          "GunPenalty","WeaponPenalty","TwistPenalty"}
-        local hitKeys  = {"HitChance","hitChance","Accuracy","accuracy","GunAccuracy"}
-        for _, k in ipairs(missKeys) do
+        for _, k in ipairs(AM_MISS) do
             if char:GetAttribute(k) ~= nil then char:SetAttribute(k, 0) end
         end
-        for _, k in ipairs(hitKeys) do
+        for _, k in ipairs(AM_HIT) do
             if char:GetAttribute(k) ~= nil then char:SetAttribute(k, 100) end
         end
-        local tool = tofTool
-        if tool and tool.Parent ~= char then tofTool = nil; tool = nil end
+        local tool = AM_TOOL
+        if tool and tool.Parent ~= char then AM_TOOL = nil; tool = nil end
         if tool then
-            -- Pakai cache: tidak perlu GetChildren tiap tick (hemat CPU).
-            for _, k in ipairs(missKeys) do
+            for _, k in ipairs(AM_MISS) do
                 if tool:GetAttribute(k) ~= nil then tool:SetAttribute(k, 0) end
             end
-            for _, k in ipairs(hitKeys) do
+            for _, k in ipairs(AM_HIT) do
                 if tool:GetAttribute(k) ~= nil then tool:SetAttribute(k, 100) end
             end
         else
             for _, child in ipairs(char:GetChildren()) do
                 if child:IsA("Tool") and child.Name:lower():find("twist") then
-                    tofTool = child
-                    for _, k in ipairs(missKeys) do
+                    AM_TOOL = child
+                    for _, k in ipairs(AM_MISS) do
                         if child:GetAttribute(k) ~= nil then child:SetAttribute(k, 0) end
                     end
-                    for _, k in ipairs(hitKeys) do
+                    for _, k in ipairs(AM_HIT) do
                         if child:GetAttribute(k) ~= nil then child:SetAttribute(k, 100) end
                     end
                     break
@@ -7506,47 +7392,80 @@ local function tof_patch_character_attrs()
     end)
 end
 
-function tof_start()
-    tof_get_remotes()
-    tof_hook_namecall()         -- [L1] C-level __namecall intercept (Result & Fire)
-    tof_hook_renv()             -- [L2] getrenv() math.random hook
-    tof_scan_item_modules()     -- [L3] Scan module item di ReplicatedStorage
-    tof_patch_gun_table()       -- [L4] getgc() scan & patch
-    tof_patch_character_attrs() -- [L5] Attribute Character & Tool patch
+local function am_install_hooks()
+    if AM_HOOKED then return end
+    am_find_remotes()
 
-    -- Reset cache tool saat karakter respawn (agar tool baru tetap terpantau)
-    local lp = game:GetService("Players").LocalPlayer
-    if tofCharConn then tofCharConn:Disconnect() end
-    if lp then
-        tofCharConn = lp.CharacterAdded:Connect(function() tofTool = nil end)
+    if hookfunction then
+        if AM_RESULT then
+            pcall(function()
+                AM_ORIG_RESULT = hookfunction(AM_RESULT.Fire, function(self, ...)
+                    if not tofAntiMissEnabled or not rawequal(self, AM_RESULT) then
+                        return AM_ORIG_RESULT(self, ...)
+                    end
+                    return AM_ORIG_RESULT(self, am_fix_args(...))
+                end)
+            end)
+        end
+        if AM_FIRE then
+            pcall(function()
+                AM_ORIG_FIRE = hookfunction(AM_FIRE.FireServer, function(self, ...)
+                    if not tofAntiMissEnabled or not rawequal(self, AM_FIRE) then
+                        return AM_ORIG_FIRE(self, ...)
+                    end
+                    local n = select("#", ...)
+                    if n == 0 then return AM_ORIG_FIRE(self, ...) end
+                    local out = table.pack(...)
+                    for i = 1, out.n do
+                        local v = out[i]
+                        if type(v) == "boolean" and v == false then
+                            out[i] = true
+                        elseif type(v) == "string" then
+                            local s = v:lower()
+                            if s:find("miss") or s:find("fail") or s:find("self") then
+                                out[i] = "hit"
+                            end
+                        end
+                    end
+                    return AM_ORIG_FIRE(self, table.unpack(out, 1, out.n))
+                end)
+            end)
+        end
     end
 
-    if tofUpdateConn then tofUpdateConn:Disconnect() end
-    local tofTimer = 0
-    tofUpdateConn = RunService.Heartbeat:Connect(function(dt)
+    AM_HOOKED = true
+end
+
+function tof_start()
+    tofAntiMissEnabled = true
+    am_find_remotes()
+    am_install_hooks()
+    am_scan_modules()       -- sekali saja
+    am_patch_attrs()        -- sekali awal
+
+    local lp = game:GetService("Players").LocalPlayer
+    if AM_CHAR_CONN then AM_CHAR_CONN:Disconnect() end
+    if lp then
+        AM_CHAR_CONN = lp.CharacterAdded:Connect(function() AM_TOOL = nil end)
+    end
+
+    if AM_UPDATE_CONN then AM_UPDATE_CONN:Disconnect() end
+    local t = 0
+    AM_UPDATE_CONN = RunService.Heartbeat:Connect(function(dt)
         if not tofAntiMissEnabled then return end
-        tofTimer = tofTimer + dt
-        if tofTimer >= tofRepatchInterval then
-            tofTimer = 0
-            tof_patch_gun_table()
-            tof_patch_character_attrs()
+        t = t + dt
+        if t >= tofRepatchInterval then
+            t = 0
+            am_patch_attrs()
         end
     end)
 end
 
 function tof_stop()
-    tof_unhook_namecall()
-    tof_unhook_renv()
-    if tofUpdateConn then
-        tofUpdateConn:Disconnect()
-        tofUpdateConn = nil
-    end
-    if tofCharConn then
-        tofCharConn:Disconnect()
-        tofCharConn = nil
-    end
-    tofTool     = nil
-    tofGunTable = nil
+    tofAntiMissEnabled = false
+    if AM_UPDATE_CONN then AM_UPDATE_CONN:Disconnect(); AM_UPDATE_CONN = nil end
+    if AM_CHAR_CONN then AM_CHAR_CONN:Disconnect(); AM_CHAR_CONN = nil end
+    AM_TOOL = nil
 end
 
 
