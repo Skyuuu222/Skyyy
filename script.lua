@@ -2077,9 +2077,13 @@ function is_exit_gate_lever(obj)
     if not obj then return false end
     local name = obj.Name:lower()
     
-    -- Cocokkan nama part / model lever spesifik Violence District
-    if name == "exitlever" or name == "exit_lever" or name == "lever" or name:find("gatelever") 
-        or name:find("exitlever") or name:find("gate_lever") or name == "gateswitch" or name == "exitswitch" then
+    -- Hanya cocokkan nama model/part ExitLever yang benar-benar milik Exit Gate
+    if name == "exitlever" or name == "exit_lever" or name:find("gatelever") or name:find("gate_lever") then
+        return true
+    end
+    
+    local pName = obj.Parent and obj.Parent.Name:lower() or ""
+    if (name == "lever" or name == "main") and (pName == "exitlever" or pName:find("gate") or pName:find("exit")) then
         return true
     end
     
@@ -2794,13 +2798,14 @@ local function fire_escape_reward_remotes()
             end
         end
 
+        -- Remote reward aman
         local itemsF = remotes:FindFirstChild("Items")
         if itemsF then
             local gateF = itemsF:FindFirstChild("Gate")
             if gateF then
                 local gateRemote = gateF:FindFirstChild("gate")
                 if gateRemote and gateRemote:IsA("RemoteEvent") then
-                    pcall(function() gateRemote:FireServer("Escaped") end)
+                    pcall(function() gateRemote:FireServer() end)
                 end
             end
         end
@@ -2917,12 +2922,16 @@ function trigger_instant_escape()
         -- bukan dari gerbang lain di map (terbukti lever Rooftop tidak bekerja).
         -- ======================================================================
         local function touchAll()
-            if currentHrp and firetouchinterest then
+            -- Sentuh secara aman tanpa spam firetouchinterest yang bisa meng-crash executor
+            if currentHrp and currentHrp.Parent then
                 for _, zp in ipairs(zoneParts) do
-                    if zp and zp.Parent then
+                    if zp and zp.Parent and zp:IsA("BasePart") then
                         pcall(function()
-                            firetouchinterest(currentHrp, zp, 0)
-                            firetouchinterest(currentHrp, zp, 1)
+                            if firetouchinterest and zp.CanTouch and currentHrp.CanTouch then
+                                firetouchinterest(currentHrp, zp, 0)
+                                task.wait()
+                                firetouchinterest(currentHrp, zp, 1)
+                            end
                         end)
                     end
                 end
@@ -3832,20 +3841,54 @@ local function RegisterThemeColor(obj, prop, themeKey)
     pcall(function() obj[prop] = T[themeKey] end)
 end
 
+local ActiveWindows = {}
+
 function ZypheraxUI:SetTheme(themeName)
     local preset = Themes[themeName]
     if not preset then return end
     ZypheraxUI.CurrentThemeName = themeName
     for k, v in pairs(preset) do T[k] = v end
+
+    -- (A) Update all registered theme subscribers
     for _, item in ipairs(ThemeSubscribers) do
         if item.obj and item.obj.Parent and T[item.key] then
             pcall(function()
-                TweenService:Create(item.obj, TweenInfo.new(0.25, Enum.EasingStyle.Quad), {
+                TweenService:Create(item.obj, TweenInfo.new(0.22, Enum.EasingStyle.Quad), {
                     [item.prop] = T[item.key]
                 }):Play()
             end)
         end
     end
+
+    -- (B) Comprehensive scan on all active UI windows to guarantee text color matches theme
+    local isLight = (themeName == "Light")
+    pcall(function()
+        for _, winObj in ipairs(ActiveWindows) do
+            if winObj and winObj._gui and winObj._gui.Parent then
+                for _, desc in ipairs(winObj._gui:GetDescendants()) do
+                    if desc:IsA("TextLabel") or desc:IsA("TextButton") or desc:IsA("TextBox") then
+                        -- Check if element has explicit theme tag or determine by brightness
+                        local curColor = desc.TextColor3
+                        if isLight then
+                            -- On Light theme, all bright text must turn to dark text
+                            if (curColor.R + curColor.G + curColor.B) > 1.8 then
+                                TweenService:Create(desc, TweenInfo.new(0.22, Enum.EasingStyle.Quad), {
+                                    TextColor3 = preset.Text
+                                }):Play()
+                            end
+                        else
+                            -- On Dark themes, any dark text must turn back to bright text
+                            if (curColor.R + curColor.G + curColor.B) < 0.9 then
+                                TweenService:Create(desc, TweenInfo.new(0.22, Enum.EasingStyle.Quad), {
+                                    TextColor3 = preset.Text
+                                }):Play()
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
 end
 
 function ZypheraxUI:GetThemes()
@@ -4090,7 +4133,8 @@ function ZypheraxUI:CreateWindow(config)
     RegisterThemeColor(mainStroke, "Color", "Stroke")
 
     -- Window Object
-    local Win = { Tabs = {}, Pages = {}, _currentTab = nil, _connections = connections }
+    local Win = { Tabs = {}, Pages = {}, _currentTab = nil, _connections = connections, _gui = gui }
+    table.insert(ActiveWindows, Win)
 
     -- // SIDEBAR \ --
     local SIDEBAR_W = 168
@@ -4408,6 +4452,7 @@ function ZypheraxUI:CreateWindow(config)
             ZIndex = 5,
             Parent = tabBtn
         })
+        RegisterThemeColor(tabLbl, "TextColor3", "TextMuted")
 
         -- Double Column Container for this Tab
         local pageFrame = U.New("Frame", {
@@ -7254,16 +7299,21 @@ local function tof_hook_namecall()
         _orig = hookmetamethod(game, "__namecall", function(self, ...)
             local method = getnamecallmethod and getnamecallmethod() or ""
 
-            if not tofAntiMissEnabled then
+            -- Fast-path: jika bukan method Fire/fire atau fitur off, langsung lewatkan tanpa alokasi apapun!
+            if not tofAntiMissEnabled or (method ~= "Fire" and method ~= "fire") then
                 return _orig(self, ...)
             end
-
-            local args = {...}
 
             local isResult = (tofResultEvent and self == tofResultEvent)
                 or (self.Name == "Result" and self.Parent and self.Parent.Name == "Twist of Fate")
             local isFire   = (tofFireEvent and self == tofFireEvent)
                 or (self.Name == "Fire" and self.Parent and self.Parent.Name == "Twist of Fate")
+
+            if not (isResult or isFire) then
+                return _orig(self, ...)
+            end
+
+            local args = {...}
 
             -- Intercept BindableEvent Result:Fire(...) -> ubah miss menjadi hit!
             if tofAntiMissEnabled and isResult and (method == "Fire" or method == "fire") then
@@ -7341,38 +7391,9 @@ end
 -- Mempengaruhi LocalScript game secara langsung
 -- ============================================================
 local function tof_hook_renv()
-    if tofRenvHooked then return end
-    pcall(function()
-        local renv = getrenv and getrenv()
-        if not renv then return end
-
-        if renv.math and renv.math.random then
-            tofOrigRenvRandom = renv.math.random
-            local safeRandom = function(...)
-                if not tofAntiMissEnabled then
-                    return tofOrigRenvRandom(...)
-                end
-                local n = select("#", ...)
-                if n == 0 then
-                    return 0.999999
-                elseif n == 1 then
-                    local m = select(1, ...)
-                    if type(m) == "number" then return m end
-                elseif n >= 2 then
-                    local _, maxVal = select(1, ...), select(2, ...)
-                    if type(maxVal) == "number" then return maxVal end
-                end
-                return tofOrigRenvRandom(...)
-            end
-
-            if hookfunction then
-                hookfunction(renv.math.random, safeRandom)
-            else
-                renv.math.random = safeRandom
-            end
-            tofRenvHooked = true
-        end
-    end)
+    -- Hook global math.random dinonaktifkan karena menyebabkan engine FPS drop.
+    -- 100% Anti Miss ditangani secara presisi lewat Layer 1 (Result/Fire hook) & Layer 3/5.
+    tofRenvHooked = false
 end
 
 local function tof_unhook_renv()
@@ -7438,31 +7459,8 @@ local function tof_patch_gun_table()
         tof_patch_table_fields(tofGunTable)
         return
     end
+    -- Scan modul item secara aman tanpa membebani GC
     tof_scan_item_modules()
-    if tofGunTable then return end
-
-    if not getgc then return end
-    -- Scan getgc() berat -> jalankan hanya tiap ~5 detik (fungsi tetap sama).
-    tofGcTimer = tofGcTimer + tofRepatchInterval
-    if tofGcTimer < 5 then return end
-    tofGcTimer = 0
-    pcall(function()
-        for _, v in pairs(getgc(true)) do
-            if type(v) == "table" then
-                local hasMiss  = rawget(v,"missChance") or rawget(v,"MissChance")
-                    or rawget(v,"miss_chance") or rawget(v,"failChance") or rawget(v,"misschance")
-                local hasShoot = rawget(v,"Shoot") or rawget(v,"shoot")
-                    or rawget(v,"Fire") or rawget(v,"CanFire") or rawget(v,"canFire")
-                local hasAmmo  = rawget(v,"ammo") or rawget(v,"Ammo")
-                    or rawget(v,"BulletCount") or rawget(v,"bulletCount") or rawget(v,"Bullets")
-                if hasMiss or (hasShoot and hasAmmo) then
-                    tofGunTable = v
-                    tof_patch_table_fields(v)
-                    return
-                end
-            end
-        end
-    end)
 end
 
 -- ============================================================
@@ -8153,7 +8151,7 @@ local function esp_setup_gen(gen)
         bbg.Adornee = part
         bbg.AlwaysOnTop = true
         bbg.Size = UDim2.new(0, 100, 0, 26)
-        bbg.StudsOffset = Vector3.new(0, 3.0, 0)
+        bbg.StudsOffset = Vector3.new(0, 6.0, 0)
         bbg.ResetOnSpawn = false
 
         pctLbl = Instance.new("TextLabel")
