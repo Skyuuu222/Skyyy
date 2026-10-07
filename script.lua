@@ -3644,23 +3644,41 @@ end
 -- ==============================================================================
 do
     -- --------------------------------------------------------------------------
-    -- Pustaka ZypheraxUI.
-    --   1) Diambil dari GitHub (sesuai permintaan).
-    --   2) Bila gagal (HTTP error / diblokir), pakai salinan lokal di bawah.
+    -- Patch kompatibilitas: Roblox TIDAK bisa men-tween property bertipe Enum
+    -- (mis. Font). ZypheraxUI meng-tween Font saat mengaktifkan tab, sehingga
+    -- error "Unable to cast value to Object" muncul dan UI berhenti (kosong).
+    -- Kita sanitasi property Enum di U.Tween: langsung di-set, tanpa di-tween.
     -- --------------------------------------------------------------------------
+    local NEEDLE = "local tw = TweenService:Create(obj, TweenInfo.new(t, style, dir), props)"
+    local INJECT = "do local __c = {} for __k, __v in pairs(props or {}) do if typeof(__v) == \"EnumItem\" then pcall(function() obj[__k] = __v end) else __c[__k] = __v end end props = __c end\n        " .. NEEDLE
+
+    local function _zy_patch(src)
+        if type(src) ~= "string" then return src end
+        local at = src:find(NEEDLE, 1, true)
+        if at then
+            src = src:sub(1, at - 1) .. INJECT .. src:sub(at + #NEEDLE)
+        end
+        return src
+    end
+
+    -- --------------------------------------------------------------------------
+    -- Pustaka ZypheraxUI: ambil dari GitHub, jika gagal pakai salinan lokal.
+    -- --------------------------------------------------------------------------
+    local ZYP_URL = "https://raw.githubusercontent.com/Zonee-Dev/ZypheraxUI/main/zypheraxui.luau"
+
     local ZypheraxUI = (function()
-        local ZYP_URL = "https://raw.githubusercontent.com/Zonee-Dev/ZypheraxUI/main/zypheraxui.luau"
+        -- (1) GitHub
         local ok, res = pcall(function()
-            local src = game:HttpGet(ZYP_URL)
+            local src = _zy_patch(game:HttpGet(ZYP_URL))
             local fn = loadstring(src)
             if not fn then error("loadstring gagal") end
             return fn()
         end)
         if ok and type(res) == "table" then return res end
-        warn("[Zypherax Hub] Gagal memuat ZypheraxUI dari GitHub, memakai salinan lokal. " .. tostring(res))
+        warn("[Zypherax Hub] Gagal memuat dari GitHub, memakai salinan lokal. " .. tostring(res))
 
-        -- --- Salinan lokal (cadangan) ---
-        local LocalCopy = (function()
+        -- (2) Salinan lokal (cadangan)
+        return (function()
 local ZypheraxUI = {}
 ZypheraxUI.Version = "Enterprise 3.0.0"
 ZypheraxUI.Flags = {}
@@ -3749,6 +3767,7 @@ local U = {} do
     function U.Tween(obj, t, props, style, dir)
         style = style or Enum.EasingStyle.Quint
         dir   = dir   or Enum.EasingDirection.Out
+        do local __c = {} for __k, __v in pairs(props or {}) do if typeof(__v) == "EnumItem" then pcall(function() obj[__k] = __v end) else __c[__k] = __v end end props = __c end
         local tw = TweenService:Create(obj, TweenInfo.new(t, style, dir), props)
         tw:Play()
         return tw
@@ -5714,7 +5733,6 @@ end
 
 return ZypheraxUI
         end)()
-        return LocalCopy
     end)()
 
     if type(ZypheraxUI) ~= "table" then
