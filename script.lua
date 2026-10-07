@@ -4340,21 +4340,72 @@ local IGNORED_LOOP_NAMES = {
 local cachedParryClient = nil
 local cachedParryRemote = nil
 
+-- Lapis 1: cari instance ParryClient yang SUDAH dipegang game lewat GC.
+-- (Dulu langsung dipakai; sekarang jadi lapis pertama saja.)
+local parry_gc_scan
+parry_gc_scan = function()
+    if not getgc then return nil end
+    local found = nil
+    pcall(function()
+        for _, v in pairs(getgc(true)) do
+            if type(v) == "table" and rawget(v, "Parry") and rawget(v, "isParryOnCooldown") ~= nil then
+                found = v
+                return
+            end
+        end
+    end)
+    return found
+end
+
+-- Lapis 2 (FIX): kalau GC-scan gagal, buat sendiri instance ParryClient dari module.
+-- Ini yang membuat ANIMASI parry muncul & cooldown (isParryOnCooldown) terisi.
+-- Tanpa ini, blob hanya kirim remote dan tidak memicu animasi/cooldown.
+local parry_module_scan
+parry_module_scan = function()
+    local ok, res = pcall(function()
+        local modules = ReplicatedStorage:WaitForChild("Modules", 3)
+        local items = modules and modules:WaitForChild("Items", 3)
+        local mod = items and items:WaitForChild("ParryClient", 3)
+        if not mod then return nil end
+
+        local ParryClient = require(mod)
+        if type(ParryClient) ~= "table" or type(ParryClient.new) ~= "function" then return nil end
+
+        -- Ambil tool dagger yang sedang dipegang (jika ada) agar skin tidak rusak.
+        local char = LocalPlayer and LocalPlayer.Character
+        local tool = char
+        pcall(function()
+            if char then
+                local daggerModel = char:FindFirstChild("Parrying Dagger")
+                if daggerModel then
+                    local leftArm = daggerModel:FindFirstChild("Left Arm")
+                    local part = leftArm and leftArm:FindFirstChild("Parry Dagger")
+                    tool = part or (daggerModel:FindFirstChildOfClass("Model")) or daggerModel
+                end
+            end
+        end)
+
+        return ParryClient.new({
+            animationId  = 109133187196613,
+            lockDuration = 0.8,
+            tool         = tool or nil
+        })
+    end)
+    if ok and type(res) == "table" then return res end
+    return nil
+end
+
 local function get_parry_instance()
     if cachedParryClient and cachedParryClient.Parry then
         return cachedParryClient
     end
 
-    -- Cari instance ParryClient yang SUDAH DIBUAT oleh game (agar model skin dagger tidak hilang/reset)
-    if getgc then
-        pcall(function()
-            for _, v in pairs(getgc(true)) do
-                if type(v) == "table" and rawget(v, "Parry") and rawget(v, "isParryOnCooldown") ~= nil then
-                    cachedParryClient = v
-                    return
-                end
-            end
-        end)
+    -- Lapis 1: instance GC milik game
+    cachedParryClient = parry_gc_scan()
+
+    -- Lapis 2: bikin sendiri dari module
+    if not cachedParryClient then
+        cachedParryClient = parry_module_scan()
     end
 
     return cachedParryClient
