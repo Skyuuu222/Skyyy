@@ -1836,8 +1836,11 @@ function killerradar_start()
     killerRadarCircle = rc
     if killerRadarConn then killerRadarConn:Disconnect() end
     local _lastRadarTick = 0
-    killerRadarConn = RunService.RenderStepped:Connect(function()
+    killerRadarConn = RunService.RenderStepped:Connect(function(dt)
         if not killerRadarEnabled then return end
+        _lastRadarTick = _lastRadarTick + dt
+        if _lastRadarTick < 0.05 then return end -- Throttled to 20 FPS untuk menghemat CPU
+        _lastRadarTick = 0
         local now = tick()
         if now - _lastRadarTick < 0.033 then return end -- ~30 FPS stabil
         _lastRadarTick = now
@@ -2768,96 +2771,36 @@ end
 
 -- BYPASS AUTO ESCAPE ENGINE (TAILOR-MADE UNTUK VIOLENCE DISTRICT)
 -- Helper: Fire semua remote reward (EXP, Screw, Sin, Gears) seperti escape normal
+-- Helper: Fire remote reward escape secara aman (Mencegah kick / freeze / foreclose)
 local function fire_escape_reward_remotes()
     pcall(function()
-        -- Scan SEMUA remote di ReplicatedStorage untuk mencari yang berkaitan dengan round win/escape reward
-        local function fireRewardRemote(r, ...)
-            local args = {...}
-            if r:IsA("RemoteEvent") then
-                pcall(function() r:FireServer(table.unpack(args)) end)
-            elseif r:IsA("RemoteFunction") then
-                pcall(function() r:InvokeServer(table.unpack(args)) end)
-            end
-        end
-
-        for _, r in ipairs(ReplicatedStorage:GetDescendants()) do
-            local rn = r.Name:lower()
-            -- Remote khusus reward/win round
-            if rn:find("escape") or rn:find("survived") or rn:find("winround") or rn:find("win_round")
-                or rn:find("roundwin") or rn:find("matchend") or rn:find("match_end")
-                or rn:find("giveexp") or rn:find("give_exp") or rn:find("givereward")
-                or rn:find("addexp") or rn:find("addxp") or rn:find("addscrews")
-                or rn:find("addcurrency") or rn:find("roundover") or rn:find("gameend")
-                or rn == "reward" or rn == "win" or rn == "complete" or rn == "finish" then
-                fireRewardRemote(r)
-                fireRewardRemote(r, true)
-                fireRewardRemote(r, "Escaped")
-                fireRewardRemote(r, LocalPlayer)
-                fireRewardRemote(r, true, "Escaped")
-            end
-        end
-
-        -- Fire khusus remote Violence District yang sudah diketahui
         local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-        if remotes then
-            -- Round / Match folder
-            local roundF = remotes:FindFirstChild("Round") or remotes:FindFirstChild("Match")
-            if roundF then
-                for _, r in ipairs(roundF:GetDescendants()) do
-                    if r:IsA("RemoteEvent") or r:IsA("RemoteFunction") then
-                        fireRewardRemote(r)
-                        fireRewardRemote(r, true)
-                        fireRewardRemote(r, "Escaped")
-                    end
-                end
-            end
+        if not remotes then return end
 
-            -- Generator Escapetime
-            local genF = remotes:FindFirstChild("Generator")
-            if genF then
-                local et = genF:FindFirstChild("Escapetime")
-                if et then
-                    pcall(function() et:FireServer() end)
-                    pcall(function() et:FireServer(true) end)
-                end
-                -- Generator complete
-                local gc = genF:FindFirstChild("GeneratorComplete") or genF:FindFirstChild("Complete")
-                    or genF:FindFirstChild("GenDone") or genF:FindFirstChild("Done")
-                if gc then
-                    pcall(function() gc:FireServer() end)
-                    pcall(function() gc:FireServer(true) end)
-                end
+        -- Hanya panggil RemoteEvent spesifik yang sudah terbukti aman dan valid
+        local genF = remotes:FindFirstChild("Generator")
+        if genF then
+            local et = genF:FindFirstChild("Escapetime")
+            if et and et:IsA("RemoteEvent") then
+                pcall(function() et:FireServer() end)
             end
+        end
 
-            -- Exit folder events
-            local exitF = remotes:FindFirstChild("Exit")
-            if exitF then
-                for _, r in ipairs(exitF:GetDescendants()) do
-                    if r:IsA("RemoteEvent") or r:IsA("RemoteFunction") then
-                        fireRewardRemote(r)
-                        fireRewardRemote(r, true)
-                    end
-                end
-                -- [SCAN 2026-10-06] LeverAnim: animasi tuas saat tuas ditekan
-                local leverAnim = exitF:FindFirstChild("LeverAnim")
-                if leverAnim then
-                    pcall(function() leverAnim:FireServer(true) end)
-                    pcall(function() leverAnim:FireServer() end)
-                end
+        local exitF = remotes:FindFirstChild("Exit")
+        if exitF then
+            local leverAnim = exitF:FindFirstChild("LeverAnim")
+            if leverAnim and leverAnim:IsA("RemoteEvent") then
+                pcall(function() leverAnim:FireServer(true) end)
             end
+        end
 
-            -- [SCAN 2026-10-06] Items.Gate.gate: penanda keluar lewat item Gate
-            local itemsF = remotes:FindFirstChild("Items")
-            if itemsF then
-                local gateF = itemsF:FindFirstChild("Gate")
-                if gateF then
-                    local gateRemote = gateF:FindFirstChild("gate")
-                    if gateRemote then
-                        pcall(function() gateRemote:FireServer() end)
-                        pcall(function() gateRemote:FireServer(true) end)
-                        pcall(function() gateRemote:FireServer("Escaped") end)
-                        pcall(function() gateRemote:FireServer(LocalPlayer) end)
-                    end
+        local itemsF = remotes:FindFirstChild("Items")
+        if itemsF then
+            local gateF = itemsF:FindFirstChild("Gate")
+            if gateF then
+                local gateRemote = gateF:FindFirstChild("gate")
+                if gateRemote and gateRemote:IsA("RemoteEvent") then
+                    pcall(function() gateRemote:FireServer("Escaped") end)
                 end
             end
         end
@@ -2931,7 +2874,11 @@ function trigger_instant_escape()
                 if fwd > 5 then
                     -- Berdiri 14 stud SEBELUM garis finish, menghadap ke garis
                     local before = origin + dir * math.max(fwd - 14, 6)
-                    approachCF = CFrame.lookAt(before, zone.part.Position)
+                    if (zone.part.Position - before).Magnitude > 0.5 then
+                        approachCF = CFrame.lookAt(before, zone.part.Position)
+                    else
+                        approachCF = CFrame.new(before)
+                    end
                 end
             end
         end
@@ -3712,26 +3659,57 @@ do
 
         -- (2) Salinan lokal (cadangan)
         return (function()
-local ZypheraxUI = {}
-ZypheraxUI.Version = "Enterprise 3.0.0"
-ZypheraxUI.Flags = {}
+-- ==============================================================================
+-- ZYPHERAX UI - MODERN MACOS ENTERPRISE EDITION (v3.5)
+-- Modern MacOS-Style Acrylic GUI Library for Roblox
+-- Features:
+--   * MacOS Traffic Lights Window Controls (Red: Close, Yellow: Minimize, Green: Maximize)
+--   * Smooth, Uninterrupted Global Dragging (UIS-based, never disconnects)
+--   * Dynamic Real-Time Theme Engine (Dark, Light, Midnight, Rose)
+--   * Full Config Manager (Create Save, Overwrite, Delete Mode, Set/Reset Autoload)
+--   * Elegant Draggable Watermark with Real-Time FPS and Minimize/Close
+--   * Clean Section Architecture with Zero Generic "SECTION" Text Overlaps
+--   * Anti-Collision Control Layouts (Toggles, Sliders, Dropdowns, Inputs, Buttons)
+-- ==============================================================================
 
--- // SERVICES \\ --
+local ZypheraxUI = {}
+ZypheraxUI.Version = "Enterprise 3.5.0"
+ZypheraxUI.Flags = {}
+ZypheraxUI.Controls = {}
+
+-- // SERVICES \ --
 local Players      = game:GetService("Players")
 local Player       = Players.LocalPlayer
 local RunService   = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UIS          = game:GetService("UserInputService")
+local HttpService  = game:GetService("HttpService")
+
 local CoreGui
 pcall(function()
     CoreGui = cloneref and cloneref(game:GetService("CoreGui")) or game:GetService("CoreGui")
 end)
 
--- VirtualUser: safe load (Anti-AFK)
+-- Safe Anti-AFK
 local VirtualUser = nil
 pcall(function() VirtualUser = game:GetService("VirtualUser") end)
+function ZypheraxUI:EnableAntiAFK()
+    if not Player then return end
+    pcall(function()
+        Player.Idled:Connect(function()
+            if VirtualUser then
+                pcall(function()
+                    VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+                    task.wait(1)
+                    VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+                end)
+            end
+        end)
+    end)
+end
+ZypheraxUI:EnableAntiAFK()
 
--- // SAFE CORE GUI RESOLVER \\ --
+-- // SAFE CORE GUI RESOLVER \ --
 local function GetCore()
     if RunService:IsStudio() then return Player:WaitForChild("PlayerGui") end
     local ok, h = pcall(function() return gethui() end)
@@ -3740,1243 +3718,914 @@ local function GetCore()
     return Player:WaitForChild("PlayerGui")
 end
 
--- // THEME (Midnight Blue Professional Palette) \\ --
-ZypheraxUI.Theme = {
-    -- Backgrounds — strict hierarchy for depth without noise
-    Background       = Color3.fromRGB(13, 14, 18),    -- main background (deep blue-grey)
-    Background2      = Color3.fromRGB(9, 10, 13),     -- deepest background
-    Surface          = Color3.fromRGB(18, 19, 25),    -- primary surface (panels)
-    Surface2         = Color3.fromRGB(22, 23, 30),    -- interactive controls base
-    Surface3         = Color3.fromRGB(28, 30, 38),    -- elevated controls (dropdowns)
-
-    -- Accent — controlled, high-end cyan
-    Accent           = Color3.fromRGB(0, 200, 255),   -- primary accent
-    AccentDark       = Color3.fromRGB(0, 110, 180),   -- pressed/dark active state
-    AccentGradient   = Color3.fromRGB(130, 120, 255), -- subtle gradient end
-
-    -- Typography — precise contrast levels
-    Text             = Color3.fromRGB(240, 240, 245), -- high emphasis
-    TextMuted        = Color3.fromRGB(145, 150, 165), -- medium emphasis
-    TextDim          = Color3.fromRGB(90, 95, 110),   -- low emphasis (placeholders)
-
-    -- Outlines/Strokes — structured, avoiding harsh lines
-    Stroke           = Color3.fromRGB(32, 34, 42),    -- default border (subtle)
-    StrokeHover      = Color3.fromRGB(50, 54, 65),    -- hover border
-    StrokeActive     = Color3.fromRGB(0, 180, 255),   -- focused/active border
-
-    -- Semantic Status
-    Success          = Color3.fromRGB(60, 210, 120),  -- success green
-    Warning          = Color3.fromRGB(245, 165, 35),  -- warning amber
-    Error            = Color3.fromRGB(250, 75, 75),   -- error red
-
-    -- Layout & Organization
-    SidebarBg        = Color3.fromRGB(10, 11, 15),    -- sidebar structure
-    SectionHeader    = Color3.fromRGB(17, 18, 23),    -- section header
-    SectionBg        = Color3.fromRGB(15, 16, 21),    -- section body
-
-    -- Corner Radius System (Tight & Professional)
-    CornerSm         = UDim.new(0, 4),                -- small elements (checkboxes, tags)
-    CornerMd         = UDim.new(0, 6),                -- medium elements (buttons, inputs)
-    CornerLg         = UDim.new(0, 12),               -- large containers (panels, main UI)
-    -- Revert ke Gotham untuk scaling yang lebih konsisten & rapi di Roblox
-    Font             = Enum.Font.GothamBold,
-    FontRegular      = Enum.Font.GothamMedium,
+-- // THEMES REGISTRY \ --
+local Themes = {
+    Dark = {
+        Background       = Color3.fromRGB(15, 17, 23),
+        Background2      = Color3.fromRGB(11, 12, 17),
+        Surface          = Color3.fromRGB(20, 23, 31),
+        Surface2         = Color3.fromRGB(26, 30, 42),
+        Surface3         = Color3.fromRGB(34, 40, 56),
+        Accent           = Color3.fromRGB(0, 200, 255),
+        AccentDark       = Color3.fromRGB(0, 120, 190),
+        AccentGradient   = Color3.fromRGB(130, 120, 255),
+        Text             = Color3.fromRGB(242, 244, 250),
+        TextMuted        = Color3.fromRGB(145, 152, 170),
+        TextDim          = Color3.fromRGB(90, 96, 112),
+        Stroke           = Color3.fromRGB(38, 43, 58),
+        StrokeHover      = Color3.fromRGB(55, 62, 84),
+        StrokeActive     = Color3.fromRGB(0, 200, 255),
+        Success          = Color3.fromRGB(60, 215, 120),
+        Warning          = Color3.fromRGB(255, 189, 46),
+        Error            = Color3.fromRGB(255, 95, 86),
+        SidebarBg        = Color3.fromRGB(12, 13, 18),
+        SectionBg        = Color3.fromRGB(17, 19, 27),
+        SectionHeader    = Color3.fromRGB(22, 25, 36),
+    },
+    Light = {
+        Background       = Color3.fromRGB(244, 246, 250),
+        Background2      = Color3.fromRGB(235, 238, 244),
+        Surface          = Color3.fromRGB(255, 255, 255),
+        Surface2         = Color3.fromRGB(238, 241, 248),
+        Surface3         = Color3.fromRGB(224, 228, 238),
+        Accent           = Color3.fromRGB(0, 150, 240),
+        AccentDark       = Color3.fromRGB(0, 110, 180),
+        AccentGradient   = Color3.fromRGB(90, 110, 230),
+        Text             = Color3.fromRGB(25, 28, 36),
+        TextMuted        = Color3.fromRGB(105, 112, 128),
+        TextDim          = Color3.fromRGB(150, 155, 168),
+        Stroke           = Color3.fromRGB(216, 222, 234),
+        StrokeHover      = Color3.fromRGB(190, 198, 214),
+        StrokeActive     = Color3.fromRGB(0, 150, 240),
+        Success          = Color3.fromRGB(40, 180, 100),
+        Warning          = Color3.fromRGB(240, 160, 30),
+        Error            = Color3.fromRGB(240, 70, 70),
+        SidebarBg        = Color3.fromRGB(232, 235, 242),
+        SectionBg        = Color3.fromRGB(255, 255, 255),
+        SectionHeader    = Color3.fromRGB(240, 243, 249),
+    },
+    Midnight = {
+        Background       = Color3.fromRGB(9, 11, 16),
+        Background2      = Color3.fromRGB(6, 7, 11),
+        Surface          = Color3.fromRGB(14, 17, 26),
+        Surface2         = Color3.fromRGB(20, 25, 38),
+        Surface3         = Color3.fromRGB(28, 35, 54),
+        Accent           = Color3.fromRGB(75, 140, 255),
+        AccentDark       = Color3.fromRGB(40, 95, 210),
+        AccentGradient   = Color3.fromRGB(145, 95, 255),
+        Text             = Color3.fromRGB(240, 244, 255),
+        TextMuted        = Color3.fromRGB(130, 142, 170),
+        TextDim          = Color3.fromRGB(80, 90, 115),
+        Stroke           = Color3.fromRGB(32, 40, 60),
+        StrokeHover      = Color3.fromRGB(48, 60, 90),
+        StrokeActive     = Color3.fromRGB(75, 140, 255),
+        Success          = Color3.fromRGB(50, 210, 130),
+        Warning          = Color3.fromRGB(255, 190, 45),
+        Error            = Color3.fromRGB(255, 90, 85),
+        SidebarBg        = Color3.fromRGB(8, 9, 14),
+        SectionBg        = Color3.fromRGB(12, 15, 22),
+        SectionHeader    = Color3.fromRGB(16, 20, 30),
+    },
+    Rose = {
+        Background       = Color3.fromRGB(18, 14, 18),
+        Background2      = Color3.fromRGB(13, 10, 13),
+        Surface          = Color3.fromRGB(25, 19, 25),
+        Surface2         = Color3.fromRGB(34, 25, 34),
+        Surface3         = Color3.fromRGB(46, 34, 46),
+        Accent           = Color3.fromRGB(255, 75, 125),
+        AccentDark       = Color3.fromRGB(200, 45, 90),
+        AccentGradient   = Color3.fromRGB(255, 135, 175),
+        Text             = Color3.fromRGB(252, 242, 247),
+        TextMuted        = Color3.fromRGB(175, 142, 160),
+        TextDim          = Color3.fromRGB(115, 88, 104),
+        Stroke           = Color3.fromRGB(56, 38, 52),
+        StrokeHover      = Color3.fromRGB(80, 54, 75),
+        StrokeActive     = Color3.fromRGB(255, 75, 125),
+        Success          = Color3.fromRGB(70, 215, 140),
+        Warning          = Color3.fromRGB(255, 195, 60),
+        Error            = Color3.fromRGB(255, 90, 95),
+        SidebarBg        = Color3.fromRGB(14, 11, 14),
+        SectionBg        = Color3.fromRGB(22, 17, 22),
+        SectionHeader    = Color3.fromRGB(28, 21, 28),
+    }
 }
+
+-- Current active theme
+ZypheraxUI.CurrentThemeName = "Dark"
+ZypheraxUI.Theme = {}
+for k, v in pairs(Themes.Dark) do ZypheraxUI.Theme[k] = v end
+
+-- Common styles
+ZypheraxUI.Theme.FontBold    = Enum.Font.GothamBold
+ZypheraxUI.Theme.Font        = Enum.Font.GothamMedium
+ZypheraxUI.Theme.FontRegular = Enum.Font.Gotham
+ZypheraxUI.Theme.CornerLg    = UDim.new(0, 12)
+ZypheraxUI.Theme.CornerMd    = UDim.new(0, 8)
+ZypheraxUI.Theme.CornerSm    = UDim.new(0, 6)
+
 local T = ZypheraxUI.Theme
 
--- // UTILITY CORE (High-Performance Engine) \\ --
-local U = {} do
-    function U.New(cls, props)
-        local o = Instance.new(cls)
-        local parent = props.Parent
-        props.Parent = nil
-        for k, v in pairs(props) do
-            o[k] = v
-        end
-        if parent then o.Parent = parent end
-        return o
-    end
+-- Theme subscriber system
+local ThemeSubscribers = {}
+local function RegisterThemeColor(obj, prop, themeKey)
+    table.insert(ThemeSubscribers, { obj = obj, prop = prop, key = themeKey })
+    pcall(function() obj[prop] = T[themeKey] end)
+end
 
-    function U.Tween(obj, t, props, style, dir)
-        style = style or Enum.EasingStyle.Quint
-        dir   = dir   or Enum.EasingDirection.Out
-        do local __c = {} for __k, __v in pairs(props or {}) do if typeof(__v) == "EnumItem" then pcall(function() obj[__k] = __v end) else __c[__k] = __v end end props = __c end
-        local tw = TweenService:Create(obj, TweenInfo.new(t, style, dir), props)
-        tw:Play()
-        return tw
-    end
-
-    function U.Corner(parent, radius)
-        return U.New("UICorner", { CornerRadius = radius or T.CornerMd, Parent = parent })
-    end
-
-    function U.Stroke(parent, color, thickness, transparency)
-        return U.New("UIStroke", {
-            Color = color or T.Stroke,
-            Thickness = thickness or 1,
-            Transparency = transparency or 0,
-            ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-            Parent = parent
-        })
-    end
-
-    function U.Gradient(parent, c0, c1, rotation)
-        return U.New("UIGradient", {
-            Color = ColorSequence.new(c0, c1),
-            Rotation = rotation or 90,
-            Parent = parent
-        })
-    end
-
-    function U.Glow(parent, color, transparency)
-        return U.New("ImageLabel", {
-            Image = "rbxassetid://6014261993",
-            ImageColor3 = color or T.Accent,
-            ImageTransparency = transparency or 0.82,
-            BackgroundTransparency = 1,
-            Size = UDim2.new(1, 50, 1, 50),
-            Position = UDim2.new(0.5, 0, 0.5, 0),
-            AnchorPoint = Vector2.new(0.5, 0.5),
-            ScaleType = Enum.ScaleType.Slice,
-            SliceCenter = Rect.new(49, 49, 450, 450),
-            ZIndex = 0,
-            Parent = parent
-        })
-    end
-
-    function U.Ripple(btn, x, y)
-        task.spawn(function()
-            if not btn or not btn.Parent then return end
-            btn.ClipsDescendants = true
-            local circle = U.New("Frame", {
-                Size = UDim2.new(0, 0, 0, 0),
-                Position = UDim2.new(0, x - btn.AbsolutePosition.X, 0, y - btn.AbsolutePosition.Y),
-                BackgroundColor3 = T.Accent,
-                BackgroundTransparency = 0.75,
-                ZIndex = btn.ZIndex + 5,
-                Parent = btn
-            })
-            U.Corner(circle, UDim.new(1, 0))
-            local sz = math.max(btn.AbsoluteSize.X, btn.AbsoluteSize.Y) * 2
-            local tw = U.Tween(circle, 0.45, {
-                Size = UDim2.new(0, sz, 0, sz),
-                Position = UDim2.new(0.5, -sz/2, 0.5, -sz/2),
-                BackgroundTransparency = 1,
-            }, Enum.EasingStyle.Quad)
-            tw.Completed:Connect(function()
-                circle:Destroy()
-            end)
-        end)
-    end
-
-    function U.Divider(parent, yOffset)
-        return U.New("Frame", {
-            Size = UDim2.new(1, 0, 0, 1),
-            Position = UDim2.new(0, 0, 0, yOffset or 0),
-            BackgroundColor3 = T.Stroke,
-            BorderSizePixel = 0,
-            ZIndex = 5,
-            Parent = parent
-        })
-    end
-
-    function U.HoverEffect(frame, stroke)
-        local baseTrans = frame.BackgroundTransparency
-        local conn1 = frame.MouseEnter:Connect(function()
-            if stroke then U.Tween(stroke, 0.12, { Color = T.StrokeHover }) end
-            U.Tween(frame, 0.12, { BackgroundTransparency = math.max(0, baseTrans - 0.08) })
-        end)
-        local conn2 = frame.MouseLeave:Connect(function()
-            if stroke then U.Tween(stroke, 0.25, { Color = T.Stroke }) end
-            U.Tween(frame, 0.25, { BackgroundTransparency = baseTrans })
-        end)
-        return conn1, conn2
-    end
-
-    -- AFK Protection (Speed Hub X style)
-    local afkInitialized = false
-    function ZypheraxUI:EnableAntiAFK()
-        if afkInitialized then return end
-        afkInitialized = true
-        task.spawn(function()
-            if not Player or not VirtualUser then return end
+function ZypheraxUI:SetTheme(themeName)
+    local preset = Themes[themeName]
+    if not preset then return end
+    ZypheraxUI.CurrentThemeName = themeName
+    for k, v in pairs(preset) do T[k] = v end
+    for _, item in ipairs(ThemeSubscribers) do
+        if item.obj and item.obj.Parent and T[item.key] then
             pcall(function()
-                Player.Idled:Connect(function()
-                    pcall(function()
-                        VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
-                        task.wait(1)
-                        VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
-                    end)
-                end)
+                TweenService:Create(item.obj, TweenInfo.new(0.25, Enum.EasingStyle.Quad), {
+                    [item.prop] = T[item.key]
+                }):Play()
             end)
-        end)
+        end
     end
 end
 
--- Enable Anti-AFK safely
-ZypheraxUI:EnableAntiAFK()
-
--- // FLOATING CIRCLE TOGGLE BUTTON \\ --
-local FloatingToggleGui = nil
-local FloatingButton    = nil
-local FloatingContainer = nil
-
-local function EnsureFloatingButton(onToggleWindow)
-    if FloatingContainer and FloatingContainer.Parent then return FloatingButton end
-
-    FloatingToggleGui = U.New("ScreenGui", {
-        Name            = "ZypheraxFloatingToggle",
-        ZIndexBehavior  = Enum.ZIndexBehavior.Sibling,
-        DisplayOrder    = 9999,
-        ResetOnSpawn    = false,
-        Parent          = GetCore()
-    })
-
-    -- Glow wrapper (larger, behind button — not clipped so glow shows)
-    local glowFrame = U.New("Frame", {
-        Name                  = "GlowWrapper",
-        Size                  = UDim2.new(0, 76, 0, 76),
-        Position              = UDim2.new(0.05, -12, 0.15, -12),
-        BackgroundTransparency = 1,
-        Visible               = false,
-        ZIndex                = 8,
-        Parent                = FloatingToggleGui
-    })
-    local glowImg = U.New("ImageLabel", {
-        Image                 = "rbxassetid://6014261993",
-        ImageColor3           = T.Accent,
-        ImageTransparency     = 0.72,
-        BackgroundTransparency = 1,
-        Size                  = UDim2.new(1, 0, 1, 0),
-        ScaleType             = Enum.ScaleType.Slice,
-        SliceCenter           = Rect.new(49, 49, 450, 450),
-        ZIndex                = 8,
-        Parent                = glowFrame
-    })
-
-    -- Actual clickable button (clips itself so inner elements stay inside circle)
-    FloatingButton = U.New("ImageButton", {
-        Name                  = "FloatingCircleBtn",
-        Size                  = UDim2.new(0, 52, 0, 52),
-        Position              = UDim2.new(0.05, 0, 0.15, 0),
-        BackgroundColor3      = T.Background2,
-        BackgroundTransparency = 0.08,
-        Image                 = "",
-        Visible               = false,
-        ZIndex                = 10,
-        ClipsDescendants      = true,
-        Parent                = FloatingToggleGui
-    })
-    U.Corner(FloatingButton, UDim.new(1, 0))
-    U.Stroke(FloatingButton, T.Accent, 1.5, 0)
-
-    -- Wadah untuk Logo di dalam bubble
-    local bLogo = U.New("ImageLabel", {
-        Name                   = "FloatingLogo",
-        Size                   = UDim2.new(1, -16, 1, -16),
-        Position               = UDim2.new(0, 8, 0, 8),
-        BackgroundTransparency = 1,
-        Image                  = "",
-        ScaleType              = Enum.ScaleType.Fit,
-        ZIndex                 = 11,
-        Parent                 = FloatingButton
-    })
-    -- Teks Fallback jika logo tidak ada
-    local bText = U.New("TextLabel", {
-        Name                  = "FloatingText",
-        Text                  = "Z",
-        Font                  = T.Font,
-        TextSize              = 24,
-        TextColor3            = T.Accent,
-        BackgroundTransparency = 1,
-        Size                  = UDim2.new(1, 0, 1, 0),
-        ZIndex                = 10,
-        Parent                = FloatingButton
-    })
-
-    -- Sync glow position whenever button moves
-    local function syncGlow()
-        glowFrame.Position = UDim2.new(
-            FloatingButton.Position.X.Scale,
-            FloatingButton.Position.X.Offset - 12,
-            FloatingButton.Position.Y.Scale,
-            FloatingButton.Position.Y.Offset - 12
-        )
-    end
-    syncGlow()
-
-    -- Draggable
-    local dragging, dragStart, startPos = false, nil, nil
-    FloatingButton.InputBegan:Connect(function(inp)
-        if inp.UserInputType == Enum.UserInputType.MouseButton1 or
-           inp.UserInputType == Enum.UserInputType.Touch then
-            dragging  = true
-            dragStart = inp.Position
-            startPos  = FloatingButton.Position
-            local c
-            c = inp.Changed:Connect(function()
-                if inp.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                    if c then c:Disconnect() end
-                end
-            end)
-        end
-    end)
-    FloatingButton.InputChanged:Connect(function(inp)
-        if dragging and (inp.UserInputType == Enum.UserInputType.MouseMovement or
-                         inp.UserInputType == Enum.UserInputType.Touch) then
-            local d = inp.Position - dragStart
-            FloatingButton.Position = UDim2.new(
-                startPos.X.Scale, startPos.X.Offset + d.X,
-                startPos.Y.Scale, startPos.Y.Offset + d.Y
-            )
-            syncGlow()
-        end
-    end)
-
-    -- Click to restore
-    local hasMoved = false
-    local downPos  = Vector2.zero
-    FloatingButton.InputBegan:Connect(function(inp)
-        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
-            downPos  = Vector2.new(inp.Position.X, inp.Position.Y)
-            hasMoved = false
-        end
-    end)
-    FloatingButton.InputChanged:Connect(function(inp)
-        if inp.UserInputType == Enum.UserInputType.MouseMovement then
-            if (Vector2.new(inp.Position.X, inp.Position.Y) - downPos).Magnitude > 4 then
-                hasMoved = true
-            end
-        end
-    end)
-    FloatingButton.MouseButton1Up:Connect(function()
-        if not hasMoved then
-            U.Ripple(FloatingButton, Player:GetMouse().X, Player:GetMouse().Y)
-            onToggleWindow(true)
-        end
-    end)
-
-    FloatingContainer = glowFrame  -- track for existence check
-    return FloatingButton
+function ZypheraxUI:GetThemes()
+    return { "Dark", "Light", "Midnight", "Rose" }
 end
 
--- // NOTIFICATION SYSTEM (Lyapos / Airflow Stacked) \\ --
+-- // UTILITY CORE \ --
+local U = {}
+
+function U.New(class, props)
+    local inst = Instance.new(class)
+    for k, v in pairs(props or {}) do
+        if k ~= "Parent" then
+            pcall(function() inst[k] = v end)
+        end
+    end
+    if props and props.Parent then inst.Parent = props.Parent end
+    return inst
+end
+
+function U.Corner(parent, radius)
+    return U.New("UICorner", { CornerRadius = radius or T.CornerMd, Parent = parent })
+end
+
+function U.Stroke(parent, color, thickness, transparency)
+    local s = U.New("UIStroke", {
+        Color = color or T.Stroke,
+        Thickness = thickness or 1,
+        Transparency = transparency or 0,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+        Parent = parent
+    })
+    return s
+end
+
+function U.Gradient(parent, c1, c2, rot)
+    return U.New("UIGradient", {
+        Color = ColorSequence.new(c1, c2),
+        Rotation = rot or 0,
+        Parent = parent
+    })
+end
+
+-- Safe Tween: filters out Enum properties that Roblox cannot interpolate
+function U.Tween(obj, duration, props, style, dir)
+    local clean = {}
+    for k, v in pairs(props or {}) do
+        if typeof(v) == "EnumItem" then
+            pcall(function() obj[k] = v end)
+        else
+            clean[k] = v
+        end
+    end
+    local tw = TweenService:Create(obj, TweenInfo.new(duration or 0.2, style or Enum.EasingStyle.Quad, dir or Enum.EasingDirection.Out), clean)
+    tw:Play()
+    return tw
+end
+
+function U.Ripple(btn, x, y)
+    task.spawn(function()
+        local ripple = U.New("Frame", {
+            BackgroundColor3 = Color3.new(1, 1, 1),
+            BackgroundTransparency = 0.8,
+            BorderSizePixel = 0,
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.fromOffset(x - btn.AbsolutePosition.X, y - btn.AbsolutePosition.Y),
+            Size = UDim2.fromOffset(0, 0),
+            ZIndex = btn.ZIndex + 2,
+            Parent = btn
+        })
+        U.Corner(ripple, UDim.new(1, 0))
+        local maxSize = math.max(btn.AbsoluteSize.X, btn.AbsoluteSize.Y) * 1.5
+        local tw = U.Tween(ripple, 0.45, {
+            Size = UDim2.fromOffset(maxSize, maxSize),
+            BackgroundTransparency = 1
+        })
+        tw.Completed:Connect(function() ripple:Destroy() end)
+    end)
+end
+
+-- // NOTIFICATIONS SYSTEM \ --
 local NotifGui = nil
-local NotifCount = 0
-
-function ZypheraxUI:Notify(config)
-    local title    = config.Title or config.Name or "Notice"
-    local content  = config.Content or config.Description or ""
-    local duration = config.Duration or 5
-    local ntype    = config.Type or "Info"
-
-    local typeColors = {
-        Info    = T.Accent,
-        Success = T.Success,
-        Warning = T.Warning,
-        Error   = T.Error,
-    }
-    local accentColor = typeColors[ntype] or T.Accent
+function ZypheraxUI:Notify(cfg)
+    cfg = cfg or {}
+    local title = cfg.Title or "Notifikasi"
+    local desc  = cfg.Description or cfg.Text or ""
+    local life  = cfg.Lifetime or 3.5
 
     if not NotifGui or not NotifGui.Parent then
         NotifGui = U.New("ScreenGui", {
             Name = "ZypheraxNotifs",
-            ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-            DisplayOrder = 9999,
+            DisplayOrder = 10000,
             ResetOnSpawn = false,
+            ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
             Parent = GetCore()
+        })
+        local container = U.New("Frame", {
+            Name = "Container",
+            Size = UDim2.new(0, 320, 1, -20),
+            Position = UDim2.new(1, -330, 0, 10),
+            BackgroundTransparency = 1,
+            Parent = NotifGui
+        })
+        local layout = U.New("UIListLayout", {
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            VerticalAlignment = Enum.VerticalAlignment.Bottom,
+            Padding = UDim.new(0, 8),
+            Parent = container
         })
     end
 
-    NotifCount = NotifCount + 1
-    local yOff = -(70 + (NotifCount - 1) * 78)
+    local holder = NotifGui:FindFirstChild("Container")
+    if not holder then return end
 
-    local holder = U.New("Frame", {
-        Size = UDim2.new(0, 310, 0, 70),
-        Position = UDim2.new(1, 20, 1, yOff),
+    local card = U.New("Frame", {
+        Size = UDim2.new(1, 0, 0, 0),
         BackgroundColor3 = T.Surface,
-        BackgroundTransparency = 0.2,
+        BackgroundTransparency = 0.1,
+        AutomaticSize = Enum.AutomaticSize.Y,
         ClipsDescendants = true,
-        Parent = NotifGui
-    })
-    U.Corner(holder, T.CornerMd)
-    local stroke = U.Stroke(holder, accentColor, 1, 0.6)
-    U.Glow(holder, accentColor, 0.88)
-
-    U.New("Frame", {
-        Size = UDim2.new(0, 3, 1, 0),
-        BackgroundColor3 = accentColor,
-        BorderSizePixel = 0,
-        ZIndex = 2,
         Parent = holder
     })
+    U.Corner(card, T.CornerMd)
+    local stroke = U.Stroke(card, T.Accent, 1, 0.4)
 
-    U.New("TextLabel", {
+    -- Accent left bar
+    local bar = U.New("Frame", {
+        Size = UDim2.new(0, 4, 1, 0),
+        BackgroundColor3 = T.Accent,
+        BorderSizePixel = 0,
+        Parent = card
+    })
+
+    local pad = U.New("UIPadding", {
+        PaddingLeft = UDim.new(0, 16),
+        PaddingRight = UDim.new(0, 12),
+        PaddingTop = UDim.new(0, 10),
+        PaddingBottom = UDim.new(0, 10),
+        Parent = card
+    })
+
+    local tLbl = U.New("TextLabel", {
         Text = title,
-        Font = T.Font,
-        TextSize = 14,
+        Font = T.FontBold,
+        TextSize = 13,
         TextColor3 = T.Text,
         BackgroundTransparency = 1,
-        Position = UDim2.new(0, 14, 0, 8),
-        Size = UDim2.new(1, -20, 0, 18),
+        Size = UDim2.new(1, 0, 0, 16),
         TextXAlignment = Enum.TextXAlignment.Left,
-        ZIndex = 2,
-        Parent = holder
+        Parent = card
     })
 
-    U.New("TextLabel", {
-        Text = content,
+    local dLbl = U.New("TextLabel", {
+        Text = desc,
         Font = T.FontRegular,
         TextSize = 12,
         TextColor3 = T.TextMuted,
         BackgroundTransparency = 1,
-        Position = UDim2.new(0, 14, 0, 28),
-        Size = UDim2.new(1, -24, 0, 32),
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Top,
+        Position = UDim2.new(0, 0, 0, 18),
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
         TextWrapped = true,
-        ZIndex = 2,
-        Parent = holder
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = card
     })
 
-    local progress = U.New("Frame", {
-        Size = UDim2.new(1, 0, 0, 2),
-        Position = UDim2.new(0, 0, 1, -2),
-        BackgroundColor3 = accentColor,
-        BorderSizePixel = 0,
-        ZIndex = 3,
-        Parent = holder
-    })
+    -- Entry animation
+    card.Position = UDim2.new(1, 40, 0, 0)
+    U.Tween(card, 0.35, { Position = UDim2.new(0, 0, 0, 0) }, Enum.EasingStyle.Quart)
 
-    U.Tween(holder, 0.4, { Position = UDim2.new(1, -325, 1, yOff) }, Enum.EasingStyle.Back)
-    U.Tween(stroke, 0.6, { Transparency = 0 })
-    U.Tween(progress, duration, { Size = UDim2.new(0, 0, 0, 2) }, Enum.EasingStyle.Linear)
-
-    task.delay(duration, function()
-        NotifCount = math.max(0, NotifCount - 1)
-        local tw = U.Tween(holder, 0.3, { Position = UDim2.new(1, 20, 1, yOff) }, Enum.EasingStyle.Back, Enum.EasingDirection.In)
-        tw.Completed:Connect(function()
-            pcall(function() holder:Destroy() end)
-        end)
+    task.delay(life, function()
+        if card and card.Parent then
+            local tw = U.Tween(card, 0.3, { Position = UDim2.new(1, 40, 0, 0), BackgroundTransparency = 1 })
+            tw.Completed:Connect(function() card:Destroy() end)
+        end
     end)
 end
-ZypheraxUI.Notification = ZypheraxUI.Notify
 
--- // WATERMARK SYSTEM (Neverlose Floating Pill) \\ --
-local WatermarkGui = nil
-local WatermarkLabel = nil
-
-function ZypheraxUI:Watermark(textOrList)
-    if not WatermarkGui or not WatermarkGui.Parent then
-        WatermarkGui = U.New("ScreenGui", {
-            Name = "ZypheraxWatermark",
-            ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-            DisplayOrder = 9998,
-            ResetOnSpawn = false,
-            Parent = GetCore()
-        })
-        local holder = U.New("Frame", {
-            Position = UDim2.new(0, 20, 0, 20),
-            BackgroundColor3 = T.Background2,
-            BackgroundTransparency = 0.15,
-            AutomaticSize = Enum.AutomaticSize.XY,
-            Parent = WatermarkGui
-        })
-        U.Corner(holder, T.CornerSm)
-        U.Stroke(holder, T.Accent, 1, 0.4)
-
-        local line = U.New("Frame", {
-            Size = UDim2.new(0, 3, 1, 0),
-            BackgroundColor3 = T.Accent,
-            BorderSizePixel = 0,
-            Parent = holder
-        })
-
-        WatermarkLabel = U.New("TextLabel", {
-            Font = T.Font,
-            TextSize = 12,
-            TextColor3 = T.Text,
-            BackgroundTransparency = 1,
-            Position = UDim2.new(0, 10, 0, 0),
-            Size = UDim2.new(0, 0, 0, 24),
-            AutomaticSize = Enum.AutomaticSize.X,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            Parent = holder
-        })
-        U.New("UIPadding", { PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 10), Parent = WatermarkLabel })
+-- // WATERMARK SYSTEM (Draggable, Minimizable, Realtime FPS) \ --
+local ActiveWatermark = nil
+function ZypheraxUI:Watermark(cfg)
+    if ActiveWatermark and ActiveWatermark._gui and ActiveWatermark._gui.Parent then
+        return ActiveWatermark
     end
+    cfg = cfg or {}
+    local hubName = cfg.Name or "Zypherax Hub"
+    local version = cfg.Version or "v3.5"
 
-    if type(textOrList) == "table" then
-        WatermarkLabel.Text = table.concat(textOrList, "  |  ")
-    else
-        WatermarkLabel.Text = tostring(textOrList)
-    end
-end
-
--- // KEYBIND LIST SYSTEM (Neverlose Floating Window) \\ --
-function ZypheraxUI:KeybindList(title)
-    local kbGui = U.New("ScreenGui", {
-        Name = "ZypheraxKeybindList",
-        ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-        DisplayOrder = 9997,
+    local gui = U.New("ScreenGui", {
+        Name = "ZypheraxWatermarkGui",
+        DisplayOrder = 9998,
         ResetOnSpawn = false,
+        ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
         Parent = GetCore()
     })
 
-    local frame = U.New("Frame", {
-        Size = UDim2.new(0, 180, 0, 130),
-        Position = UDim2.new(0, 20, 0.4, 0),
-        BackgroundColor3 = T.Background,
-        BackgroundTransparency = 0.2,
-        Visible = false, -- Hidden by default
-        Parent = kbGui
-    })
-    U.Corner(frame, T.CornerSm)
-    U.Stroke(frame, T.Stroke, 1, 0)
-
-    local header = U.New("Frame", {
-        Size = UDim2.new(1, 0, 0, 26),
+    local pill = U.New("Frame", {
+        Name = "WatermarkPill",
+        Size = UDim2.new(0, 240, 0, 32),
+        Position = UDim2.new(0, 18, 0, 18),
         BackgroundColor3 = T.Surface,
         BackgroundTransparency = 0.2,
-        Parent = frame
+        ClipsDescendants = true,
+        Parent = gui
     })
-    U.Corner(header, T.CornerSm)
-    U.New("TextLabel", {
-        Text = title or "Keybinds",
+    U.Corner(pill, UDim.new(1, 0))
+    U.Stroke(pill, T.Accent, 1, 0.4)
+
+    -- Status dot
+    local dot = U.New("Frame", {
+        Size = UDim2.new(0, 8, 0, 8),
+        Position = UDim2.new(0, 10, 0.5, -4),
+        BackgroundColor3 = T.Accent,
+        BorderSizePixel = 0,
+        Parent = pill
+    })
+    U.Corner(dot, UDim.new(1, 0))
+
+    -- Main text
+    local label = U.New("TextLabel", {
+        Name = "ContentLabel",
+        Text = hubName .. "  |  60 FPS",
         Font = T.Font,
-        TextSize = 12,
+        TextSize = 11,
         TextColor3 = T.Text,
         BackgroundTransparency = 1,
-        Position = UDim2.new(0, 10, 0, 0),
-        Size = UDim2.new(1, -20, 1, 0),
+        Position = UDim2.new(0, 24, 0, 0),
+        Size = UDim2.new(1, -66, 1, 0),
         TextXAlignment = Enum.TextXAlignment.Left,
-        Parent = header
+        TextTruncate = Enum.TextTruncate.AtEnd,
+        Parent = pill
     })
 
-    return frame
+    -- Minimize button (-)
+    local minBtn = U.New("TextButton", {
+        Text = "−",
+        Font = T.FontBold,
+        TextSize = 12,
+        TextColor3 = T.TextMuted,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(1, -38, 0, 0),
+        Size = UDim2.new(0, 16, 1, 0),
+        Parent = pill
+    })
+
+    -- Close button (✕)
+    local closeBtn = U.New("TextButton", {
+        Text = "✕",
+        Font = T.FontBold,
+        TextSize = 11,
+        TextColor3 = T.TextDim,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(1, -20, 0, 0),
+        Size = UDim2.new(0, 16, 1, 0),
+        Parent = pill
+    })
+
+    local isMinimized = false
+    minBtn.MouseButton1Click:Connect(function()
+        isMinimized = not isMinimized
+        if isMinimized then
+            U.Tween(pill, 0.2, { Size = UDim2.new(0, 48, 0, 32) })
+            label.Visible = false
+            minBtn.Text = "+"
+        else
+            U.Tween(pill, 0.2, { Size = UDim2.new(0, 240, 0, 32) })
+            label.Visible = true
+            minBtn.Text = "−"
+        end
+    end)
+
+    closeBtn.MouseButton1Click:Connect(function()
+        gui.Enabled = false
+    end)
+
+    -- Smooth global dragging for watermark
+    local wDragging, wDragStart, wStartPos
+    pill.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            wDragging = true
+            wDragStart = input.Position
+            wStartPos = pill.Position
+        end
+    end)
+    UIS.InputChanged:Connect(function(input)
+        if wDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - wDragStart
+            pill.Position = UDim2.new(
+                wStartPos.X.Scale, wStartPos.X.Offset + delta.X,
+                wStartPos.Y.Scale, wStartPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+    UIS.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            wDragging = false
+        end
+    end)
+
+    local watermarkObj = {
+        _gui = gui,
+        _pill = pill,
+        _label = label,
+        _dot = dot,
+        Set = function(self, keyOrText, val)
+            if not self._label then return end
+            if val ~= nil then
+                self._label.Text = hubName .. "  |  " .. tostring(val)
+            else
+                self._label.Text = tostring(keyOrText)
+            end
+        end,
+        SetVisible = function(self, bool)
+            if self._gui then self._gui.Enabled = (bool == true) end
+        end,
+        Destroy = function(self)
+            if self._gui then self._gui:Destroy() end
+        end
+    }
+    ActiveWatermark = watermarkObj
+    return watermarkObj
 end
 
--- // MAIN WINDOW BUILDER (Neverlose Double-Column Layout + Speed Hub Circle Minimize) \\ --
+-- // MAIN WINDOW BUILDER (MacOS Traffic Lights + Double Column) \ --
 function ZypheraxUI:CreateWindow(config)
     config = config or {}
-    local title   = config.Title or config.Name or "Zypherax UI"
-    local sub     = config.Description or config.SubName or "Enterprise Edition"
-    local size    = config.Size or UDim2.fromOffset(660, 480)
+    local title   = config.Title or config.Name or "Zypherax Hub"
+    local sub     = config.Description or config.SubName or "Violence District"
+    local size    = config.Size or UDim2.fromOffset(760, 560)
     local keybind = config.Keybind or Enum.KeyCode.RightControl
-    local logo    = config.Logo
 
     local core = GetCore()
     local connections = {}
+    local function track(c) table.insert(connections, c); return c end
 
-    local function trackConnection(conn)
-        table.insert(connections, conn)
-        return conn
-    end
-
-    -- Root ScreenGui
     local gui = U.New("ScreenGui", {
         Name = "ZypheraxApp_" .. title,
-        ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
         DisplayOrder = 100,
         ResetOnSpawn = false,
+        ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
         Parent = core
     })
 
-    -- Wadah transparan: bayangan (drop-shadow) di belakang jendela dihilangkan.
-    -- Tetap dipakai sebagai induk jendela agar fitur drag tetap berfungsi normal.
+    -- Drag anchor frame (Clean, no drop-shadow)
     local shadow = U.New("Frame", {
-        BackgroundTransparency = 1,
-        BorderSizePixel = 0,
+        Name = "WindowAnchor",
         Size = size,
         Position = UDim2.new(0.5, 0, 0.5, 0),
         AnchorPoint = Vector2.new(0.5, 0.5),
-        ZIndex = 0,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ZIndex = 1,
         Parent = gui
     })
 
     -- Main window frame
     local main = U.New("Frame", {
-        Size = size,
-        Position = UDim2.new(0.5, 0, 0.5, 0),
-        AnchorPoint = Vector2.new(0.5, 0.5),
+        Name = "MainWindow",
+        Size = UDim2.fromScale(1, 1),
         BackgroundColor3 = T.Background,
-        BackgroundTransparency = 0.05,
+        BackgroundTransparency = 0.04,
         ClipsDescendants = true,
         ZIndex = 1,
         Parent = shadow
     })
     U.Corner(main, T.CornerLg)
-    U.Stroke(main, T.Stroke, 1.2, 0)
+    local mainStroke = U.Stroke(main, T.Stroke, 1.2, 0)
+    RegisterThemeColor(main, "BackgroundColor3", "Background")
+    RegisterThemeColor(mainStroke, "Color", "Stroke")
 
-    -- Top Glow (subtle cyan at top edge)
-    U.Glow(main, T.Accent, 0.92)
-
-    -- // OVERLAY CONTROL BUTTONS (top-right corner of window) \\ --
-    local ctrlContainer = U.New("Frame", {
-        Size                   = UDim2.new(0, 68, 0, 30),
-        Position               = UDim2.new(1, -76, 0, 10),
-        BackgroundTransparency = 1,
-        ZIndex                 = 20,
-        Parent                 = main
+    -- Subtle accent gradient top glow
+    local topGlow = U.New("Frame", {
+        Size = UDim2.new(1, 0, 0, 1.5),
+        BackgroundColor3 = T.Accent,
+        BorderSizePixel = 0,
+        ZIndex = 10,
+        Parent = main
     })
-    U.New("UIListLayout", {
-        FillDirection        = Enum.FillDirection.Horizontal,
-        HorizontalAlignment  = Enum.HorizontalAlignment.Right,
-        VerticalAlignment    = Enum.VerticalAlignment.Center,
-        Padding              = UDim.new(0, 4),
-        Parent               = ctrlContainer
-    })
-
-    local function makeCtrlBtn(symbol, hoverColor)
-        local wrap = U.New("Frame", {
-            Size                   = UDim2.new(0, 26, 0, 26),
-            BackgroundColor3       = T.Surface3,
-            BackgroundTransparency = 0.5,
-            ZIndex                 = 20,
-            Parent                 = ctrlContainer
-        })
-        U.Corner(wrap, T.CornerSm)
-        local wStroke = U.Stroke(wrap, T.Stroke, 1, 0.3)
-        local lbl = U.New("TextLabel", {
-            Text                   = symbol,
-            Font                   = T.Font,
-            TextSize               = 14,
-            TextColor3             = T.TextDim,
-            BackgroundTransparency = 1,
-            Size                   = UDim2.new(1, 0, 1, 0),
-            ZIndex                 = 21,
-            Parent                 = wrap
-        })
-        local btn = U.New("TextButton", {
-            Size                   = UDim2.new(1, 0, 1, 0),
-            BackgroundTransparency = 1,
-            Text                   = "",
-            AutoButtonColor        = false,
-            ZIndex                 = 22,
-            Parent                 = wrap
-        })
-        trackConnection(btn.MouseEnter:Connect(function()
-            U.Tween(wrap,    0.12, { BackgroundColor3 = hoverColor, BackgroundTransparency = 0.05 })
-            U.Tween(wStroke, 0.12, { Color = hoverColor, Transparency = 0 })
-            U.Tween(lbl,     0.12, { TextColor3 = Color3.new(1,1,1) })
-        end))
-        trackConnection(btn.MouseLeave:Connect(function()
-            U.Tween(wrap,    0.2, { BackgroundColor3 = T.Surface3, BackgroundTransparency = 0.5 })
-            U.Tween(wStroke, 0.2, { Color = T.Stroke, Transparency = 0.3 })
-            U.Tween(lbl,     0.2, { TextColor3 = T.TextDim })
-        end))
-        return btn
-    end
-
-    -- Order: minimize (−) first = left position, close (✕) second = right position
-    -- Matches Windows/standard convention: [−] [✕]
-    local minBtn   = makeCtrlBtn("−", T.Warning)
-    local closeBtn = makeCtrlBtn("✕", T.Error)
+    U.Gradient(topGlow, T.Accent, T.AccentGradient, 0)
+    RegisterThemeColor(topGlow, "BackgroundColor3", "Accent")
 
     -- Window Object
-    local Win = { Tabs = {}, Pages = {}, _currentTab = nil }
+    local Win = { Tabs = {}, Pages = {}, _currentTab = nil, _connections = connections }
+
+    -- // SIDEBAR \ --
+    local SIDEBAR_W = 230
+    local sidebar = U.New("Frame", {
+        Name = "Sidebar",
+        Size = UDim2.new(0, SIDEBAR_W, 1, 0),
+        BackgroundColor3 = T.SidebarBg,
+        BorderSizePixel = 0,
+        ClipsDescendants = true,
+        ZIndex = 2,
+        Parent = main
+    })
+    U.Corner(sidebar, T.CornerLg)
+    RegisterThemeColor(sidebar, "BackgroundColor3", "SidebarBg")
+
+    -- Right border separator of sidebar
+    local sideDiv = U.New("Frame", {
+        Size = UDim2.new(0, 1, 1, 0),
+        Position = UDim2.new(1, 0, 0, 0),
+        BackgroundColor3 = T.Stroke,
+        BorderSizePixel = 0,
+        ZIndex = 3,
+        Parent = sidebar
+    })
+    RegisterThemeColor(sideDiv, "BackgroundColor3", "Stroke")
+
+    -- // SIDEBAR HEADER (MacOS Traffic Lights + Titles) \ --
+    local sidebarHeader = U.New("Frame", {
+        Name = "SidebarHeader",
+        Size = UDim2.new(1, 0, 0, 84),
+        BackgroundTransparency = 1,
+        ZIndex = 4,
+        Parent = sidebar
+    })
+
+    -- MacOS Traffic Light Buttons (🔴 Red, 🟡 Yellow, 🟢 Green)
+    local trafficContainer = U.New("Frame", {
+        Name = "MacOSTrafficLights",
+        Size = UDim2.new(0, 60, 0, 16),
+        Position = UDim2.new(0, 16, 0, 14),
+        BackgroundTransparency = 1,
+        ZIndex = 5,
+        Parent = sidebarHeader
+    })
+    local tLayout = U.New("UIListLayout", {
+        FillDirection = Enum.FillDirection.Horizontal,
+        Padding = UDim.new(0, 7),
+        VerticalAlignment = Enum.VerticalAlignment.Center,
+        Parent = trafficContainer
+    })
+
+    local function makeTrafficDot(color, hoverColor, onClick)
+        local dot = U.New("TextButton", {
+            Size = UDim2.fromOffset(12, 12),
+            BackgroundColor3 = color,
+            BorderSizePixel = 0,
+            AutoButtonColor = false,
+            Text = "",
+            ZIndex = 6,
+            Parent = trafficContainer
+        })
+        U.Corner(dot, UDim.new(1, 0))
+        track(dot.MouseEnter:Connect(function()
+            U.Tween(dot, 0.15, { BackgroundColor3 = hoverColor })
+        end))
+        track(dot.MouseLeave:Connect(function()
+            U.Tween(dot, 0.15, { BackgroundColor3 = color })
+        end))
+        track(dot.MouseButton1Click:Connect(function()
+            if onClick then onClick() end
+        end))
+        return dot
+    end
+
+    -- 🔴 Close: smoothly closes window
+    makeTrafficDot(Color3.fromRGB(255, 95, 86), Color3.fromRGB(255, 120, 110), function()
+        Win:ToggleVisibility(false)
+    end)
+
+    -- 🟡 Minimize: minimizes window
+    makeTrafficDot(Color3.fromRGB(255, 189, 46), Color3.fromRGB(255, 210, 80), function()
+        Win:ToggleVisibility(false)
+    end)
+
+    -- 🟢 Maximize: toggles size
+    local isMaximized = false
+    makeTrafficDot(Color3.fromRGB(39, 201, 63), Color3.fromRGB(60, 225, 90), function()
+        isMaximized = not isMaximized
+        local targetSize = isMaximized and UDim2.fromOffset(860, 640) or size
+        U.Tween(shadow, 0.3, { Size = targetSize }, Enum.EasingStyle.Quart)
+    end)
+
+    -- Window Title & Subtitle below traffic lights
+    local titleLbl = U.New("TextLabel", {
+        Text = string.upper(title),
+        Font = T.FontBold,
+        TextSize = 15,
+        TextColor3 = T.Accent,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 16, 0, 38),
+        Size = UDim2.new(1, -30, 0, 18),
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+        ZIndex = 5,
+        Parent = sidebarHeader
+    })
+    RegisterThemeColor(titleLbl, "TextColor3", "Accent")
+
+    local subLbl = U.New("TextLabel", {
+        Text = sub,
+        Font = T.FontRegular,
+        TextSize = 11,
+        TextColor3 = T.TextMuted,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 16, 0, 58),
+        Size = UDim2.new(1, -30, 0, 14),
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+        ZIndex = 5,
+        Parent = sidebarHeader
+    })
+    RegisterThemeColor(subLbl, "TextColor3", "TextMuted")
+
+    -- Horizontal divider under sidebar header
+    local hDiv = U.New("Frame", {
+        Size = UDim2.new(1, -24, 0, 1),
+        Position = UDim2.new(0, 12, 1, -1),
+        BackgroundColor3 = T.Stroke,
+        BorderSizePixel = 0,
+        ZIndex = 4,
+        Parent = sidebarHeader
+    })
+    RegisterThemeColor(hDiv, "BackgroundColor3", "Stroke")
+
+    -- // SMOOTH UNINTERRUPTED GLOBAL DRAGGING \ --
+    local dragging = false
+    local dragStart, startPos = nil, nil
+    track(sidebarHeader.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = inp.Position
+            startPos = shadow.Position
+        end
+    end))
+    track(UIS.InputChanged:Connect(function(inp)
+        if dragging and (inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch) then
+            local delta = inp.Position - dragStart
+            shadow.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+            )
+        end
+    end))
+    track(UIS.InputEnded:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end))
+
+    -- // SIDEBAR TAB LIST (Pill-style) \ --
+    local tabList = U.New("ScrollingFrame", {
+        Name = "TabList",
+        Size = UDim2.new(1, 0, 1, -84 - 64),
+        Position = UDim2.new(0, 0, 0, 84),
+        BackgroundTransparency = 1,
+        ScrollBarThickness = 0,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        ZIndex = 3,
+        Parent = sidebar
+    })
+    local tabLayout = U.New("UIListLayout", {
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 4),
+        Parent = tabList
+    })
+    U.New("UIPadding", {
+        PaddingLeft = UDim.new(0, 12),
+        PaddingRight = UDim.new(0, 12),
+        PaddingTop = UDim.new(0, 10),
+        Parent = tabList
+    })
+
+    -- // SIDEBAR FOOTER (User card) \ --
+    local footer = U.New("Frame", {
+        Name = "SidebarFooter",
+        Size = UDim2.new(1, 0, 0, 60),
+        Position = UDim2.new(0, 0, 1, -60),
+        BackgroundColor3 = T.Surface,
+        BackgroundTransparency = 0.5,
+        BorderSizePixel = 0,
+        ZIndex = 4,
+        Parent = sidebar
+    })
+    RegisterThemeColor(footer, "BackgroundColor3", "Surface")
+    local fStroke = U.Stroke(footer, T.Stroke, 1, 0.4)
+    RegisterThemeColor(fStroke, "Color", "Stroke")
+
+    local uName = Player and Player.DisplayName or "User"
+    local uHandle = Player and ("@" .. Player.Name) or "@user"
+
+    local fLbl = U.New("TextLabel", {
+        Text = uName,
+        Font = T.FontBold,
+        TextSize = 12,
+        TextColor3 = T.Text,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 16, 0, 12),
+        Size = UDim2.new(1, -32, 0, 16),
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+        ZIndex = 5,
+        Parent = footer
+    })
+    local hLbl = U.New("TextLabel", {
+        Text = uHandle,
+        Font = T.FontRegular,
+        TextSize = 10,
+        TextColor3 = T.TextMuted,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 16, 0, 30),
+        Size = UDim2.new(1, -32, 0, 14),
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+        ZIndex = 5,
+        Parent = footer
+    })
+
+    -- // CONTENT AREA (Double Column) \ --
+    local contentArea = U.New("Frame", {
+        Name = "ContentArea",
+        Size = UDim2.new(1, -(SIDEBAR_W + 1), 1, 0),
+        Position = UDim2.new(0, SIDEBAR_W + 1, 0, 0),
+        BackgroundTransparency = 1,
+        ZIndex = 2,
+        Parent = main
+    })
+
+    -- Visibility Toggle Method
+    function Win:ToggleVisibility(visible)
+        if visible == nil then visible = not gui.Enabled end
+        if visible then
+            gui.Enabled = true
+            main.Size = UDim2.fromScale(0.95, 0.95)
+            main.BackgroundTransparency = 0.4
+            U.Tween(main, 0.28, { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 0.04 }, Enum.EasingStyle.Quart)
+        else
+            U.Tween(main, 0.2, { Size = UDim2.fromScale(0.95, 0.95), BackgroundTransparency = 1 }, Enum.EasingStyle.Quart).Completed:Connect(function()
+                gui.Enabled = false
+            end)
+        end
+    end
+
+    function Win:SetTheme(name)
+        ZypheraxUI:SetTheme(name)
+    end
 
     function Win:Destroy()
         for _, c in ipairs(connections) do
             if c and c.Connected then pcall(function() c:Disconnect() end) end
         end
-        table.clear(connections)
-        if gui then pcall(function() gui:Destroy() end) end
-        if FloatingToggleGui then pcall(function() FloatingToggleGui:Destroy() end) end
+        if gui then gui:Destroy() end
     end
 
-    -- Toggle Window Visibility & Floating Bubble
-    local floatBtn = EnsureFloatingButton(function()
-        Win:ToggleVisibility(true)
-    end)
-    -- Update logo inside bubble if provided
-    if floatBtn then
-        local bLogo = floatBtn:FindFirstChild("FloatingLogo")
-        local bText = floatBtn:FindFirstChild("FloatingText")
-        if logo and logo ~= "" then
-            if bLogo then
-                bLogo.Image = logo
-                bLogo.Visible = true
-            end
-            if bText then bText.Visible = false end
-        else
-            if bLogo then bLogo.Visible = false end
-            if bText then bText.Visible = true end
-        end
-    end
-
-    function Win:ToggleVisibility(visible)
-        if visible == nil then visible = not gui.Enabled end
-        if visible then
-            gui.Enabled = true
-            floatBtn.Visible = false
-            if FloatingContainer then FloatingContainer.Visible = false end
-            main.Size = UDim2.new(0, size.X.Offset * 0.92, 0, size.Y.Offset * 0.92)
-            main.BackgroundTransparency = 1
-            U.Tween(main, 0.32, { Size = size, BackgroundTransparency = 0.08 }, Enum.EasingStyle.Quint)
-        else
-            U.Tween(main, 0.22, {
-                Size = UDim2.new(0, size.X.Offset * 0.92, 0, size.Y.Offset * 0.92),
-                BackgroundTransparency = 1
-            }, Enum.EasingStyle.Quint).Completed:Connect(function()
-                gui.Enabled = false
-                floatBtn.Visible = true
-                if FloatingContainer then FloatingContainer.Visible = true end
-            end)
-        end
-    end
-
-    trackConnection(closeBtn.MouseButton1Click:Connect(function()
-        U.Ripple(closeBtn, Player:GetMouse().X, Player:GetMouse().Y)
-        Win:Destroy()
-    end))
-    trackConnection(minBtn.MouseButton1Click:Connect(function()
-        U.Ripple(minBtn, Player:GetMouse().X, Player:GetMouse().Y)
-        Win:ToggleVisibility(false)
-    end))
-
-    -- Keybind Listener
-    local registeredKeybinds = {}
-    trackConnection(UIS.InputBegan:Connect(function(inp, gp)
+    -- Keybind listener
+    track(UIS.InputBegan:Connect(function(inp, gp)
         if gp then return end
         if inp.KeyCode == keybind then
             Win:ToggleVisibility()
-        else
-            for _, kb in ipairs(registeredKeybinds) do
-                if inp.KeyCode == kb.key then kb.callback(kb.key) end
-            end
         end
     end))
 
-    -- // SIDEBAR (Full height, left column — matches reference image) \\ --
-    local SIDEBAR_W = 240
-    local sidebar = U.New("Frame", {
-        Size             = UDim2.new(0, SIDEBAR_W, 1, 0),
-        Position         = UDim2.new(0, 0, 0, 0),
-        BackgroundColor3 = T.SidebarBg,
-        BorderSizePixel  = 0,
-        ClipsDescendants = true,
-        ZIndex           = 2,
-        Parent           = main
-    })
-    U.Corner(sidebar, T.CornerLg)
-    -- Right border separator
-    U.New("Frame", {
-        Size             = UDim2.new(0, 1, 1, 0),
-        Position         = UDim2.new(1, 0, 0, 0),
-        BackgroundColor3 = T.Stroke,
-        BorderSizePixel  = 0,
-        ZIndex           = 3,
-        Parent           = sidebar
-    })
-    -- Fill bottom-left corner to be square (covers the rounded corners on the right side)
-    U.New("Frame", {
-        Size             = UDim2.new(0, T.CornerLg.Offset, 1, 0),
-        Position         = UDim2.new(1, -T.CornerLg.Offset, 0, 0),
-        BackgroundColor3 = T.SidebarBg,
-        BorderSizePixel  = 0,
-        ZIndex           = 2,
-        Parent           = sidebar
-    })
+    -- // TAB CREATOR \ --
+    function Win:CreateTab(tabCfg)
+        local tabName = type(tabCfg) == "table" and (tabCfg.Name or tabCfg.Title) or tabCfg or "Tab"
+        local tabIcon = type(tabCfg) == "table" and tabCfg.Icon or nil
 
-    -- // SIDEBAR HEADER (Logo + Title + drag area) \\ --
-    local sidebarHeader = U.New("Frame", {
-        Size             = UDim2.new(1, 0, 0, 72),
-        BackgroundTransparency = 1,
-        ZIndex           = 4,
-        Parent           = sidebar
-    })
-
-    -- Logo box (Transparent background)
-    local logoBox = U.New("Frame", {
-        Size             = UDim2.new(0, 44, 0, 44),
-        Position         = UDim2.new(0, 14, 0.5, -22),
-        BackgroundTransparency = 1,
-        ZIndex           = 5,
-        Parent           = sidebarHeader
-    })
-    U.Corner(logoBox, UDim.new(0, 6))
-    -- Logo image
-    local logoImg = U.New("ImageLabel", {
-        Size                   = UDim2.new(1, 0, 1, 0),
-        Position               = UDim2.new(0, 0, 0, 0),
-        BackgroundTransparency = 1,
-        Image                  = logo or "",
-        ScaleType              = Enum.ScaleType.Fit,
-        ZIndex                 = 6,
-        Parent                 = logoBox
-    })
-    if not logo or logo == "" then
-        logoImg.Visible = false
-        U.New("TextLabel", {
-            Text                   = "Z",
-            Font                   = T.Font,
-            TextSize               = 24,
-            TextColor3             = T.Accent,
+        -- Tab button
+        local tabBtn = U.New("TextButton", {
+            Name = "TabBtn_" .. tabName,
+            Size = UDim2.new(1, 0, 0, 38),
+            BackgroundColor3 = T.Surface2,
             BackgroundTransparency = 1,
-            Size                   = UDim2.new(1, 0, 1, 0),
-            ZIndex                 = 6,
-            Parent                 = logoBox
+            AutoButtonColor = false,
+            Text = "",
+            ZIndex = 4,
+            Parent = tabList
         })
-    end
+        U.Corner(tabBtn, T.CornerMd)
+        local btnStroke = U.Stroke(tabBtn, T.Stroke, 1, 1)
 
-    -- Title text
-    U.New("TextLabel", {
-        Text                   = string.upper(title),
-        Font                   = T.Font,
-        TextSize               = 16,
-        TextColor3             = T.Accent,
-        BackgroundTransparency = 1,
-        Position               = UDim2.new(0, 66, 0, 16),
-        Size                   = UDim2.new(1, -80, 0, 18),
-        TextXAlignment         = Enum.TextXAlignment.Left,
-        ZIndex                 = 5,
-        Parent                 = sidebarHeader
-    })
-    U.New("TextLabel", {
-        Text                   = sub,
-        Font                   = T.FontRegular,
-        TextSize               = 12,
-        TextColor3             = T.TextMuted,
-        BackgroundTransparency = 1,
-        Position               = UDim2.new(0, 66, 0, 36),
-        Size                   = UDim2.new(1, -80, 0, 14),
-        TextXAlignment         = Enum.TextXAlignment.Left,
-        ZIndex                 = 5,
-        Parent                 = sidebarHeader
-    })
-
-    -- Blue underline divider below header (matching reference image)
-    local headerDivider = U.New("Frame", {
-        Size             = UDim2.new(1, -20, 0, 1.5),
-        Position         = UDim2.new(0, 10, 1, -1),
-        BackgroundColor3 = T.Accent,
-        BorderSizePixel  = 0,
-        ZIndex           = 5,
-        Parent           = sidebarHeader
-    })
-    U.New("UIGradient", {
-        Color    = ColorSequence.new(T.Accent, Color3.fromRGB(0,0,0)),
-        Rotation = 0,
-        Parent   = headerDivider
-    })
-
-    -- Draggable (drag on sidebar header)
-    local dragging, dragStart, startPos = false, nil, nil
-    trackConnection(sidebarHeader.InputBegan:Connect(function(inp)
-        if inp.UserInputType == Enum.UserInputType.MouseButton1 or
-           inp.UserInputType == Enum.UserInputType.Touch then
-            dragging  = true
-            dragStart = inp.Position
-            startPos  = shadow.Position
-            local c
-            c = inp.Changed:Connect(function()
-                if inp.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                    if c then c:Disconnect() end
-                end
-            end)
-        end
-    end))
-    trackConnection(sidebarHeader.InputChanged:Connect(function(inp)
-        if dragging and (
-            inp.UserInputType == Enum.UserInputType.MouseMovement or
-            inp.UserInputType == Enum.UserInputType.Touch
-        ) then
-            local d = inp.Position - dragStart
-            shadow.Position = UDim2.new(
-                startPos.X.Scale, startPos.X.Offset + d.X,
-                startPos.Y.Scale, startPos.Y.Offset + d.Y
-            )
-        end
-    end))
-
-    -- // SIDEBAR TAB LIST (scrollable, pill-style) \\ --
-    local tabList = U.New("ScrollingFrame", {
-        Size                   = UDim2.new(1, 0, 1, -72 - 80),  -- leave room for header + footer
-        Position               = UDim2.new(0, 0, 0, 72),
-        BackgroundTransparency = 1,
-        ScrollBarThickness     = 0,
-        AutomaticCanvasSize    = Enum.AutomaticSize.Y,
-        CanvasSize             = UDim2.new(0, 0, 0, 0),
-        ZIndex                 = 3,
-        Parent                 = sidebar
-    })
-    U.New("UIListLayout", {
-        SortOrder = Enum.SortOrder.LayoutOrder,
-        Padding   = UDim.new(0, 3),
-        Parent    = tabList
-    })
-    U.New("UIPadding", {
-        PaddingLeft   = UDim.new(0, 10),
-        PaddingRight  = UDim.new(0, 10),
-        PaddingTop    = UDim.new(0, 8),
-        Parent        = tabList
-    })
-
-    -- // SIDEBAR PLAYER FOOTER CARD \\ --
-    local footer = U.New("Frame", {
-        Size             = UDim2.new(1, 0, 0, 72),
-        Position         = UDim2.new(0, 0, 1, -72),
-        BackgroundColor3 = T.Surface,
-        BackgroundTransparency = 0.3,
-        BorderSizePixel  = 0,
-        ZIndex           = 4,
-        Parent           = sidebar
-    })
-    -- Top border of footer
-    U.New("Frame", {
-        Size             = UDim2.new(1, 0, 0, 1),
-        BackgroundColor3 = T.Stroke,
-        BorderSizePixel  = 0,
-        ZIndex           = 5,
-        Parent           = footer
-    })
-
-    -- Avatar circle
-    local avatarFrame = U.New("Frame", {
-        Size             = UDim2.new(0, 44, 0, 44),
-        Position         = UDim2.new(0, 12, 0.5, -22),
-        BackgroundColor3 = T.Surface3,
-        ZIndex           = 5,
-        Parent           = footer
-    })
-    U.Corner(avatarFrame, UDim.new(1, 0))
-    U.Stroke(avatarFrame, T.Accent, 1.5, 0.3)
-
-    local avatarImg = U.New("ImageLabel", {
-        Size                   = UDim2.new(1, 0, 1, 0),
-        BackgroundTransparency = 1,
-        Image                  = "",
-        ScaleType              = Enum.ScaleType.Crop,
-        ZIndex                 = 6,
-        Parent                 = avatarFrame
-    })
-    U.Corner(avatarImg, UDim.new(1, 0))
-
-    -- Load avatar async
-    task.spawn(function()
-        local ok, url = pcall(function()
-            return Players:GetUserThumbnailAsync(
-                Player.UserId,
-                Enum.ThumbnailType.AvatarBust,
-                Enum.ThumbnailSize.Size100x100
-            )
-        end)
-        if ok and url then avatarImg.Image = url end
-    end)
-
-    -- Online status dot
-    local statusDot = U.New("Frame", {
-        Size             = UDim2.new(0, 10, 0, 10),
-        Position         = UDim2.new(1, -2, 1, -2),
-        AnchorPoint      = Vector2.new(1, 1),
-        BackgroundColor3 = T.Success,
-        ZIndex           = 7,
-        Parent           = avatarFrame
-    })
-    U.Corner(statusDot, UDim.new(1, 0))
-    U.Stroke(statusDot, T.SidebarBg, 1.5, 0)
-
-    -- Username
-    U.New("TextLabel", {
-        Text                   = Player.DisplayName,
-        Font                   = T.Font,
-        TextSize               = 13,
-        TextColor3             = T.Text,
-        BackgroundTransparency = 1,
-        Position               = UDim2.new(0, 64, 0, 14),
-        Size                   = UDim2.new(1, -80, 0, 16),
-        TextXAlignment         = Enum.TextXAlignment.Left,
-        TextTruncate           = Enum.TextTruncate.AtEnd,
-        ZIndex                 = 5,
-        Parent                 = footer
-    })
-
-    -- @username muted
-    U.New("TextLabel", {
-        Text                   = "@" .. Player.Name,
-        Font                   = T.FontRegular,
-        TextSize               = 10,
-        TextColor3             = T.TextMuted,
-        BackgroundTransparency = 1,
-        Position               = UDim2.new(0, 64, 0, 32),
-        Size                   = UDim2.new(1, -80, 0, 13),
-        TextXAlignment         = Enum.TextXAlignment.Left,
-        TextTruncate           = Enum.TextTruncate.AtEnd,
-        ZIndex                 = 5,
-        Parent                 = footer
-    })
-
-    -- Status badge ("Online" pill)
-    local statusBadge = U.New("Frame", {
-        Size             = UDim2.new(0, 52, 0, 16),
-        Position         = UDim2.new(0, 64, 0, 48),
-        BackgroundColor3 = T.Success,
-        BackgroundTransparency = 0.6,
-        ZIndex           = 5,
-        Parent           = footer
-    })
-    U.Corner(statusBadge, UDim.new(1, 0))
-    U.New("TextLabel", {
-        Text                   = "●  Online",
-        Font                   = T.Font,
-        TextSize               = 9,
-        TextColor3             = T.Success,
-        BackgroundTransparency = 1,
-        Size                   = UDim2.new(1, 0, 1, 0),
-        ZIndex                 = 6,
-        Parent                 = statusBadge
-    })
-
-
-    -- // CONTENT CONTAINER (Double Column, right of sidebar) \\ --
-    local contentArea = U.New("Frame", {
-        Size             = UDim2.new(1, -(SIDEBAR_W + 1), 1, -8),
-        Position         = UDim2.new(0, SIDEBAR_W + 1, 0, 4),
-        BackgroundTransparency = 1,
-        ZIndex           = 2,
-        Parent           = main
-    })
-
-    -- // RESIZE HANDLE (Clean Single Triangle Chevron) \\ --
-    local resizeHandle = U.New("Frame", {
-        Size                   = UDim2.new(0, 20, 0, 20),
-        Position               = UDim2.new(1, -20, 1, -20),
-        BackgroundTransparency = 1,
-        ZIndex                 = 20,
-        Parent                 = main
-    })
-    
-    local chevron = U.New("TextLabel", {
-        Text                   = "⌟",
-        Font                   = T.Font,
-        TextSize               = 18,
-        TextColor3             = T.TextDim,
-        BackgroundTransparency = 1,
-        Size                   = UDim2.new(1, 0, 1, 0),
-        ZIndex                 = 21,
-        Parent                 = resizeHandle
-    })
-
-    local resizeBtn = U.New("TextButton", {
-        Size                   = UDim2.new(1, 0, 1, 0), 
-        BackgroundTransparency = 1,
-        Text                   = "", 
-        AutoButtonColor        = false, 
-        ZIndex                 = 22, 
-        Parent                 = resizeHandle
-    })
-
-    local MIN_W, MIN_H = 460, 340
-    local resizeDragging, resizeStart, resizeOrigSize = false, nil, nil
-    trackConnection(resizeBtn.InputBegan:Connect(function(inp)
-        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
-            resizeDragging = true
-            resizeStart    = Vector2.new(inp.Position.X, inp.Position.Y)
-            resizeOrigSize = Vector2.new(main.AbsoluteSize.X, main.AbsoluteSize.Y)
-            local c
-            c = inp.Changed:Connect(function()
-                if inp.UserInputState == Enum.UserInputState.End then
-                    resizeDragging = false
-                    if c then c:Disconnect() end
-                end
-            end)
-        end
-    end))
-    trackConnection(UIS.InputChanged:Connect(function(inp)
-        if resizeDragging and inp.UserInputType == Enum.UserInputType.MouseMovement then
-            local delta    = Vector2.new(inp.Position.X, inp.Position.Y) - resizeStart
-            local newW     = math.max(MIN_W, resizeOrigSize.X + delta.X)
-            local newH     = math.max(MIN_H, resizeOrigSize.Y + delta.Y)
-            local newSize  = UDim2.fromOffset(newW, newH)
-            main.Size      = newSize
-            shadow.Size    = UDim2.new(0, newW + 80, 0, newH + 80)
-            size           = newSize
-        end
-    end))
-    trackConnection(resizeBtn.MouseEnter:Connect(function()
-        U.Tween(chevron, 0.12, { TextColor3 = T.Accent })
-    end))
-    trackConnection(resizeBtn.MouseLeave:Connect(function()
-        U.Tween(chevron, 0.2, { TextColor3 = T.TextDim })
-    end))
-
-    -- // CREATE TAB / PAGE (Neverlose Double Column Grid Layout) \\ --
-    function Win:CreateTab(nameOrCfg, icon)
-        local tabName = type(nameOrCfg) == "table" and (nameOrCfg.Name or nameOrCfg.Title) or nameOrCfg
-        local tabIcon = type(nameOrCfg) == "table" and (nameOrCfg.Icon or nameOrCfg.Logo) or icon
-
-        local tabBtn = U.New("Frame", {
-            Size                   = UDim2.new(1, 0, 0, 42),
-            BackgroundColor3       = T.Surface2,
-            BackgroundTransparency = 1,
-            ZIndex                 = 4,
-            Parent                 = tabList
-        })
-        U.Corner(tabBtn, UDim.new(0, 8))
-
-        -- Left accent bar (pill shape, shown when active)
+        -- Active indicator bar
         local activeBar = U.New("Frame", {
-            Size             = UDim2.new(0, 3, 0, 22),
-            Position         = UDim2.new(0, 0, 0.5, -11),
+            Size = UDim2.new(0, 3, 0, 18),
+            Position = UDim2.new(0, 6, 0.5, -9),
             BackgroundColor3 = T.Accent,
+            BorderSizePixel = 0,
             BackgroundTransparency = 1,
-            ZIndex           = 5,
-            Parent           = tabBtn
+            ZIndex = 5,
+            Parent = tabBtn
         })
         U.Corner(activeBar, UDim.new(1, 0))
-
-        -- Icon (image or default circle dot)
-        local iconEl
-        local iconOffset = 14
-        if tabIcon and tabIcon ~= "" then
-            iconEl = U.New("ImageLabel", {
-                Image                  = string.find(tabIcon, "rbxassetid") and tabIcon or ("rbxassetid://" .. tabIcon),
-                Size                   = UDim2.new(0, 18, 0, 18),
-                Position               = UDim2.new(0, 12, 0.5, -9),
-                BackgroundColor3       = T.Surface3,
-                BackgroundTransparency = 0.3,
-                ImageColor3            = T.TextMuted,
-                ZIndex                 = 5,
-                Parent                 = tabBtn
-            })
-            U.Corner(iconEl, UDim.new(0, 4))
-            iconOffset = 38
-        else
-            iconEl = U.New("Frame", {
-                Size             = UDim2.new(0, 6, 0, 6),
-                Position         = UDim2.new(0, 16, 0.5, -3),
-                BackgroundColor3 = T.TextDim,
-                ZIndex           = 5,
-                Parent           = tabBtn
-            })
-            U.Corner(iconEl, UDim.new(1, 0))
-        end
+        RegisterThemeColor(activeBar, "BackgroundColor3", "Accent")
 
         local tabLbl = U.New("TextLabel", {
-            Text                   = tabName,
-            Font                   = T.FontRegular,
-            TextSize               = 13,
-            TextColor3             = T.TextMuted,
+            Text = tabName,
+            Font = T.FontRegular,
+            TextSize = 12,
+            TextColor3 = T.TextMuted,
             BackgroundTransparency = 1,
-            Position               = UDim2.new(0, iconOffset, 0, 0),
-            Size                   = UDim2.new(1, -iconOffset - 10, 1, 0),
-            TextXAlignment         = Enum.TextXAlignment.Left,
-            ZIndex                 = 5,
-            Parent                 = tabBtn
+            Position = UDim2.new(0, 18, 0, 0),
+            Size = UDim2.new(1, -26, 1, 0),
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            ZIndex = 5,
+            Parent = tabBtn
         })
 
-        -- Invisible clickable overlay
-        local tabBtnStroke = U.Stroke(tabBtn, T.Stroke, 1, 1)  -- hidden by default
-        local clickable = U.New("TextButton", {
-            Size                   = UDim2.new(1, 0, 1, 0),
-            BackgroundTransparency = 1,
-            Text                   = "",
-            AutoButtonColor        = false,
-            ZIndex                 = 6,
-            Parent                 = tabBtn
-        })
-
-        -- Double Column Container (Side 1 = Left Column, Side 2 = Right Column)
+        -- Double Column Container for this Tab
         local pageFrame = U.New("Frame", {
-            Size = UDim2.new(1, -16, 1, -16),
-            Position = UDim2.new(0, 8, 0, 8),
+            Name = "Page_" .. tabName,
+            Size = UDim2.new(1, -20, 1, -20),
+            Position = UDim2.new(0, 10, 0, 10),
             BackgroundTransparency = 1,
             Visible = false,
             ZIndex = 3,
             Parent = contentArea
         })
 
-        local function makeColumn(posX, widthScale)
+        local function makeColumn(posX)
             local col = U.New("ScrollingFrame", {
-                Size = UDim2.new(widthScale, -4, 1, 0),
+                Size = UDim2.new(0.5, -6, 1, 0),
                 Position = UDim2.new(posX, 0, 0, 0),
                 BackgroundTransparency = 1,
                 ScrollBarThickness = 2,
                 ScrollBarImageColor3 = T.Accent,
-                ScrollBarImageTransparency = 0.6,
                 AutomaticCanvasSize = Enum.AutomaticSize.Y,
                 CanvasSize = UDim2.new(0, 0, 0, 0),
                 ZIndex = 3,
                 Parent = pageFrame
             })
-            U.New("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8), Parent = col })
-            U.New("UIPadding", { PaddingBottom = UDim.new(0, 12), Parent = col })
+            U.New("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 10), Parent = col })
+            U.New("UIPadding", { PaddingBottom = UDim.new(0, 16), Parent = col })
             return col
         end
 
-        local leftCol  = makeColumn(0, 0.5)
-        local rightCol = makeColumn(0.5, 0.5)
+        local leftCol  = makeColumn(0)
+        local rightCol = makeColumn(0.5)
 
-        local function activate()
+        local function activateTab()
             for _, t in ipairs(Win.Tabs) do
                 t.page.Visible = false
-                -- Deactivate: remove pill bg, fade label, hide bar and icon tint
-                U.Tween(t.btn,    0.18, { BackgroundTransparency = 1 })
-                U.Tween(t.stroke, 0.18, { Transparency = 1 })
-                U.Tween(t.lbl,    0.18, { TextColor3 = T.TextMuted, Font = T.FontRegular })
-                U.Tween(t.bar,    0.18, { BackgroundTransparency = 1 })
-                if t.iconEl and t.iconEl:IsA("ImageLabel") then
-                    U.Tween(t.iconEl, 0.18, { ImageColor3 = T.TextMuted, BackgroundTransparency = 0.3 })
-                elseif t.iconEl and t.iconEl:IsA("Frame") then
-                    U.Tween(t.iconEl, 0.18, { BackgroundColor3 = T.TextDim })
-                end
+                U.Tween(t.btn, 0.15, { BackgroundTransparency = 1 })
+                U.Tween(t.stroke, 0.15, { Transparency = 1 })
+                U.Tween(t.lbl, 0.15, { TextColor3 = T.TextMuted, Font = T.FontRegular })
+                U.Tween(t.bar, 0.15, { BackgroundTransparency = 1 })
             end
             pageFrame.Visible = true
-            -- Activate: pill bg cyan-tint, accent label, show left bar
-            U.Tween(tabBtn,       0.2, { BackgroundColor3 = T.AccentDark, BackgroundTransparency = 0.7 })
-            U.Tween(tabBtnStroke, 0.2, { Transparency = 0.5, Color = T.AccentDark })
-            U.Tween(tabLbl,       0.2, { TextColor3 = T.Accent, Font = T.Font })
-            U.Tween(activeBar,    0.2, { BackgroundTransparency = 0 })
-            if iconEl and iconEl:IsA("ImageLabel") then
-                U.Tween(iconEl, 0.2, { ImageColor3 = T.Accent, BackgroundTransparency = 0.1 })
-            elseif iconEl and iconEl:IsA("Frame") then
-                U.Tween(iconEl, 0.2, { BackgroundColor3 = T.Accent })
-            end
+            U.Tween(tabBtn, 0.18, { BackgroundColor3 = T.Surface2, BackgroundTransparency = 0.4 })
+            U.Tween(btnStroke, 0.18, { Transparency = 0.5, Color = T.Accent })
+            U.Tween(tabLbl, 0.18, { TextColor3 = T.Accent, Font = T.FontBold })
+            U.Tween(activeBar, 0.18, { BackgroundTransparency = 0 })
             Win._currentTab = tabName
         end
 
-        trackConnection(clickable.MouseButton1Click:Connect(function()
-            U.Ripple(tabBtn, Player:GetMouse().X, Player:GetMouse().Y)
-            activate()
-        end))
-        trackConnection(clickable.MouseEnter:Connect(function()
+        track(tabBtn.MouseButton1Click:Connect(activateTab))
+        track(tabBtn.MouseEnter:Connect(function()
             if Win._currentTab ~= tabName then
-                U.Tween(tabBtn,       0.12, { BackgroundColor3 = T.Surface3, BackgroundTransparency = 0.5 })
-                U.Tween(tabLbl,       0.12, { TextColor3 = T.Text })
+                U.Tween(tabBtn, 0.12, { BackgroundColor3 = T.Surface, BackgroundTransparency = 0.5 })
+                U.Tween(tabLbl, 0.12, { TextColor3 = T.Text })
             end
         end))
-        trackConnection(clickable.MouseLeave:Connect(function()
+        track(tabBtn.MouseLeave:Connect(function()
             if Win._currentTab ~= tabName then
-                U.Tween(tabBtn,       0.2, { BackgroundTransparency = 1 })
-                U.Tween(tabLbl,       0.2, { TextColor3 = T.TextMuted })
+                U.Tween(tabBtn, 0.15, { BackgroundTransparency = 1 })
+                U.Tween(tabLbl, 0.15, { TextColor3 = T.TextMuted })
             end
         end))
 
-        if #Win.Tabs == 0 then activate() end
+        if #Win.Tabs == 0 then activateTab() end
 
-        local entry = {
-            btn    = tabBtn,
-            stroke = tabBtnStroke,
-            lbl    = tabLbl,
-            bar    = activeBar,
-            iconEl = iconEl,
-            page   = pageFrame,
-            name   = tabName
-        }
-        table.insert(Win.Tabs, entry)
+        local tabEntry = { btn = tabBtn, stroke = btnStroke, lbl = tabLbl, bar = activeBar, page = pageFrame, name = tabName }
+        table.insert(Win.Tabs, tabEntry)
 
-        -- // TAB / PAGE COMPONENT API (Neverlose Sections) \\ --
-        local Tab = {}
-
-        function Tab:CreateSection(secCfg)
-            local secName = type(secCfg) == "table" and (secCfg.Name or secCfg.Title) or secCfg
+        -- // SECTION BUILDER (Zero Generic "SECTION" Text Overlaps) \ --
+        local TabObj = {}
+        function TabObj:CreateSection(secCfg)
+            local rawName = type(secCfg) == "table" and (secCfg.Name or secCfg.Title) or secCfg
             local side    = type(secCfg) == "table" and (secCfg.Side or 1) or 1
             local targetCol = (side == 2) and rightCol or leftCol
 
+            -- Check if name is generic
+            local isGeneric = (rawName == nil or rawName == "" or rawName == "Section" or rawName == "SECTION")
+            local displayName = isGeneric and "" or tostring(rawName)
+
             local sectionBox = U.New("Frame", {
+                Name = "SectionBox_" .. (displayName ~= "" and displayName or "Card"),
                 Size = UDim2.new(1, 0, 0, 0),
                 BackgroundColor3 = T.SectionBg,
                 AutomaticSize = Enum.AutomaticSize.Y,
@@ -4984,46 +4633,51 @@ function ZypheraxUI:CreateWindow(config)
                 Parent = targetCol
             })
             U.Corner(sectionBox, T.CornerMd)
-            U.Stroke(sectionBox, T.Stroke, 1, 0.4)
+            local sStroke = U.Stroke(sectionBox, T.Stroke, 1, 0.4)
+            RegisterThemeColor(sectionBox, "BackgroundColor3", "SectionBg")
+            RegisterThemeColor(sStroke, "Color", "Stroke")
 
-            -- Section Header
+            -- Section Header Frame (Only visible if real name exists)
             local secHeader = U.New("Frame", {
-                Size = UDim2.new(1, 0, 0, 30),
+                Name = "Header",
+                Size = UDim2.new(1, 0, 0, displayName ~= "" and 28 or 0),
                 BackgroundColor3 = T.SectionHeader,
+                Visible = (displayName ~= ""),
                 ZIndex = 5,
                 Parent = sectionBox
             })
             U.Corner(secHeader, T.CornerMd)
-            U.New("Frame", { Size = UDim2.new(1, 0, 0.4, 0), Position = UDim2.new(0, 0, 0.6, 0), BackgroundColor3 = T.SectionHeader, BorderSizePixel = 0, ZIndex = 4, Parent = secHeader })
-            
-            -- Top accent line (Subtle gradient)
-            local topLine = U.New("Frame", {
+            RegisterThemeColor(secHeader, "BackgroundColor3", "SectionHeader")
+
+            local hLine = U.New("Frame", {
                 Size = UDim2.new(1, 0, 0, 1),
-                Position = UDim2.new(0, 0, 0, 0),
-                BackgroundColor3 = Color3.new(1,1,1),
+                Position = UDim2.new(0, 0, 1, -1),
+                BackgroundColor3 = T.Accent,
                 BorderSizePixel = 0,
                 ZIndex = 6,
                 Parent = secHeader
             })
-            U.Gradient(topLine, T.AccentGradient, T.Background, 0)
+            U.Gradient(hLine, T.Accent, T.Background, 0)
 
-            U.New("TextLabel", {
-                Text = string.upper(secName),
-                Font = T.Font,
-                TextSize = 12,
-                TextColor3 = T.TextMuted,
+            local hTitle = U.New("TextLabel", {
+                Text = displayName,
+                Font = T.FontBold,
+                TextSize = 11,
+                TextColor3 = T.Accent,
                 BackgroundTransparency = 1,
                 Position = UDim2.new(0, 10, 0, 0),
                 Size = UDim2.new(1, -20, 1, 0),
                 TextXAlignment = Enum.TextXAlignment.Left,
+                TextTruncate = Enum.TextTruncate.AtEnd,
                 ZIndex = 6,
                 Parent = secHeader
             })
 
             -- Elements Container inside Section
             local secContainer = U.New("Frame", {
+                Name = "Container",
                 Size = UDim2.new(1, -16, 0, 0),
-                Position = UDim2.new(0, 8, 0, 32),
+                Position = UDim2.new(0, 8, 0, displayName ~= "" and 34 or 8),
                 BackgroundTransparency = 1,
                 AutomaticSize = Enum.AutomaticSize.Y,
                 ZIndex = 5,
@@ -5032,14 +4686,26 @@ function ZypheraxUI:CreateWindow(config)
             U.New("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8), Parent = secContainer })
             U.New("UIPadding", { PaddingBottom = UDim.new(0, 10), Parent = secContainer })
 
-            local Section = {}
+            local SectionObj = {}
+
+            -- Header updater (Sets section title without duplicate labels)
+            function SectionObj:Header(hCfg)
+                local txt = type(hCfg) == "table" and (hCfg.Name or hCfg[1]) or tostring(hCfg)
+                if txt and txt ~= "" then
+                    local clean = txt:gsub("<[^>]->", "")
+                    hTitle.Text = clean
+                    secHeader.Visible = true
+                    secHeader.Size = UDim2.new(1, 0, 0, 28)
+                    secContainer.Position = UDim2.new(0, 8, 0, 34)
+                end
+            end
 
             local function makeBase(height, isButton)
                 local cls = isButton and "TextButton" or "Frame"
                 local base = U.New(cls, {
-                    Size = UDim2.new(1, 0, 0, height),
+                    Size = UDim2.new(1, 0, 0, height or 38),
                     BackgroundColor3 = T.Surface2,
-                    BackgroundTransparency = 0.2, -- allow some section bg to bleed through for depth
+                    BackgroundTransparency = 0.25,
                     BorderSizePixel = 0,
                     ZIndex = 5,
                     Parent = secContainer
@@ -5048,13 +4714,15 @@ function ZypheraxUI:CreateWindow(config)
                     base.Text = ""
                     base.AutoButtonColor = false
                 end
-                U.Corner(base, T.CornerMd)
-                local stroke = U.Stroke(base, T.Stroke, 1, 0)
-                return base, stroke
+                U.Corner(base, T.CornerSm)
+                local bStroke = U.Stroke(base, T.Stroke, 1, 0)
+                RegisterThemeColor(base, "BackgroundColor3", "Surface2")
+                RegisterThemeColor(bStroke, "Color", "Stroke")
+                return base, bStroke
             end
 
-            -- TOGGLE
-            function Section:CreateToggle(cfg)
+            -- // TOGGLE (Anti-Collision: TextTruncate + Dedicated Switch Area) \ --
+            function SectionObj:CreateToggle(cfg)
                 local nm      = cfg.Name or "Toggle"
                 local flag    = cfg.Flag
                 local default = cfg.Default == true
@@ -5063,76 +4731,75 @@ function ZypheraxUI:CreateWindow(config)
 
                 if flag then ZypheraxUI.Flags[flag] = toggled end
 
-                local base, stroke = makeBase(36)
-                local h1, h2 = U.HoverEffect(base, stroke)
-                trackConnection(h1); trackConnection(h2)
+                local base, stroke = makeBase(38)
 
-                U.New("TextLabel", {
+                -- Label has generous space, cannot collide with switch
+                local lbl = U.New("TextLabel", {
                     Text = nm,
                     Font = T.FontRegular,
                     TextSize = 12,
                     TextColor3 = T.Text,
                     BackgroundTransparency = 1,
                     Position = UDim2.new(0, 10, 0, 0),
-                    Size = UDim2.new(1, -55, 1, 0),
+                    Size = UDim2.new(1, -56, 1, 0),
                     TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
                     ZIndex = 6,
                     Parent = base
                 })
 
+                -- Switch pill
                 local track = U.New("Frame", {
-                    Size = UDim2.new(0, 32, 0, 16),
-                    Position = UDim2.new(1, -42, 0.5, -8),
+                    Size = UDim2.new(0, 34, 0, 18),
+                    Position = UDim2.new(1, -44, 0.5, -9),
                     BackgroundColor3 = toggled and T.Accent or T.Surface3,
                     ZIndex = 6,
                     Parent = base
                 })
                 U.Corner(track, UDim.new(1, 0))
-                local trackStroke = U.Stroke(track, toggled and T.Accent or T.Stroke, 1, 0)
+                local tStroke = U.Stroke(track, toggled and T.Accent or T.Stroke, 1, 0)
 
                 local knob = U.New("Frame", {
-                    Size = UDim2.new(0, 12, 0, 12),
-                    Position = UDim2.new(0, toggled and 18 or 2, 0.5, -6),
-                    BackgroundColor3 = T.Text,
+                    Size = UDim2.new(0, 14, 0, 14),
+                    Position = UDim2.new(0, toggled and 18 or 2, 0.5, -7),
+                    BackgroundColor3 = Color3.new(1, 1, 1),
                     ZIndex = 7,
                     Parent = track
                 })
                 U.Corner(knob, UDim.new(1, 0))
 
-                local clickable = U.New("TextButton", { Size = UDim2.new(1,0,1,0), BackgroundTransparency=1, Text="", ZIndex=8, Parent=base })
+                local btn = U.New("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", ZIndex = 8, Parent = base })
 
-                local function fire(silent)
-                    toggled = not toggled
+                local function setVal(v, silent)
+                    toggled = v
                     if flag then ZypheraxUI.Flags[flag] = toggled end
                     U.Tween(track, 0.2, { BackgroundColor3 = toggled and T.Accent or T.Surface3 })
-                    U.Tween(trackStroke, 0.2, { Color = toggled and T.Accent or T.Stroke })
-                    U.Tween(knob, 0.25, { Position = UDim2.new(0, toggled and 18 or 2, 0.5, -6) }, Enum.EasingStyle.Back)
-                    if not silent then cb(toggled) end
+                    U.Tween(tStroke, 0.2, { Color = toggled and T.Accent or T.Stroke })
+                    U.Tween(knob, 0.22, { Position = UDim2.new(0, toggled and 18 or 2, 0.5, -7) }, Enum.EasingStyle.Quart)
+                    if not silent then pcall(cb, toggled) end
                 end
 
-                trackConnection(clickable.MouseButton1Down:Connect(function()
-                    U.Tween(knob, 0.1, { Size = UDim2.new(0, 14, 0, 12) })
-                end))
-                trackConnection(clickable.MouseButton1Up:Connect(function()
-                    U.Tween(knob, 0.2, { Size = UDim2.new(0, 12, 0, 12) }, Enum.EasingStyle.Back)
+                track(btn.MouseButton1Click:Connect(function()
+                    U.Ripple(btn, Player:GetMouse().X, Player:GetMouse().Y)
+                    setVal(not toggled)
                 end))
 
-                trackConnection(clickable.MouseButton1Click:Connect(function()
-                    U.Ripple(clickable, Player:GetMouse().X, Player:GetMouse().Y)
-                    fire()
-                end))
-
-                if default then cb(true) end
-                return { Set = function(_, v) if v ~= toggled then fire(true) end end, Get = function() return toggled end }
+                if default then pcall(cb, true) end
+                local ret = {
+                    Set = function(_, v) setVal(v == true, false) end,
+                    Get = function() return toggled end
+                }
+                if flag then ZypheraxUI.Controls[flag] = ret end
+                return ret
             end
-            Section.Toggle = Section.CreateToggle
+            SectionObj.Toggle = SectionObj.CreateToggle
 
-            -- SLIDER
-            function Section:CreateSlider(cfg)
+            -- // SLIDER (Anti-Collision: Two-Row Layout) \ --
+            function SectionObj:CreateSlider(cfg)
                 local nm      = cfg.Name or "Slider"
                 local flag    = cfg.Flag
-                local mn      = cfg.Min or 0
-                local mx      = cfg.Max or 100
+                local mn      = cfg.Min or cfg.Minimum or 0
+                local mx      = cfg.Max or cfg.Maximum or 100
                 local default = math.clamp(cfg.Default or mn, mn, mx)
                 local suffix  = cfg.Suffix or ""
                 local cb      = cfg.Callback or function() end
@@ -5141,10 +4808,9 @@ function ZypheraxUI:CreateWindow(config)
                 if flag then ZypheraxUI.Flags[flag] = value end
 
                 local base, stroke = makeBase(48)
-                local h1, h2 = U.HoverEffect(base, stroke)
-                trackConnection(h1); trackConnection(h2)
 
-                U.New("TextLabel", {
+                -- Title top-left
+                local lbl = U.New("TextLabel", {
                     Text = nm,
                     Font = T.FontRegular,
                     TextSize = 12,
@@ -5153,13 +4819,15 @@ function ZypheraxUI:CreateWindow(config)
                     Position = UDim2.new(0, 10, 0, 4),
                     Size = UDim2.new(1, -70, 0, 18),
                     TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
                     ZIndex = 6,
                     Parent = base
                 })
 
+                -- Value readout top-right
                 local valLbl = U.New("TextLabel", {
                     Text = tostring(default) .. suffix,
-                    Font = T.Font,
+                    Font = T.FontBold,
                     TextSize = 11,
                     TextColor3 = T.Accent,
                     BackgroundTransparency = 1,
@@ -5170,598 +4838,675 @@ function ZypheraxUI:CreateWindow(config)
                     Parent = base
                 })
 
-                local track = U.New("Frame", {
+                -- Track bottom
+                local trackBar = U.New("Frame", {
                     Size = UDim2.new(1, -20, 0, 4),
                     Position = UDim2.new(0, 10, 0, 32),
                     BackgroundColor3 = T.Surface3,
                     ZIndex = 6,
                     Parent = base
                 })
-                U.Corner(track, UDim.new(1, 0))
+                U.Corner(trackBar, UDim.new(1, 0))
 
-                local fillRatio = (default - mn) / math.max(mx - mn, 1)
+                local ratio = (default - mn) / math.max(mx - mn, 1)
                 local fill = U.New("Frame", {
-                    Size = UDim2.new(fillRatio, 0, 1, 0),
-                    BackgroundColor3 = Color3.new(1,1,1), -- gradient base
+                    Size = UDim2.new(ratio, 0, 1, 0),
+                    BackgroundColor3 = T.Accent,
                     ZIndex = 7,
-                    Parent = track
+                    Parent = trackBar
                 })
                 U.Corner(fill, UDim.new(1, 0))
-                U.Gradient(fill, T.AccentGradient, T.Accent, 0)
+                U.Gradient(fill, T.Accent, T.AccentGradient, 0)
 
                 local knob = U.New("Frame", {
-                    Size = UDim2.new(0, 12, 0, 12),
+                    Size = UDim2.fromOffset(12, 12),
                     Position = UDim2.new(1, -6, 0.5, -6),
-                    BackgroundColor3 = T.Text,
+                    BackgroundColor3 = Color3.new(1, 1, 1),
                     ZIndex = 8,
                     Parent = fill
                 })
                 U.Corner(knob, UDim.new(1, 0))
-                local knobStroke = U.Stroke(knob, T.Stroke, 1, 0)
 
-                local hitbox = U.New("TextButton", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "", ZIndex = 9, Parent = base })
-                local dragging = false
-                local dragConn = nil
+                local btn = U.New("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", ZIndex = 9, Parent = base })
 
-                local function updateSlider(mx_pos)
-                    local rel = math.clamp((mx_pos - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
+                local function updateSlider(mouseX)
+                    local rel = math.clamp((mouseX - trackBar.AbsolutePosition.X) / trackBar.AbsoluteSize.X, 0, 1)
                     value = math.floor(mn + (mx - mn) * rel)
                     if flag then ZypheraxUI.Flags[flag] = value end
                     valLbl.Text = tostring(value) .. suffix
                     fill.Size = UDim2.new(rel, 0, 1, 0)
-                    cb(value)
+                    pcall(cb, value)
                 end
 
-                trackConnection(hitbox.InputBegan:Connect(function(inp)
+                local sDragging = false
+                track(btn.InputBegan:Connect(function(inp)
                     if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
-                        dragging = true
-                        U.Tween(knob, 0.1, { Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(1, -7, 0.5, -7) })
-                        U.Tween(knobStroke, 0.1, { Color = T.Accent })
-                        updateSlider(UIS:GetMouseLocation().X)
-                        if dragConn then dragConn:Disconnect() end
-                        dragConn = UIS.InputChanged:Connect(function(mInp)
-                            if dragging and (mInp.UserInputType == Enum.UserInputType.MouseMovement or mInp.UserInputType == Enum.UserInputType.Touch) then
-                                updateSlider(UIS:GetMouseLocation().X)
-                            end
-                        end)
+                        sDragging = true
+                        updateSlider(inp.Position.X)
+                    end
+                end))
+                track(UIS.InputChanged:Connect(function(inp)
+                    if sDragging and (inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch) then
+                        updateSlider(inp.Position.X)
+                    end
+                end))
+                track(UIS.InputEnded:Connect(function(inp)
+                    if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+                        sDragging = false
                     end
                 end))
 
-                trackConnection(hitbox.InputEnded:Connect(function(inp)
-                    if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
-                        dragging = false
-                        U.Tween(knob, 0.2, { Size = UDim2.new(0, 12, 0, 12), Position = UDim2.new(1, -6, 0.5, -6) }, Enum.EasingStyle.Back)
-                        U.Tween(knobStroke, 0.2, { Color = T.Stroke })
-                        if dragConn then dragConn:Disconnect(); dragConn = nil end
-                    end
-                end))
-
-                return { Set = function(_, v) value = math.clamp(v, mn, mx) local r = (value-mn)/math.max(mx-mn,1) fill.Size = UDim2.new(r,0,1,0) valLbl.Text=tostring(value)..suffix end, Get = function() return value end }
+                local ret = {
+                    Set = function(_, v)
+                        v = math.clamp(v, mn, mx)
+                        value = v
+                        local r = (v - mn) / math.max(mx - mn, 1)
+                        fill.Size = UDim2.new(r, 0, 1, 0)
+                        valLbl.Text = tostring(v) .. suffix
+                        pcall(cb, v)
+                    end,
+                    Get = function() return value end
+                }
+                if flag then ZypheraxUI.Controls[flag] = ret end
+                return ret
             end
-            Section.Slider = Section.CreateSlider
+            SectionObj.Slider = SectionObj.CreateSlider
 
-            -- DROPDOWN
-            function Section:CreateDropdown(cfg)
-                local nm    = cfg.Name or "Dropdown"
-                local flag  = cfg.Flag
-                local items = cfg.Items or {}
-                local multi = cfg.Multi == true
-                local cb    = cfg.Callback or function() end
-                local selected = multi and (type(cfg.Default) == "table" and cfg.Default or {}) or (cfg.Default or nil)
-                local open = false
+            -- // DROPDOWN \ --
+            function SectionObj:CreateDropdown(cfg)
+                local nm      = cfg.Name or "Dropdown"
+                local items   = cfg.Options or cfg.Items or {}
+                local default = cfg.Default or (items[1] or "")
+                local cb      = cfg.Callback or function() end
+                local selected = default
+                local isOpen  = false
 
-                if flag then ZypheraxUI.Flags[flag] = selected end
-
-                local base, stroke = makeBase(34)
-                base.ClipsDescendants = true
-
-                local clickable = U.New("TextButton", { Size = UDim2.new(1,0,0,34), BackgroundTransparency = 1, Text = "", ZIndex = 6, Parent = base })
+                local base, stroke = makeBase(36)
 
                 local lbl = U.New("TextLabel", {
-                    Text = nm .. " : " .. (multi and (#selected > 0 and table.concat(selected, ", ") or "None") or (selected or "None")),
+                    Text = nm .. ": " .. tostring(selected),
                     Font = T.FontRegular,
                     TextSize = 12,
                     TextColor3 = T.Text,
                     BackgroundTransparency = 1,
                     Position = UDim2.new(0, 10, 0, 0),
-                    Size = UDim2.new(1, -30, 0, 34),
+                    Size = UDim2.new(1, -40, 0, 36),
                     TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
                     ZIndex = 6,
                     Parent = base
                 })
 
                 local chevron = U.New("TextLabel", {
-                    Text = "›", Font = T.Font, TextSize = 16, TextColor3 = T.TextMuted, BackgroundTransparency = 1,
-                    Position = UDim2.new(1, -22, 0, 0), Size = UDim2.new(0, 16, 0, 34), Rotation = 90, ZIndex = 6, Parent = base
+                    Text = "▼",
+                    Font = T.FontBold,
+                    TextSize = 10,
+                    TextColor3 = T.TextMuted,
+                    BackgroundTransparency = 1,
+                    Position = UDim2.new(1, -26, 0, 0),
+                    Size = UDim2.new(0, 20, 0, 36),
+                    ZIndex = 6,
+                    Parent = base
                 })
 
-                local itemList = U.New("Frame", { Size = UDim2.new(1, -16, 0, 0), Position = UDim2.new(0, 8, 0, 36), BackgroundTransparency = 1, ZIndex = 6, Parent = base })
-                U.New("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 3), Parent = itemList })
+                local listFrame = U.New("Frame", {
+                    Size = UDim2.new(1, -16, 0, 0),
+                    Position = UDim2.new(0, 8, 0, 38),
+                    BackgroundColor3 = T.Surface3,
+                    ClipsDescendants = true,
+                    Visible = false,
+                    ZIndex = 7,
+                    Parent = base
+                })
+                U.Corner(listFrame, T.CornerSm)
+                local dLayout = U.New("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 2), Parent = listFrame })
 
-                local rowObjects = {}
-
-                local function updateRows()
-                    for _, r in ipairs(rowObjects) do
-                        local isOn = multi and table.find(selected, r.item) or selected == r.item
-                        U.Tween(r.row, 0.2, { BackgroundTransparency = isOn and 0.3 or 1 })
-                        U.Tween(r.stroke, 0.2, { Transparency = isOn and 0 or 1 })
-                        U.Tween(r.txt, 0.2, { TextColor3 = isOn and T.Accent or T.TextMuted })
+                local function rebuild()
+                    for _, c in ipairs(listFrame:GetChildren()) do
+                        if c:IsA("TextButton") then c:Destroy() end
+                    end
+                    for _, it in ipairs(items) do
+                        local iBtn = U.New("TextButton", {
+                            Size = UDim2.new(1, 0, 0, 26),
+                            BackgroundColor3 = (it == selected) and T.Accent or T.Surface3,
+                            BackgroundTransparency = (it == selected) and 0.4 or 1,
+                            Text = tostring(it),
+                            Font = T.FontRegular,
+                            TextSize = 11,
+                            TextColor3 = (it == selected) and T.Accent or T.Text,
+                            ZIndex = 8,
+                            Parent = listFrame
+                        })
+                        U.Corner(iBtn, UDim.new(0, 4))
+                        track(iBtn.MouseButton1Click:Connect(function()
+                            selected = it
+                            lbl.Text = nm .. ": " .. tostring(selected)
+                            isOpen = false
+                            listFrame.Visible = false
+                            U.Tween(base, 0.2, { Size = UDim2.new(1, 0, 0, 36) })
+                            chevron.Text = "▼"
+                            pcall(cb, selected)
+                            rebuild()
+                        end))
                     end
                 end
+                rebuild()
 
-                local function buildItems()
-                    if #rowObjects > 0 then updateRows(); return #items * 29 end
-                    local totalH = 0
-                    for _, item in ipairs(items) do
-                        local isOn = multi and table.find(selected, item) or selected == item
-                        local row = U.New("TextButton", {
-                            Size = UDim2.new(1, 0, 0, 26), BackgroundColor3 = T.Surface3, BackgroundTransparency = isOn and 0.3 or 1,
-                            Text = "", AutoButtonColor = false, ZIndex = 7, Parent = itemList
-                        })
-                        U.Corner(row, T.CornerSm)
-                        local rowStroke = U.Stroke(row, T.Stroke, 1, isOn and 0 or 1)
-                        
-                        local txt = U.New("TextLabel", {
-                            Text = tostring(item), Font = T.FontRegular, TextSize = 11, TextColor3 = isOn and T.Accent or T.TextMuted,
-                            BackgroundTransparency = 1, Position = UDim2.new(0, 10, 0, 0), Size = UDim2.new(1, -15, 1, 0),
-                            TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 8, Parent = row
-                        })
-                        table.insert(rowObjects, { item = item, row = row, txt = txt, stroke = rowStroke })
-
-                        trackConnection(row.MouseEnter:Connect(function()
-                            if (multi and not table.find(selected, item)) or (not multi and selected ~= item) then
-                                U.Tween(row, 0.15, { BackgroundTransparency = 0.6 })
-                                U.Tween(txt, 0.15, { TextColor3 = T.Text })
-                            end
-                        end))
-                        trackConnection(row.MouseLeave:Connect(function()
-                            if (multi and not table.find(selected, item)) or (not multi and selected ~= item) then
-                                U.Tween(row, 0.2, { BackgroundTransparency = 1 })
-                                U.Tween(txt, 0.2, { TextColor3 = T.TextMuted })
-                            end
-                        end))
-
-                        trackConnection(row.MouseButton1Click:Connect(function()
-                            if multi then
-                                local idx = table.find(selected, item)
-                                if idx then table.remove(selected, idx) else table.insert(selected, item) end
-                            else
-                                selected = item
-                                open = false
-                                U.Tween(base, 0.25, { Size = UDim2.new(1, 0, 0, 34) }, Enum.EasingStyle.Quint)
-                                U.Tween(chevron, 0.2, { Rotation = 90 })
-                            end
-                            if flag then ZypheraxUI.Flags[flag] = selected end
-                            lbl.Text = nm .. " : " .. (multi and (#selected > 0 and table.concat(selected, ", ") or "None") or (selected or "None"))
-                            cb(selected)
-                            updateRows()
-                        end))
-                        totalH = totalH + 29
-                    end
-                    itemList.Size = UDim2.new(1, -16, 0, totalH)
-                    return totalH
-                end
-
-                trackConnection(clickable.MouseButton1Click:Connect(function()
-                    open = not open
-                    local totalH = buildItems()
-                    if open then
-                        U.Tween(base, 0.3, { Size = UDim2.new(1, 0, 0, 40 + totalH) }, Enum.EasingStyle.Quint)
-                        U.Tween(chevron, 0.25, { Rotation = 270 })
+                local toggleBtn = U.New("TextButton", { Size = UDim2.new(1, 0, 0, 36), BackgroundTransparency = 1, Text = "", ZIndex = 9, Parent = base })
+                track(toggleBtn.MouseButton1Click:Connect(function()
+                    isOpen = not isOpen
+                    if isOpen then
+                        listFrame.Visible = true
+                        local h = #items * 28 + 4
+                        U.Tween(base, 0.2, { Size = UDim2.new(1, 0, 0, 42 + h) })
+                        U.Tween(listFrame, 0.2, { Size = UDim2.new(1, -16, 0, h) })
+                        chevron.Text = "▲"
                     else
-                        U.Tween(base, 0.3, { Size = UDim2.new(1, 0, 0, 34) }, Enum.EasingStyle.Quint)
-                        U.Tween(chevron, 0.25, { Rotation = 90 })
+                        U.Tween(base, 0.2, { Size = UDim2.new(1, 0, 0, 36) })
+                        U.Tween(listFrame, 0.2, { Size = UDim2.new(1, -16, 0, 0) }).Completed:Connect(function()
+                            listFrame.Visible = false
+                        end)
+                        chevron.Text = "▼"
                     end
                 end))
 
-                local h1, h2 = U.HoverEffect(base, stroke)
-                trackConnection(h1); trackConnection(h2)
+                return {
+                    Set = function(_, v)
+                        selected = v
+                        lbl.Text = nm .. ": " .. tostring(selected)
+                        pcall(cb, selected)
+                        rebuild()
+                    end,
+                    Get = function() return selected end
+                }
             end
-            Section.Dropdown = Section.CreateDropdown
+            SectionObj.Dropdown = SectionObj.CreateDropdown
 
-            -- COLORPICKER (Full HSV Panel)
-            function Section:CreateColorPicker(cfg)
-                local nm      = cfg.Name or "Color"
-                local flag    = cfg.Flag
-                local default = cfg.Default or Color3.fromRGB(0, 195, 255)
+            -- // BUTTON \ --
+            function SectionObj:CreateButton(cfg)
+                local nm = type(cfg) == "table" and (cfg.Name or cfg.Text) or tostring(cfg)
+                local cb = type(cfg) == "table" and cfg.Callback or function() end
+
+                local base, stroke = makeBase(34, true)
+                local lbl = U.New("TextLabel", {
+                    Text = nm,
+                    Font = T.FontBold,
+                    TextSize = 12,
+                    TextColor3 = T.Text,
+                    BackgroundTransparency = 1,
+                    Size = UDim2.fromScale(1, 1),
+                    TextXAlignment = Enum.TextXAlignment.Center,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
+                    ZIndex = 6,
+                    Parent = base
+                })
+
+                track(base.MouseEnter:Connect(function()
+                    U.Tween(base, 0.15, { BackgroundColor3 = T.Surface3 })
+                    U.Tween(stroke, 0.15, { Color = T.Accent })
+                end))
+                track(base.MouseLeave:Connect(function()
+                    U.Tween(base, 0.2, { BackgroundColor3 = T.Surface2 })
+                    U.Tween(stroke, 0.2, { Color = T.Stroke })
+                end))
+                track(base.MouseButton1Click:Connect(function()
+                    U.Ripple(base, Player:GetMouse().X, Player:GetMouse().Y)
+                    pcall(cb)
+                end))
+
+                return {
+                    SetText = function(_, t) lbl.Text = tostring(t) end
+                }
+            end
+            SectionObj.Button = SectionObj.CreateButton
+
+            -- // INPUT \ --
+            function SectionObj:CreateInput(cfg)
+                local nm      = cfg.Name or "Input"
+                local ph      = cfg.Placeholder or "Ketik..."
+                local default = cfg.Default or ""
                 local cb      = cfg.Callback or function() end
 
-                local h, s, v = Color3.toHSV(default)
-                local currentColor = default
-                if flag then ZypheraxUI.Flags[flag] = currentColor end
+                local base, stroke = makeBase(36)
 
-                -- Row (collapsed)
-                local base, stroke = makeBase(34)
-                local h1, h2 = U.HoverEffect(base, stroke)
-                trackConnection(h1); trackConnection(h2)
-
-                U.New("TextLabel", {
-                    Text = nm, Font = T.FontRegular, TextSize = 12, TextColor3 = T.Text,
-                    BackgroundTransparency = 1, Position = UDim2.new(0, 10, 0, 0),
-                    Size = UDim2.new(1, -60, 1, 0), TextXAlignment = Enum.TextXAlignment.Left,
-                    ZIndex = 6, Parent = base
+                local lbl = U.New("TextLabel", {
+                    Text = nm,
+                    Font = T.FontRegular,
+                    TextSize = 12,
+                    TextColor3 = T.Text,
+                    BackgroundTransparency = 1,
+                    Position = UDim2.new(0, 10, 0, 0),
+                    Size = UDim2.new(0.45, 0, 1, 0),
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
+                    ZIndex = 6,
+                    Parent = base
                 })
 
-                local swatch = U.New("Frame", {
-                    Size = UDim2.new(0, 28, 0, 16), Position = UDim2.new(1, -38, 0.5, -8),
-                    BackgroundColor3 = currentColor, ZIndex = 6, Parent = base
+                local box = U.New("TextBox", {
+                    Text = default,
+                    PlaceholderText = ph,
+                    Font = T.FontRegular,
+                    TextSize = 11,
+                    TextColor3 = T.Text,
+                    PlaceholderColor3 = T.TextDim,
+                    BackgroundColor3 = T.Surface3,
+                    Position = UDim2.new(0.48, 0, 0.5, -12),
+                    Size = UDim2.new(0.5, -6, 0, 24),
+                    ClearTextOnFocus = false,
+                    ZIndex = 6,
+                    Parent = base
                 })
-                U.Corner(swatch, T.CornerSm)
-                U.Stroke(swatch, T.Stroke, 1, 0)
+                U.Corner(box, UDim.new(0, 4))
+                local bStroke = U.Stroke(box, T.Stroke, 1, 0)
 
-                -- Expand toggle
-                local panelOpen = false
-                local panel = nil
-
-                local function buildHSVPanel()
-                    panel = U.New("Frame", {
-                        Size = UDim2.new(1, 0, 0, 120),
-                        BackgroundColor3 = T.Surface,
-                        BorderSizePixel = 0,
-                        ZIndex = 6,
-                        Parent = secContainer,
-                        ClipsDescendants = true
-                    })
-                    U.Corner(panel, T.CornerSm)
-                    U.Stroke(panel, T.Stroke, 1, 0)
-                    U.New("UIPadding", { PaddingLeft = UDim.new(0,8), PaddingRight = UDim.new(0,8), PaddingTop = UDim.new(0,8), PaddingBottom = UDim.new(0,8), Parent = panel })
-
-                    -- SV field (Saturation × Value 2D square)
-                    local svField = U.New("ImageButton", {
-                        Size = UDim2.new(0, 80, 0, 80),
-                        Position = UDim2.new(0, 0, 0, 0),
-                        BackgroundColor3 = Color3.fromHSV(h, 1, 1),
-                        AutoButtonColor = false,
-                        ZIndex = 7,
-                        Parent = panel
-                    })
-                    U.Corner(svField, T.CornerSm)
-                    -- White to transparent gradient (saturation)
-                    U.New("UIGradient", {
-                        Color = ColorSequence.new(Color3.new(1,1,1), Color3.new(1,1,1)),
-                        Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1)}),
-                        Rotation = 0,
-                        Parent = svField
-                    })
-                    -- Transparent to black gradient (value)
-                    local valGrad = U.New("Frame", {
-                        Size = UDim2.new(1,0,1,0), BackgroundTransparency = 1,
-                        ZIndex = 8, Parent = svField, ClipsDescendants = true
-                    })
-                    U.Corner(valGrad, T.CornerSm)
-                    U.New("UIGradient", {
-                        Color = ColorSequence.new(Color3.new(0,0,0), Color3.new(0,0,0)),
-                        Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 0)}),
-                        Rotation = 270,
-                        Parent = valGrad
-                    })
-
-                    -- SV cursor
-                    local svCursor = U.New("Frame", {
-                        Size = UDim2.new(0, 10, 0, 10),
-                        AnchorPoint = Vector2.new(0.5, 0.5),
-                        Position = UDim2.new(s, 0, 1 - v, 0),
-                        BackgroundColor3 = Color3.new(1,1,1),
-                        BorderSizePixel = 0,
-                        ZIndex = 10,
-                        Parent = svField
-                    })
-                    U.Corner(svCursor, UDim.new(1, 0))
-                    U.Stroke(svCursor, Color3.new(0,0,0), 1.5, 0)
-
-                    -- Hue bar
-                    local hueBar = U.New("ImageLabel", {
-                        Size = UDim2.new(0, 14, 0, 80),
-                        Position = UDim2.new(0, 88, 0, 0),
-                        Image = "rbxassetid://2880333002", -- rainbow hue bar
-                        BackgroundTransparency = 1,
-                        ZIndex = 7,
-                        Parent = panel
-                    })
-                    U.Corner(hueBar, T.CornerSm)
-                    U.Stroke(hueBar, T.Stroke, 1, 0)
-                    local hueBtn = U.New("TextButton", {
-                        Size = UDim2.new(1,0,1,0), BackgroundTransparency=1, Text="", ZIndex=8, Parent=hueBar
-                    })
-
-                    -- Hue cursor
-                    local hueCursor = U.New("Frame", {
-                        Size = UDim2.new(1, 4, 0, 4),
-                        Position = UDim2.new(0, -2, h, -2),
-                        BackgroundColor3 = Color3.new(1,1,1),
-                        BorderSizePixel = 0,
-                        ZIndex = 9,
-                        Parent = hueBar
-                    })
-                    U.Corner(hueCursor, UDim.new(0, 2))
-
-                    -- HEX input
-                    local function toHex(c)
-                        return string.format("#%02X%02X%02X",
-                            math.round(c.R*255), math.round(c.G*255), math.round(c.B*255))
-                    end
-
-                    local hexBox = U.New("TextBox", {
-                        Size = UDim2.new(0, 80, 0, 22),
-                        Position = UDim2.new(0, 0, 0, 88),
-                        BackgroundColor3 = T.Surface3, Text = toHex(currentColor),
-                        Font = T.Font, TextSize = 11, TextColor3 = T.Accent,
-                        PlaceholderText = "#RRGGBB", ClearTextOnFocus = false,
-                        TextXAlignment = Enum.TextXAlignment.Center,
-                        ZIndex = 7, Parent = panel
-                    })
-                    U.Corner(hexBox, T.CornerSm)
-                    U.Stroke(hexBox, T.Stroke, 1, 0)
-
-                    -- Update function
-                    local function applyColor()
-                        currentColor = Color3.fromHSV(h, s, v)
-                        swatch.BackgroundColor3 = currentColor
-                        svField.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
-                        svCursor.Position = UDim2.new(s, 0, 1 - v, 0)
-                        hueCursor.Position = UDim2.new(0, -2, h, -2)
-                        hexBox.Text = toHex(currentColor)
-                        if flag then ZypheraxUI.Flags[flag] = currentColor end
-                        cb(currentColor)
-                    end
-
-                    -- SV drag
-                    local svDrag = false
-                    svField.InputBegan:Connect(function(inp)
-                        if inp.UserInputType == Enum.UserInputType.MouseButton1 then svDrag = true end
-                    end)
-                    local svConn
-                    svField.InputBegan:Connect(function(inp)
-                        if inp.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
-                        svDrag = true
-                        if svConn then svConn:Disconnect() end
-                        svConn = UIS.InputChanged:Connect(function(m)
-                            if not svDrag then return end
-                            if m.UserInputType ~= Enum.UserInputType.MouseMovement then return end
-                            local rel = svField.AbsolutePosition
-                            local sz  = svField.AbsoluteSize
-                            s = math.clamp((m.Position.X - rel.X) / sz.X, 0, 1)
-                            v = 1 - math.clamp((m.Position.Y - rel.Y) / sz.Y, 0, 1)
-                            applyColor()
-                        end)
-                    end)
-                    UIS.InputEnded:Connect(function(inp)
-                        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
-                            svDrag = false
-                            if svConn then svConn:Disconnect(); svConn = nil end
-                        end
-                    end)
-
-                    -- Hue drag
-                    local hueDrag = false
-                    local hueConn
-                    hueBtn.InputBegan:Connect(function(inp)
-                        if inp.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
-                        hueDrag = true
-                        if hueConn then hueConn:Disconnect() end
-                        hueConn = UIS.InputChanged:Connect(function(m)
-                            if not hueDrag then return end
-                            if m.UserInputType ~= Enum.UserInputType.MouseMovement then return end
-                            local rel = hueBar.AbsolutePosition
-                            local sz  = hueBar.AbsoluteSize
-                            h = math.clamp((m.Position.Y - rel.Y) / sz.Y, 0, 1)
-                            applyColor()
-                        end)
-                    end)
-                    UIS.InputEnded:Connect(function(inp)
-                        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
-                            hueDrag = false
-                            if hueConn then hueConn:Disconnect(); hueConn = nil end
-                        end
-                    end)
-
-                    -- Hex input
-                    hexBox.FocusLost:Connect(function()
-                        local raw = hexBox.Text:gsub("#", "")
-                        if #raw == 6 then
-                            local r = tonumber(raw:sub(1,2),16)
-                            local g = tonumber(raw:sub(3,4),16)
-                            local b = tonumber(raw:sub(5,6),16)
-                            if r and g and b then
-                                h, s, v = Color3.toHSV(Color3.fromRGB(r,g,b))
-                                applyColor()
-                            end
-                        end
-                    end)
-                end
-
-                -- Toggle panel open/close
-                local toggleBtn = U.New("TextButton", {
-                    Size = UDim2.new(1,0,1,0), BackgroundTransparency=1, Text="", ZIndex=8, Parent=base
-                })
-                trackConnection(toggleBtn.MouseButton1Click:Connect(function()
-                    panelOpen = not panelOpen
-                    if panelOpen then
-                        if not panel or not panel.Parent then buildHSVPanel() end
-                        U.Tween(base, 0.2, { Size = UDim2.new(1, 0, 0, 34) })
-                    else
-                        if panel and panel.Parent then
-                            pcall(function() panel:Destroy() end)
-                            panel = nil
-                        end
-                    end
+                track(box.FocusLost:Connect(function(enter)
+                    pcall(cb, box.Text, enter)
                 end))
-            end
-            Section.Colorpicker = Section.CreateColorPicker
 
-            -- KEYBIND
-            function Section:CreateKeybind(cfg)
+                return {
+                    Set = function(_, v) box.Text = tostring(v) end,
+                    Get = function() return box.Text end
+                }
+            end
+            SectionObj.Input = SectionObj.CreateInput
+
+            -- // LABEL \ --
+            function SectionObj:CreateLabel(textOrCfg)
+                local txt = type(textOrCfg) == "table" and (textOrCfg.Name or textOrCfg.Text or textOrCfg[1]) or tostring(textOrCfg)
+                local lbl = U.New("TextLabel", {
+                    Text = txt,
+                    Font = T.FontRegular,
+                    TextSize = 11,
+                    TextColor3 = T.TextMuted,
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(1, 0, 0, 0),
+                    AutomaticSize = Enum.AutomaticSize.Y,
+                    TextWrapped = true,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    ZIndex = 5,
+                    Parent = secContainer
+                })
+                U.New("UIPadding", { PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4), Parent = lbl })
+                return {
+                    Set = function(_, t) lbl.Text = tostring(t) end
+                }
+            end
+            SectionObj.Label = SectionObj.CreateLabel
+
+            -- // KEYBIND \ --
+            function SectionObj:CreateKeybind(cfg)
                 local nm      = cfg.Name or "Keybind"
-                local flag    = cfg.Flag
-                local default = cfg.Default or Enum.KeyCode.Delete
+                local default = cfg.Default or Enum.KeyCode.RightControl
                 local cb      = cfg.Callback or function() end
                 local current = default
                 local binding = false
 
-                if flag then ZypheraxUI.Flags[flag] = current end
+                local base, stroke = makeBase(36)
 
-                local base, stroke = makeBase(34)
-                local h1, h2 = U.HoverEffect(base, stroke)
-                trackConnection(h1); trackConnection(h2)
-
-                U.New("TextLabel", {
-                    Text = nm, Font = T.FontRegular, TextSize = 12, TextColor3 = T.Text, BackgroundTransparency = 1,
-                    Position = UDim2.new(0, 10, 0, 0), Size = UDim2.new(1, -85, 1, 0), TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 6, Parent = base
+                local lbl = U.New("TextLabel", {
+                    Text = nm,
+                    Font = T.FontRegular,
+                    TextSize = 12,
+                    TextColor3 = T.Text,
+                    BackgroundTransparency = 1,
+                    Position = UDim2.new(0, 10, 0, 0),
+                    Size = UDim2.new(1, -85, 1, 0),
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
+                    ZIndex = 6,
+                    Parent = base
                 })
 
-                local badge = U.New("Frame", {
-                    Size = UDim2.new(0, 65, 0, 20), Position = UDim2.new(1, -72, 0.5, -10), BackgroundColor3 = T.Surface3, ZIndex = 6, Parent = base
+                local badge = U.New("TextButton", {
+                    Text = current.Name,
+                    Font = T.FontBold,
+                    TextSize = 11,
+                    TextColor3 = T.Accent,
+                    BackgroundColor3 = T.Surface3,
+                    Position = UDim2.new(1, -72, 0.5, -11),
+                    Size = UDim2.new(0, 64, 0, 22),
+                    ZIndex = 6,
+                    Parent = base
                 })
-                U.Corner(badge, T.CornerSm)
+                U.Corner(badge, UDim.new(0, 4))
                 local bStroke = U.Stroke(badge, T.Stroke, 1, 0)
 
-                local bLbl = U.New("TextLabel", {
-                    Text = current.Name, Font = T.Font, TextSize = 10, TextColor3 = T.Accent, BackgroundTransparency = 1, Size = UDim2.new(1,0,1,0), ZIndex = 7, Parent = badge
-                })
-
-                local btn = U.New("TextButton", { Size = UDim2.new(1,0,1,0), BackgroundTransparency=1, Text="", ZIndex=8, Parent=base })
                 local bindConn = nil
-
-                local kbEntry = { key = current, callback = function(k) cb(k) end }
-                table.insert(registeredKeybinds, kbEntry)
-
-                trackConnection(btn.MouseButton1Click:Connect(function()
+                track(badge.MouseButton1Click:Connect(function()
                     binding = true
-                    bLbl.Text = "..."
-                    U.Tween(bStroke, 0.15, { Color = T.Accent })
-
+                    badge.Text = "..."
+                    bStroke.Color = T.Accent
                     if bindConn then bindConn:Disconnect() end
                     bindConn = UIS.InputBegan:Connect(function(inp, gp)
                         if gp then return end
                         if inp.UserInputType == Enum.UserInputType.Keyboard then
                             binding = false
                             current = inp.KeyCode
-                            kbEntry.key = current
-                            if flag then ZypheraxUI.Flags[flag] = current end
-                            bLbl.Text = current.Name
-                            U.Tween(bStroke, 0.2, { Color = T.Stroke })
+                            badge.Text = current.Name
+                            bStroke.Color = T.Stroke
                             if bindConn then bindConn:Disconnect(); bindConn = nil end
+                            pcall(cb, current)
                         end
                     end)
                 end))
+
+                return {
+                    Set = function(_, k) current = k; badge.Text = k.Name end,
+                    Get = function() return current end
+                }
             end
-            Section.Keybind = Section.CreateKeybind
+            SectionObj.Keybind = SectionObj.CreateKeybind
 
-            -- INPUT
-            function Section:CreateInput(cfg)
-                local nm      = cfg.Name or "Input"
-                local flag    = cfg.Flag
-                local ph      = cfg.Placeholder or "Type..."
-                local default = cfg.Default or ""
-                local cb      = cfg.Callback or function() end
+            -- // BUILT-IN CONFIG MANAGER SYSTEM (Matching Image 4 & 5) \ --
+            function SectionObj:CreateConfigSystem()
+                local FOLDER = "ZypheraxHub"
+                local CONFIGS_FOLDER = FOLDER .. "/Configs"
+                local AUTOLOAD_FILE = FOLDER .. "/autoload.txt"
 
-                if flag then ZypheraxUI.Flags[flag] = default end
+                pcall(function()
+                    if makefolder and isfolder then
+                        if not isfolder(FOLDER) then makefolder(FOLDER) end
+                        if not isfolder(CONFIGS_FOLDER) then makefolder(CONFIGS_FOLDER) end
+                    end
+                end)
 
-                local base, stroke = makeBase(34)
-                local h1, h2 = U.HoverEffect(base, stroke)
-                trackConnection(h1); trackConnection(h2)
+                local selectedSave = nil
+                local deleteMode = false
 
+                -- Header row with icon + "Config"
+                local confBox = U.New("Frame", {
+                    Name = "ConfigManager",
+                    Size = UDim2.new(1, 0, 0, 0),
+                    AutomaticSize = Enum.AutomaticSize.Y,
+                    BackgroundColor3 = T.Surface,
+                    BackgroundTransparency = 0.3,
+                    ZIndex = 5,
+                    Parent = secContainer
+                })
+                U.Corner(confBox, T.CornerMd)
+                U.Stroke(confBox, T.Stroke, 1, 0.4)
+                local pad = U.New("UIPadding", {
+                    PaddingTop = UDim.new(0, 10),
+                    PaddingBottom = UDim.new(0, 10),
+                    PaddingLeft = UDim.new(0, 10),
+                    PaddingRight = UDim.new(0, 10),
+                    Parent = confBox
+                })
+                local cLayout = U.New("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8), Parent = confBox })
+
+                -- Title
+                local topRow = U.New("Frame", { Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Parent = confBox })
                 U.New("TextLabel", {
-                    Text = nm, Font = T.FontRegular, TextSize = 12, TextColor3 = T.Text, BackgroundTransparency = 1,
-                    Position = UDim2.new(0, 10, 0, 0), Size = UDim2.new(0.4, 0, 1, 0), TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 6, Parent = base
+                    Text = "⚙  Config Manager",
+                    Font = T.FontBold,
+                    TextSize = 13,
+                    TextColor3 = T.Accent,
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(1, -20, 1, 0),
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    Parent = topRow
                 })
 
-                local inputBox = U.New("TextBox", {
-                    Text = default, PlaceholderText = ph, Font = T.FontRegular, TextSize = 11, TextColor3 = T.Text, PlaceholderColor3 = T.TextDim,
-                    BackgroundColor3 = T.Surface3, Position = UDim2.new(0.42, 0, 0.5, -10), Size = UDim2.new(0.55, 0, 0, 20), ClearTextOnFocus = false,
-                    TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 6, Parent = base
+                -- Search box ("Search Saves Loader...")
+                local searchBox = U.New("TextBox", {
+                    PlaceholderText = "Search Saves Loader...",
+                    Font = T.FontRegular,
+                    TextSize = 11,
+                    TextColor3 = T.Text,
+                    PlaceholderColor3 = T.TextDim,
+                    BackgroundColor3 = T.Surface2,
+                    Size = UDim2.new(1, 0, 0, 28),
+                    ClearTextOnFocus = false,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    Parent = confBox
                 })
-                U.Corner(inputBox, T.CornerSm)
-                U.Stroke(inputBox, T.Stroke, 1, 0)
-                U.New("UIPadding", { PaddingLeft = UDim.new(0, 6), Parent = inputBox })
+                U.Corner(searchBox, UDim.new(0, 5))
+                U.Stroke(searchBox, T.Stroke, 1, 0)
+                U.New("UIPadding", { PaddingLeft = UDim.new(0, 8), Parent = searchBox })
 
-                trackConnection(inputBox.FocusLost:Connect(function(enter)
-                    if flag then ZypheraxUI.Flags[flag] = inputBox.Text end
-                    cb(inputBox.Text, enter)
-                end))
+                -- Saves list container
+                local saveListFrame = U.New("ScrollingFrame", {
+                    Size = UDim2.new(1, 0, 0, 110),
+                    BackgroundColor3 = T.Background2,
+                    ScrollBarThickness = 2,
+                    ScrollBarImageColor3 = T.Accent,
+                    AutomaticCanvasSize = Enum.AutomaticSize.Y,
+                    CanvasSize = UDim2.new(0, 0, 0, 0),
+                    ClipsDescendants = true,
+                    Parent = confBox
+                })
+                U.Corner(saveListFrame, UDim.new(0, 6))
+                U.Stroke(saveListFrame, T.Stroke, 1, 0.2)
+                local sListLayout = U.New("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4), Parent = saveListFrame })
+                U.New("UIPadding", { PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 6), PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), Parent = saveListFrame })
 
-                return { Set = function(_, v) inputBox.Text = tostring(v) end, Get = function() return inputBox.Text end }
-            end
-            Section.Input = Section.CreateInput
-
-            -- BUTTON
-            function Section:CreateButton(cfg)
-                local nm    = cfg.Name or "Button"
-                local cb    = cfg.Callback or function() end
-                local style = cfg.Style
-
-                local base, stroke = makeBase(32, true)
-                local txt = U.New("TextLabel", {
-                    Text = nm, Font = T.Font, TextSize = 12, TextColor3 = style == "Primary" and Color3.new(1,1,1) or T.Text, BackgroundTransparency = 1,
-                    Size = UDim2.new(1, -20, 1, 0), Position = UDim2.new(0, 10, 0, 0), TextXAlignment = Enum.TextXAlignment.Center, ZIndex = 6, Parent = base
+                local emptyLbl = U.New("TextLabel", {
+                    Text = "+",
+                    Font = T.FontBold,
+                    TextSize = 22,
+                    TextColor3 = T.TextDim,
+                    BackgroundTransparency = 1,
+                    Size = UDim2.fromScale(1, 1),
+                    Visible = true,
+                    Parent = saveListFrame
                 })
 
-                if style == "Primary" then
-                    base.BackgroundColor3 = Color3.new(1,1,1)
-                    base.BackgroundTransparency = 0
-                    U.Gradient(base, T.AccentGradient, T.Accent, 90)
-                    stroke.Color = T.Accent
-                    
-                    trackConnection(base.MouseEnter:Connect(function() U.Tween(base, 0.15, { BackgroundTransparency = 0.15 }) end))
-                    trackConnection(base.MouseLeave:Connect(function() U.Tween(base, 0.2, { BackgroundTransparency = 0 }) end))
-                else
-                    local c1, c2 = U.HoverEffect(base, stroke)
-                    trackConnection(c1); trackConnection(c2)
+                -- Input box ("Enter save name...")
+                local nameInput = U.New("TextBox", {
+                    PlaceholderText = "Enter save name...",
+                    Font = T.FontRegular,
+                    TextSize = 11,
+                    TextColor3 = T.Text,
+                    PlaceholderColor3 = T.TextDim,
+                    BackgroundColor3 = T.Surface2,
+                    Size = UDim2.new(1, 0, 0, 28),
+                    ClearTextOnFocus = false,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    Parent = confBox
+                })
+                U.Corner(nameInput, UDim.new(0, 5))
+                U.Stroke(nameInput, T.Stroke, 1, 0)
+                U.New("UIPadding", { PaddingLeft = UDim.new(0, 8), Parent = nameInput })
+
+                local function getConfigFiles()
+                    local t = {}
+                    pcall(function()
+                        if listfiles and isfolder and isfolder(CONFIGS_FOLDER) then
+                            for _, f in ipairs(listfiles(CONFIGS_FOLDER)) do
+                                local bName = f:gsub("\\", "/"):match("([^/]+)%.json$")
+                                if bName then table.insert(t, bName) end
+                            end
+                        end
+                    end)
+                    return t
                 end
 
-                trackConnection(base.MouseButton1Down:Connect(function()
-                    U.Tween(base, 0.1, { Size = UDim2.new(1, -4, 0, 28), Position = UDim2.new(0, 2, 0, 2) })
-                end))
-                
-                trackConnection(base.MouseButton1Up:Connect(function()
-                    U.Tween(base, 0.2, { Size = UDim2.new(1, 0, 0, 32), Position = UDim2.new(0, 0, 0, 0) }, Enum.EasingStyle.Back)
-                end))
+                local function refreshSaveList(filterText)
+                    filterText = (filterText or ""):lower()
+                    for _, c in ipairs(saveListFrame:GetChildren()) do
+                        if c:IsA("TextButton") then c:Destroy() end
+                    end
+                    local allSaves = getConfigFiles()
+                    local count = 0
+                    for _, sName in ipairs(allSaves) do
+                        if filterText == "" or sName:lower():find(filterText) then
+                            count = count + 1
+                            local isSel = (sName == selectedSave)
+                            local sBtn = U.New("TextButton", {
+                                Size = UDim2.new(1, 0, 0, 24),
+                                BackgroundColor3 = isSel and T.Accent or T.Surface3,
+                                BackgroundTransparency = isSel and 0.3 or 0.7,
+                                Text = "  " .. sName,
+                                Font = isSel and T.FontBold or T.FontRegular,
+                                TextSize = 11,
+                                TextColor3 = isSel and T.Accent or T.Text,
+                                TextXAlignment = Enum.TextXAlignment.Left,
+                                ZIndex = 6,
+                                Parent = saveListFrame
+                            })
+                            U.Corner(sBtn, UDim.new(0, 4))
+                            sBtn.MouseButton1Click:Connect(function()
+                                if deleteMode then
+                                    pcall(function()
+                                        if delfile then delfile(CONFIGS_FOLDER .. "/" .. sName .. ".json") end
+                                    end)
+                                    if selectedSave == sName then selectedSave = nil end
+                                    refreshSaveList(searchBox.Text)
+                                    ZypheraxUI:Notify({ Title = "Config", Description = "Save '" .. sName .. "' dihapus." })
+                                else
+                                    selectedSave = sName
+                                    nameInput.Text = sName
+                                    refreshSaveList(searchBox.Text)
+                                    -- Auto load this save
+                                    pcall(function()
+                                        if readfile and isfile and isfile(CONFIGS_FOLDER .. "/" .. sName .. ".json") then
+                                            local raw = readfile(CONFIGS_FOLDER .. "/" .. sName .. ".json")
+                                            local data = HttpService:JSONDecode(raw)
+                                            for fKey, val in pairs(data) do
+                                                if ZypheraxUI.Controls[fKey] and ZypheraxUI.Controls[fKey].Set then
+                                                    ZypheraxUI.Controls[fKey]:Set(val)
+                                                end
+                                            end
+                                            ZypheraxUI:Notify({ Title = "Config Loaded", Description = "Konfigurasi '" .. sName .. "' diterapkan!" })
+                                        end
+                                    end)
+                                end
+                            end)
+                        end
+                    end
+                    emptyLbl.Visible = (count == 0)
+                end
 
-                trackConnection(base.MouseButton1Click:Connect(function()
-                    U.Ripple(base, Player:GetMouse().X, Player:GetMouse().Y)
-                    cb()
-                end))
-            end
-            Section.Button = Section.CreateButton
+                searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+                    refreshSaveList(searchBox.Text)
+                end)
 
-            -- LABEL
-            function Section:CreateLabel(text)
-                local lbl = U.New("TextLabel", {
-                    Text = text, Font = T.FontRegular, TextSize = 11, TextColor3 = T.TextMuted, BackgroundTransparency = 1,
-                    Size = UDim2.new(1, 0, 0, 18), TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 5, Parent = secContainer
+                -- Button Grid (2 rows of 2 buttons + 1 full button)
+                local grid1 = U.New("Frame", { Size = UDim2.new(1, 0, 0, 28), BackgroundTransparency = 1, Parent = confBox })
+                local grid1Layout = U.New("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 8), Parent = grid1 })
+
+                local function makeGridBtn(parent, text, onClick)
+                    local btn = U.New("TextButton", {
+                        Size = UDim2.new(0.5, -4, 1, 0),
+                        BackgroundColor3 = T.Surface2,
+                        Text = text,
+                        Font = T.FontBold,
+                        TextSize = 11,
+                        TextColor3 = T.Text,
+                        ZIndex = 6,
+                        Parent = parent
+                    })
+                    U.Corner(btn, UDim.new(0, 5))
+                    U.Stroke(btn, T.Stroke, 1, 0)
+                    btn.MouseButton1Click:Connect(function()
+                        U.Ripple(btn, Player:GetMouse().X, Player:GetMouse().Y)
+                        if onClick then onClick() end
+                    end)
+                    return btn
+                end
+
+                -- Create Save
+                makeGridBtn(grid1, "Create Save", function()
+                    local sName = nameInput.Text
+                    if not sName or sName == "" then
+                        ZypheraxUI:Notify({ Title = "Config", Description = "Nama save tidak boleh kosong!" })
+                        return
+                    end
+                    pcall(function()
+                        local toSave = {}
+                        for k, v in pairs(ZypheraxUI.Flags) do toSave[k] = v end
+                        local json = HttpService:JSONEncode(toSave)
+                        if writefile then
+                            writefile(CONFIGS_FOLDER .. "/" .. sName .. ".json", json)
+                            ZypheraxUI:Notify({ Title = "Config Saved", Description = "Save '" .. sName .. "' berhasil dibuat!" })
+                            selectedSave = sName
+                            refreshSaveList(searchBox.Text)
+                        end
+                    end)
+                end)
+
+                -- Delete Mode Button
+                local delBtn
+                delBtn = makeGridBtn(grid1, "Delete Mode: OFF", function()
+                    deleteMode = not deleteMode
+                    delBtn.Text = "Delete Mode: " .. (deleteMode and "ON" or "OFF")
+                    delBtn.TextColor3 = deleteMode and T.Error or T.Text
+                end)
+
+                local grid2 = U.New("Frame", { Size = UDim2.new(1, 0, 0, 28), BackgroundTransparency = 1, Parent = confBox })
+                local grid2Layout = U.New("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 8), Parent = grid2 })
+
+                -- Overwrite
+                makeGridBtn(grid2, "Overwrite", function()
+                    local sName = selectedSave or nameInput.Text
+                    if not sName or sName == "" then
+                        ZypheraxUI:Notify({ Title = "Config", Description = "Pilih config untuk ditimpa!" })
+                        return
+                    end
+                    pcall(function()
+                        local toSave = {}
+                        for k, v in pairs(ZypheraxUI.Flags) do toSave[k] = v end
+                        local json = HttpService:JSONEncode(toSave)
+                        if writefile then
+                            writefile(CONFIGS_FOLDER .. "/" .. sName .. ".json", json)
+                            ZypheraxUI:Notify({ Title = "Config Overwritten", Description = "Save '" .. sName .. "' diperbarui!" })
+                        end
+                    end)
+                end)
+
+                -- Set Autoload
+                makeGridBtn(grid2, "Set Autoload", function()
+                    local sName = selectedSave or nameInput.Text
+                    if not sName or sName == "" then
+                        ZypheraxUI:Notify({ Title = "Config", Description = "Pilih save untuk Autoload!" })
+                        return
+                    end
+                    pcall(function()
+                        if writefile then
+                            writefile(AUTOLOAD_FILE, sName)
+                            ZypheraxUI:Notify({ Title = "Autoload", Description = "Autoload diset ke: " .. sName })
+                        end
+                    end)
+                end)
+
+                -- Reset Autoload (Full Width)
+                local resetBtn = U.New("TextButton", {
+                    Size = UDim2.new(1, 0, 0, 28),
+                    BackgroundColor3 = T.Surface2,
+                    Text = "Reset Autoload",
+                    Font = T.FontBold,
+                    TextSize = 11,
+                    TextColor3 = T.TextMuted,
+                    ZIndex = 6,
+                    Parent = confBox
                 })
-                local LblObj = {}
-                function LblObj:Colorpicker(cfg) return Section:CreateColorPicker(cfg) end
-                function LblObj:Keybind(cfg) return Section:CreateKeybind(cfg) end
-                return LblObj
+                U.Corner(resetBtn, UDim.new(0, 5))
+                U.Stroke(resetBtn, T.Stroke, 1, 0)
+                resetBtn.MouseButton1Click:Connect(function()
+                    U.Ripple(resetBtn, Player:GetMouse().X, Player:GetMouse().Y)
+                    pcall(function()
+                        if delfile and isfile and isfile(AUTOLOAD_FILE) then
+                            delfile(AUTOLOAD_FILE)
+                            ZypheraxUI:Notify({ Title = "Autoload", Description = "Autoload direset (dimatikan)." })
+                        end
+                    end)
+                end)
+
+                refreshSaveList("")
             end
-            Section.Label = Section.CreateLabel
 
-            return Section
+            return SectionObj
         end
-        Tab.Section = Tab.CreateSection
 
-        return Tab
-    end
-    Win.Page = Win.CreateTab
-    Win.Category = Win.CreateTab
-
-    -- Neverlose Theme API Compatibility
-    function Win:ChangeTheme(themeKey, colorVal)
-        if T[themeKey] ~= nil then
-            T[themeKey] = colorVal
-        end
-    end
-
-    function Win:Init()
-        -- Compatibility finish method
-        return Win
+        return TabObj
     end
 
     return Win
 end
 
 return ZypheraxUI
+
         end)()
     end)()
 
@@ -5975,7 +5720,11 @@ return ZypheraxUI
 
         S.Header = function(_, cfg)
             if type(cfg) ~= "table" then return end
-            _emit("Label", { Name = cfg.Name or cfg[1] })
+            pcall(function() zsec:Header(cfg) end)
+        end
+
+        S.CreateConfigSystem = function(_)
+            pcall(function() zsec:CreateConfigSystem() end)
         end
 
         return S
@@ -6024,8 +5773,17 @@ return ZypheraxUI
     function BridgeLib:CreateWindow(_) return BridgeWindow end
     function BridgeLib:Gradient(name) return name end
     function BridgeLib:GetThemes() return { "Dark", "Light", "Midnight", "Rose" } end
-    function BridgeLib:SetTheme(_) end
-    function BridgeLib:Watermark(_) return BridgeWatermark end
+    function BridgeLib:SetTheme(name)
+        pcall(function()
+            ZypheraxUI:SetTheme(name)
+            if _zwin and _zwin.SetTheme then _zwin:SetTheme(name) end
+        end)
+    end
+    function BridgeLib:Watermark(cfg)
+        local wm
+        pcall(function() wm = ZypheraxUI:Watermark(cfg) end)
+        return wm or BridgeWatermark
+    end
     -- Dipakai Loading Screen untuk membuka jendela setelah selesai memuat.
     function BridgeLib:_Reveal()
         pcall(function()
@@ -6112,14 +5870,14 @@ do
             -- Backdrop gelap + blur.
             local overlay = Instance.new("Frame")
             overlay.Size = UDim2.fromScale(1, 1)
-            overlay.BackgroundColor3 = Color3.fromRGB(6, 8, 14)
-            overlay.BackgroundTransparency = 0
+            overlay.BackgroundColor3 = Color3.fromRGB(10, 12, 18)
+            overlay.BackgroundTransparency = 0.82 -- Frosted blur saja, tidak blank hitam
             overlay.BorderSizePixel = 0
             overlay.ZIndex = 1
             overlay.Parent = SG
 
             local blur = Instance.new("BlurEffect")
-            blur.Size = 0
+            blur.Size = 22
             blur.Parent = game:GetService("Lighting")
 
             -- Kartu glassmorphism.
@@ -6258,7 +6016,7 @@ do
             status.Parent = card
 
             -- Animasi masuk.
-            TweenService:Create(overlay, TweenInfo.new(0.35), { BackgroundTransparency = 0 }):Play()
+            TweenService:Create(overlay, TweenInfo.new(0.35), { BackgroundTransparency = 0.82 }):Play()
             TweenService:Create(blur, TweenInfo.new(0.35), { Size = 16 }):Play()
             TweenService:Create(card,
                 TweenInfo.new(0.45, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
@@ -7240,7 +6998,7 @@ end)
 local TabPlayer = tabGroup:Tab({ Name = "Player", Image = "lucide/user" })
 
 -- SEKSI 1: SPEED PLAYER
-local SecSpeed = TabPlayer:Section({})
+local SecSpeed = TabPlayer:Section({ Name = "Kecepatan Pemain", Side = 1 })
 SecSpeed:Header({ Name = ZypheraxLib:Gradient("Kecepatan Pemain (WalkSpeed)", Color3.fromRGB(99,130,255), Color3.fromRGB(72,214,200)) })
 
 SecSpeed:Slider({
@@ -7288,7 +7046,7 @@ SecSpeed:Button({
 })
 
 -- SEKSI 2: FLY ENGINE
-local SecFly = TabPlayer:Section({})
+local SecFly = TabPlayer:Section({ Name = "Terbang (Fly)", Side = 2 })
 SecFly:Header({ Name = ZypheraxLib:Gradient("Terbang (Infinite Yield Fly)", Color3.fromRGB(99,130,255), Color3.fromRGB(168,120,255)) })
 
 SecFly:Toggle({
@@ -7332,7 +7090,7 @@ SecFly:Input({
 })
 
 -- SEKSI 3: ANTI-AFK
-local SecUtil = TabPlayer:Section({})
+local SecUtil = TabPlayer:Section({ Name = "Player Utility", Side = 1 })
 SecUtil:Header({ Name = ZypheraxLib:Gradient("Player Utility", Color3.fromRGB(99,130,255), Color3.fromRGB(120,160,255)) })
 
 SecUtil:Toggle({
@@ -7355,7 +7113,7 @@ end -- [End TabPlayer]
 -- ==============================================================================
 local TabMain = tabGroup:Tab({ Name = "Main", Image = "lucide/zap" })
 
-local SecAutoGen = TabMain:Section({})
+local SecAutoGen = TabMain:Section({ Name = "Auto Generator", Side = 1 })
 SecAutoGen:Header({ Name = ZypheraxLib:Gradient("Auto Perfect Generator", Color3.fromRGB(72,214,200), Color3.fromRGB(99,130,255)) })
 
 SecAutoGen:Toggle({
@@ -7374,7 +7132,7 @@ SecAutoGen:Toggle({
 })
 
 
-local SecAutoParry = TabMain:Section({})
+local SecAutoParry = TabMain:Section({ Name = "Auto Parry", Side = 2 })
 SecAutoParry:Header({ Name = ZypheraxLib:Gradient("Auto Parry", Color3.fromRGB(232,120,140), Color3.fromRGB(168,120,255)) })
 
 SecAutoParry:Toggle({
@@ -7401,7 +7159,7 @@ SecAutoParry:Toggle({
 })
 
 -- SEKSI 3: AUTO HEAL
-local SecAutoHealMain = TabMain:Section({})
+local SecAutoHealMain = TabMain:Section({ Name = "Auto Heal", Side = 1 })
 SecAutoHealMain:Header({ Name = ZypheraxLib:Gradient("Auto Heal (Pemulihan Otomatis)", Color3.fromRGB(86,204,158), Color3.fromRGB(72,214,200)) })
 
 SecAutoHealMain:Toggle({
@@ -7431,7 +7189,7 @@ SecAutoHealMain:Slider({
 })
 
 -- SEKSI: AUTO ESCAPE (BYPASS SURVIVOR WIN)
-local SecAutoEscape = TabMain:Section({})
+local SecAutoEscape = TabMain:Section({ Name = "Auto Escape", Side = 2 })
 SecAutoEscape:Header({ Name = ZypheraxLib:Gradient("Auto Escape (Bypass Win)", Color3.fromRGB(72,214,200), Color3.fromRGB(140,200,255)) })
 
 -- Pastikan auto-loop dari sesi sebelumnya tidak masih berjalan
@@ -7949,7 +7707,7 @@ end
 -- ==============================================================================
 local TabCombat = tabGroup:Tab({ Name = "Combat", Image = "lucide/crosshair" })
 
-local SecCross = TabCombat:Section({})
+local SecCross = TabCombat:Section({ Name = "Crosshair", Side = 1 })
 SecCross:Header({ Name = ZypheraxLib:Gradient("Crosshair", Color3.fromRGB(232,120,140), Color3.fromRGB(255,170,120)) })
 
 SecCross:Toggle({
@@ -8036,7 +7794,7 @@ SecCross:Button({
 -- ==============================================================================
 -- SECTION: TWIST OF FATE - ANTI MISS
 -- ==============================================================================
-local SecTOF = TabCombat:Section({})
+local SecTOF = TabCombat:Section({ Name = "Twist of Fate (Anti Miss)", Side = 2 })
 SecTOF:Header({ Name = ZypheraxLib:Gradient("Twist of Fate - Anti Miss [ULTRA]", Color3.fromRGB(168,120,255), Color3.fromRGB(99,130,255)) })
 
 SecTOF:Toggle({
@@ -8065,7 +7823,7 @@ SecTOF:Toggle({
 -- ==============================================================================
 -- SEKSI: INFINITE ITEM CHARGES (UNLIMITED USES)
 -- ==============================================================================
-local SecInfCharge = TabCombat:Section({})
+local SecInfCharge = TabCombat:Section({ Name = "Infinite Charges", Side = 1 })
 SecInfCharge:Header({ Name = ZypheraxLib:Gradient("Infinite Item Charges", Color3.fromRGB(99,130,255), Color3.fromRGB(168,120,255)) })
 
 SecInfCharge:Toggle({
@@ -8391,7 +8149,11 @@ local function start_esp_player()
     if espPlayerRemovingConn then espPlayerRemovingConn:Disconnect() end
     espPlayerRemovingConn = Players.PlayerRemoving:Connect(esp_remove_player)
 
-    espPlayerConn = RunService.RenderStepped:Connect(function()
+    local _espPlayerTick = 0
+    espPlayerConn = RunService.RenderStepped:Connect(function(dt)
+        _espPlayerTick = _espPlayerTick + dt
+        if _espPlayerTick < 0.033 then return end -- Throttled to ~30 FPS untuk mencegah drop FPS
+        _espPlayerTick = 0
         for _, p in ipairs(Players:GetPlayers()) do
             if p ~= LocalPlayer then
                 pcall(esp_update_player, p)
@@ -8650,7 +8412,7 @@ end
 -- ==============================================================================
 local TabESP = tabGroup:Tab({ Name = "ESP", Image = "lucide/eye" })
 
-local SecESPPlayer = TabESP:Section({})
+local SecESPPlayer = TabESP:Section({ Name = "ESP Player", Side = 1 })
 SecESPPlayer:Header({ Name = ZypheraxLib:Gradient("ESP Player - Survivor dan Killer", Color3.fromRGB(232,120,140), Color3.fromRGB(255,160,120)) })
 
 SecESPPlayer:Toggle({
@@ -8668,7 +8430,7 @@ SecESPPlayer:Toggle({
     end
 })
 
-local SecESPGen = TabESP:Section({})
+local SecESPGen = TabESP:Section({ Name = "ESP Generator", Side = 2 })
 SecESPGen:Header({ Name = ZypheraxLib:Gradient("ESP Generator", Color3.fromRGB(86,204,158), Color3.fromRGB(99,130,255)) })
 
 SecESPGen:Toggle({
@@ -8688,7 +8450,7 @@ SecESPGen:Toggle({
 
 
 -- SEKSI ESP EXIT GATE (tambah ke TabESP)
-local SecESPGate = TabESP:Section({})
+local SecESPGate = TabESP:Section({ Name = "ESP Gate & Exit", Side = 1 })
 SecESPGate:Header({ Name = ZypheraxLib:Gradient("ESP Pintu Keluar (Exit Gate)", Color3.fromRGB(240,190,100), Color3.fromRGB(232,150,110)) })
 
 SecESPGate:Toggle({
@@ -8718,7 +8480,7 @@ do
 local TabView = tabGroup:Tab({ Name = "View", Image = "lucide/sun" })
 
 -- SEKSI 1: FULLBRIGHT + NO FOG
-local SecFB = TabView:Section({})
+local SecFB = TabView:Section({ Name = "Fullbright", Side = 1 })
 SecFB:Header({ Name = ZypheraxLib:Gradient("Fullbright & No Fog", Color3.fromRGB(240,190,100), Color3.fromRGB(255,200,130)) })
 
 SecFB:Toggle({
@@ -8737,7 +8499,7 @@ SecFB:Toggle({
 })
 
 -- SEKSI 2: CUSTOM FOV
-local SecFov = TabView:Section({})
+local SecFov = TabView:Section({ Name = "Custom FOV", Side = 2 })
 SecFov:Header({ Name = ZypheraxLib:Gradient("Custom FOV (Field of View)", Color3.fromRGB(99,130,255), Color3.fromRGB(140,200,255)) })
 
 SecFov:Toggle({
@@ -8786,7 +8548,7 @@ end -- [End TabView]
 do
 local TabRadar = tabGroup:Tab({ Name = "Radar", Image = "lucide/radio" })
 
-local SecRadar = TabRadar:Section({})
+local SecRadar = TabRadar:Section({ Name = "Radar Killer", Side = 1 })
 SecRadar:Header({ Name = ZypheraxLib:Gradient("Killer Radar (Mini-Map)", Color3.fromRGB(232,100,120), Color3.fromRGB(200,120,180)) })
 
 SecRadar:Toggle({
@@ -8816,7 +8578,7 @@ SecRadar:Slider({
     end
 })
 
-local SecRadarInfo = TabRadar:Section({})
+local SecRadarInfo = TabRadar:Section({ Name = "Info Radar", Side = 2 })
 SecRadarInfo:Header({ Name = ZypheraxLib:Gradient("Cara Baca Radar", Color3.fromRGB(140,152,190), Color3.fromRGB(120,170,200)) })
 SecRadarInfo:Label({ Name = "🟢 Titik Hijau = Kamu sendiri" })
 SecRadarInfo:Label({ Name = "🔴 Titik Merah = Killer (besar)" })
@@ -8831,7 +8593,7 @@ end -- [End TabRadar]
 do
 local TabWebhook = tabGroup:Tab({ Name = "Webhook", Image = "lucide/bell" })
 
-local SecWHUrl = TabWebhook:Section({})
+local SecWHUrl = TabWebhook:Section({ Name = "Webhook Discord", Side = 1 })
 SecWHUrl:Header({ Name = ZypheraxLib:Gradient("Discord Webhook Notifier", Color3.fromRGB(99,130,255), Color3.fromRGB(72,214,200)) })
 
 SecWHUrl:Input({
@@ -8895,7 +8657,7 @@ SecWHUrl:Button({
     end
 })
 
-local SecWHSummary = TabWebhook:Section({})
+local SecWHSummary = TabWebhook:Section({ Name = "Match Summary", Side = 2 })
 SecWHSummary:Header({ Name = ZypheraxLib:Gradient("Per-Match Summary (Zypherax Hub Style)", Color3.fromRGB(99,130,255), Color3.fromRGB(72,214,200)) })
 
 SecWHSummary:Toggle({
@@ -8927,7 +8689,7 @@ SecWHSummary:Button({
 SecWHSummary:Label({ Name = "Format Zypherax Hub: Discord Blurple, Delta (+/-) Level, EXP, Screws, Gears, Sin." })
 SecWHSummary:Label({ Name = "Summary dikirim per-match (bukan live update) saat match selesai / escape." })
 
-local SecWHInfo = TabWebhook:Section({})
+local SecWHInfo = TabWebhook:Section({ Name = "Petunjuk Webhook", Side = 1 })
 SecWHInfo:Header({ Name = ZypheraxLib:Gradient("Cara Pakai Webhook", Color3.fromRGB(140,152,190), Color3.fromRGB(120,170,200)) })
 SecWHInfo:Label({ Name = "Salin URL dari: Server Discord > Edit Channel > Integrations > Webhooks" })
 SecWHInfo:Label({ Name = "Delta (+/-) dihitung otomatis dari awal match hingga kamu berhasil escape." })
@@ -8943,7 +8705,7 @@ local TabMod = tabGroup:Tab({ Name = "Modifikasi", Image = "lucide/sparkles" })
 
 
 -- SEKSI 1: SALIN AVATAR PEMAIN
-local SecAvatar = TabMod:Section({})
+local SecAvatar = TabMod:Section({ Name = "Avatar Swap", Side = 1 })
 SecAvatar:Header({ Name = ZypheraxLib:Gradient("Salin Avatar Pemain", Color3.fromRGB(99,130,255), Color3.fromRGB(168,120,255)) })
 
 SecAvatar:Input({
@@ -8991,7 +8753,7 @@ SecAvatar:Button({
 })
 
 -- SEKSI 2: KLONING OUTFIT TERSIMPAN
-local SecOutfit = TabMod:Section({})
+local SecOutfit = TabMod:Section({ Name = "Outfit Clone", Side = 2 })
 SecOutfit:Header({ Name = ZypheraxLib:Gradient("Kloning Outfit Tersimpan", Color3.fromRGB(232,110,170), Color3.fromRGB(168,120,255)) })
 
 SecOutfit:Input({
@@ -9035,7 +8797,7 @@ SecOutfit:Button({
 })
 
 -- SEKSI 3: PEMUAT AKSESORIS CATALOG
-local SecAcc = TabMod:Section({})
+local SecAcc = TabMod:Section({ Name = "Catalog Accessories", Side = 1 })
 SecAcc:Header({ Name = ZypheraxLib:Gradient("Pemuat Aksesoris Catalog", Color3.fromRGB(86,204,158), Color3.fromRGB(120,160,255)) })
 
 local acc_offset_y = 0
@@ -9160,7 +8922,7 @@ SecAcc:Button({
 })
 
 -- SEKSI 4: KORBLOX & HEADLESS
-local SecBody = TabMod:Section({})
+local SecBody = TabMod:Section({ Name = "Korblox & Headless", Side = 2 })
 SecBody:Header({ Name = ZypheraxLib:Gradient("Korblox & Headless", Color3.fromRGB(232,130,110), Color3.fromRGB(200,110,150)) })
 
 local korblox_offset = 0.7
@@ -9243,8 +9005,15 @@ do
 local TabConfig = tabGroup:Tab({ Name = "Pengaturan", Image = "lucide/settings" })
 
 -- SEKSI 1: PENAMPILAN & TEMA
-local SecTheme = TabConfig:Section({})
+local SecTheme = TabConfig:Section({ Name = "Tema & Penampilan", Side = 1 })
 SecTheme:Header({ Name = "Penampilan (Appearance)" })
+
+-- Config Manager System (Save / Load / Autoload) sesuai foto
+pcall(function()
+    if SecTheme.CreateConfigSystem then
+        SecTheme:CreateConfigSystem()
+    end
+end)
 
 SecTheme:Dropdown({
     Name = "Pilihan Tema (Color Themes)",
@@ -9377,7 +9146,7 @@ SecTheme:Dropdown({
 -- ==============================================================================
 -- SEKSI 2: WATERMARK & WINDOW
 -- ==============================================================================
-local SecWin = TabConfig:Section({})
+local SecWin = TabConfig:Section({ Name = "Window & Watermark", Side = 2 })
 SecWin:Header({ Name = ZypheraxLib:Gradient("Jendela & Kontrol", Color3.fromRGB(99,130,255), Color3.fromRGB(168,120,255)) })
 
 -- Toggle log diagnostik.
