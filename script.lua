@@ -4027,146 +4027,19 @@ end
 -- // WATERMARK SYSTEM (Draggable, Minimizable, Realtime FPS) \ --
 local ActiveWatermark = nil
 function ZypheraxUI:Watermark(cfg)
-    if ActiveWatermark and ActiveWatermark._gui and ActiveWatermark._gui.Parent then
-        return ActiveWatermark
-    end
-    cfg = cfg or {}
-    local hubName = cfg.Name or "Zypherax Hub"
-    local version = cfg.Version or "v3.5"
-
-    local gui = U.New("ScreenGui", {
-        Name = "ZypheraxWatermarkGui",
-        DisplayOrder = 9998,
-        ResetOnSpawn = false,
-        ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-        Parent = GetCore()
-    })
-
-    local pill = U.New("Frame", {
-        Name = "WatermarkPill",
-        Size = UDim2.new(0, 240, 0, 32),
-        Position = UDim2.new(0, 18, 0, 18),
-        BackgroundColor3 = T.Surface,
-        BackgroundTransparency = 0.2,
-        ClipsDescendants = true,
-        Parent = gui
-    })
-    U.Corner(pill, UDim.new(1, 0))
-    U.Stroke(pill, T.Accent, 1, 0.4)
-
-    -- Status dot
-    local dot = U.New("Frame", {
-        Size = UDim2.new(0, 8, 0, 8),
-        Position = UDim2.new(0, 10, 0.5, -4),
-        BackgroundColor3 = T.Accent,
-        BorderSizePixel = 0,
-        Parent = pill
-    })
-    U.Corner(dot, UDim.new(1, 0))
-
-    -- Main text
-    local label = U.New("TextLabel", {
-        Name = "ContentLabel",
-        Text = hubName .. "  |  60 FPS",
-        Font = T.Font,
-        TextSize = 11,
-        TextColor3 = T.Text,
-        BackgroundTransparency = 1,
-        Position = UDim2.new(0, 24, 0, 0),
-        Size = UDim2.new(1, -66, 1, 0),
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextTruncate = Enum.TextTruncate.AtEnd,
-        Parent = pill
-    })
-
-    -- Minimize button (-)
-    local minBtn = U.New("TextButton", {
-        Text = "−",
-        Font = T.FontBold,
-        TextSize = 12,
-        TextColor3 = T.TextMuted,
-        BackgroundTransparency = 1,
-        Position = UDim2.new(1, -38, 0, 0),
-        Size = UDim2.new(0, 16, 1, 0),
-        Parent = pill
-    })
-
-    -- Close button (✕)
-    local closeBtn = U.New("TextButton", {
-        Text = "✕",
-        Font = T.FontBold,
-        TextSize = 11,
-        TextColor3 = T.TextDim,
-        BackgroundTransparency = 1,
-        Position = UDim2.new(1, -20, 0, 0),
-        Size = UDim2.new(0, 16, 1, 0),
-        Parent = pill
-    })
-
-    local isMinimized = false
-    minBtn.MouseButton1Click:Connect(function()
-        isMinimized = not isMinimized
-        if isMinimized then
-            U.Tween(pill, 0.2, { Size = UDim2.new(0, 48, 0, 32) })
-            label.Visible = false
-            minBtn.Text = "+"
-        else
-            U.Tween(pill, 0.2, { Size = UDim2.new(0, 240, 0, 32) })
-            label.Visible = true
-            minBtn.Text = "−"
-        end
+    -- Inert watermark: safely cleanup existing widgets and return dummy methods
+    pcall(function()
+        local core = GetCore()
+        local oldWm = core:FindFirstChild("ZypheraxWatermarkGui")
+        if oldWm then oldWm:Destroy() end
+        local oldFt = core:FindFirstChild("ZypheraxFloatingToggle")
+        if oldFt then oldFt:Destroy() end
     end)
-
-    closeBtn.MouseButton1Click:Connect(function()
-        gui.Enabled = false
-    end)
-
-    -- Smooth global dragging for watermark
-    local wDragging, wDragStart, wStartPos
-    pill.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            wDragging = true
-            wDragStart = input.Position
-            wStartPos = pill.Position
-        end
-    end)
-    UIS.InputChanged:Connect(function(input)
-        if wDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            local delta = input.Position - wDragStart
-            pill.Position = UDim2.new(
-                wStartPos.X.Scale, wStartPos.X.Offset + delta.X,
-                wStartPos.Y.Scale, wStartPos.Y.Offset + delta.Y
-            )
-        end
-    end)
-    UIS.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            wDragging = false
-        end
-    end)
-
-    local watermarkObj = {
-        _gui = gui,
-        _pill = pill,
-        _label = label,
-        _dot = dot,
-        Set = function(self, keyOrText, val)
-            if not self._label then return end
-            if val ~= nil then
-                self._label.Text = hubName .. "  |  " .. tostring(val)
-            else
-                self._label.Text = tostring(keyOrText)
-            end
-        end,
-        SetVisible = function(self, bool)
-            if self._gui then self._gui.Enabled = (bool == true) end
-        end,
-        Destroy = function(self)
-            if self._gui then self._gui:Destroy() end
-        end
+    return {
+        Set = function() end,
+        SetVisible = function() end,
+        Destroy = function() end,
     }
-    ActiveWatermark = watermarkObj
-    return watermarkObj
 end
 
 -- // MAIN WINDOW BUILDER (MacOS Traffic Lights + Double Column) \ --
@@ -4216,22 +4089,11 @@ function ZypheraxUI:CreateWindow(config)
     RegisterThemeColor(main, "BackgroundColor3", "Background")
     RegisterThemeColor(mainStroke, "Color", "Stroke")
 
-    -- Subtle accent gradient top glow
-    local topGlow = U.New("Frame", {
-        Size = UDim2.new(1, 0, 0, 1.5),
-        BackgroundColor3 = T.Accent,
-        BorderSizePixel = 0,
-        ZIndex = 10,
-        Parent = main
-    })
-    U.Gradient(topGlow, T.Accent, T.AccentGradient, 0)
-    RegisterThemeColor(topGlow, "BackgroundColor3", "Accent")
-
     -- Window Object
     local Win = { Tabs = {}, Pages = {}, _currentTab = nil, _connections = connections }
 
     -- // SIDEBAR \ --
-    local SIDEBAR_W = 230
+    local SIDEBAR_W = 168
     local sidebar = U.New("Frame", {
         Name = "Sidebar",
         Size = UDim2.new(0, SIDEBAR_W, 1, 0),
@@ -4258,31 +4120,31 @@ function ZypheraxUI:CreateWindow(config)
     -- // SIDEBAR HEADER (MacOS Traffic Lights + Titles) \ --
     local sidebarHeader = U.New("Frame", {
         Name = "SidebarHeader",
-        Size = UDim2.new(1, 0, 0, 84),
+        Size = UDim2.new(1, 0, 0, 78),
         BackgroundTransparency = 1,
         ZIndex = 4,
         Parent = sidebar
     })
 
-    -- MacOS Traffic Light Buttons (🔴 Red, 🟡 Yellow, 🟢 Green)
+    -- MacOS Traffic Light Buttons (🔴 Red, 🟡 Yellow, 🟢 Green - Compact)
     local trafficContainer = U.New("Frame", {
         Name = "MacOSTrafficLights",
-        Size = UDim2.new(0, 60, 0, 16),
-        Position = UDim2.new(0, 16, 0, 14),
+        Size = UDim2.new(0, 48, 0, 12),
+        Position = UDim2.new(0, 14, 0, 12),
         BackgroundTransparency = 1,
         ZIndex = 5,
         Parent = sidebarHeader
     })
     local tLayout = U.New("UIListLayout", {
         FillDirection = Enum.FillDirection.Horizontal,
-        Padding = UDim.new(0, 7),
+        Padding = UDim.new(0, 6),
         VerticalAlignment = Enum.VerticalAlignment.Center,
         Parent = trafficContainer
     })
 
     local function makeTrafficDot(color, hoverColor, onClick)
         local dot = U.New("TextButton", {
-            Size = UDim2.fromOffset(12, 12),
+            Size = UDim2.fromOffset(10, 10),
             BackgroundColor3 = color,
             BorderSizePixel = 0,
             AutoButtonColor = false,
@@ -4325,11 +4187,11 @@ function ZypheraxUI:CreateWindow(config)
     local titleLbl = U.New("TextLabel", {
         Text = string.upper(title),
         Font = T.FontBold,
-        TextSize = 15,
+        TextSize = 13,
         TextColor3 = T.Accent,
         BackgroundTransparency = 1,
-        Position = UDim2.new(0, 16, 0, 38),
-        Size = UDim2.new(1, -30, 0, 18),
+        Position = UDim2.new(0, 14, 0, 32),
+        Size = UDim2.new(1, -24, 0, 16),
         TextXAlignment = Enum.TextXAlignment.Left,
         TextTruncate = Enum.TextTruncate.AtEnd,
         ZIndex = 5,
@@ -4340,11 +4202,11 @@ function ZypheraxUI:CreateWindow(config)
     local subLbl = U.New("TextLabel", {
         Text = sub,
         Font = T.FontRegular,
-        TextSize = 11,
+        TextSize = 10,
         TextColor3 = T.TextMuted,
         BackgroundTransparency = 1,
-        Position = UDim2.new(0, 16, 0, 58),
-        Size = UDim2.new(1, -30, 0, 14),
+        Position = UDim2.new(0, 14, 0, 48),
+        Size = UDim2.new(1, -24, 0, 14),
         TextXAlignment = Enum.TextXAlignment.Left,
         TextTruncate = Enum.TextTruncate.AtEnd,
         ZIndex = 5,
@@ -4391,8 +4253,8 @@ function ZypheraxUI:CreateWindow(config)
     -- // SIDEBAR TAB LIST (Pill-style) \ --
     local tabList = U.New("ScrollingFrame", {
         Name = "TabList",
-        Size = UDim2.new(1, 0, 1, -84 - 64),
-        Position = UDim2.new(0, 0, 0, 84),
+        Size = UDim2.new(1, 0, 1, -78 - 54),
+        Position = UDim2.new(0, 0, 0, 78),
         BackgroundTransparency = 1,
         ScrollBarThickness = 0,
         AutomaticCanvasSize = Enum.AutomaticSize.Y,
@@ -4406,17 +4268,17 @@ function ZypheraxUI:CreateWindow(config)
         Parent = tabList
     })
     U.New("UIPadding", {
-        PaddingLeft = UDim.new(0, 12),
-        PaddingRight = UDim.new(0, 12),
-        PaddingTop = UDim.new(0, 10),
+        PaddingLeft = UDim.new(0, 8),
+        PaddingRight = UDim.new(0, 8),
+        PaddingTop = UDim.new(0, 8),
         Parent = tabList
     })
 
     -- // SIDEBAR FOOTER (User card) \ --
     local footer = U.New("Frame", {
         Name = "SidebarFooter",
-        Size = UDim2.new(1, 0, 0, 60),
-        Position = UDim2.new(0, 0, 1, -60),
+        Size = UDim2.new(1, 0, 0, 54),
+        Position = UDim2.new(0, 0, 1, -54),
         BackgroundColor3 = T.Surface,
         BackgroundTransparency = 0.5,
         BorderSizePixel = 0,
@@ -4436,7 +4298,7 @@ function ZypheraxUI:CreateWindow(config)
         TextSize = 12,
         TextColor3 = T.Text,
         BackgroundTransparency = 1,
-        Position = UDim2.new(0, 16, 0, 12),
+        Position = UDim2.new(0, 12, 0, 8),
         Size = UDim2.new(1, -32, 0, 16),
         TextXAlignment = Enum.TextXAlignment.Left,
         TextTruncate = Enum.TextTruncate.AtEnd,
@@ -4449,7 +4311,7 @@ function ZypheraxUI:CreateWindow(config)
         TextSize = 10,
         TextColor3 = T.TextMuted,
         BackgroundTransparency = 1,
-        Position = UDim2.new(0, 16, 0, 30),
+        Position = UDim2.new(0, 12, 0, 24),
         Size = UDim2.new(1, -32, 0, 14),
         TextXAlignment = Enum.TextXAlignment.Left,
         TextTruncate = Enum.TextTruncate.AtEnd,
@@ -4509,7 +4371,7 @@ function ZypheraxUI:CreateWindow(config)
         -- Tab button
         local tabBtn = U.New("TextButton", {
             Name = "TabBtn_" .. tabName,
-            Size = UDim2.new(1, 0, 0, 38),
+            Size = UDim2.new(1, 0, 0, 34),
             BackgroundColor3 = T.Surface2,
             BackgroundTransparency = 1,
             AutoButtonColor = false,
@@ -4522,8 +4384,8 @@ function ZypheraxUI:CreateWindow(config)
 
         -- Active indicator bar
         local activeBar = U.New("Frame", {
-            Size = UDim2.new(0, 3, 0, 18),
-            Position = UDim2.new(0, 6, 0.5, -9),
+            Size = UDim2.new(0, 3, 0, 16),
+            Position = UDim2.new(0, 5, 0.5, -8),
             BackgroundColor3 = T.Accent,
             BorderSizePixel = 0,
             BackgroundTransparency = 1,
@@ -4539,8 +4401,8 @@ function ZypheraxUI:CreateWindow(config)
             TextSize = 12,
             TextColor3 = T.TextMuted,
             BackgroundTransparency = 1,
-            Position = UDim2.new(0, 18, 0, 0),
-            Size = UDim2.new(1, -26, 1, 0),
+            Position = UDim2.new(0, 14, 0, 0),
+            Size = UDim2.new(1, -18, 1, 0),
             TextXAlignment = Enum.TextXAlignment.Left,
             TextTruncate = Enum.TextTruncate.AtEnd,
             ZIndex = 5,
@@ -5507,6 +5369,7 @@ end
 
 return ZypheraxUI
 
+
         end)()
     end)()
 
@@ -5550,21 +5413,10 @@ return ZypheraxUI
     -- --------------------------------------------------------------------------
     -- Watermark: objek tiruan dengan method Set / SetVisible.
     -- --------------------------------------------------------------------------
-    local BridgeWatermark = { _visible = false, _fps = "" }
-    local function _zy_wm_refresh()
-        local list = { "Zypherax Hub v1.0.0" }
-        if BridgeWatermark._fps ~= "" then table.insert(list, BridgeWatermark._fps) end
-        if not BridgeWatermark._visible then list = { " " } end
-        pcall(function() ZypheraxUI:Watermark(list) end)
-    end
-    function BridgeWatermark:Set(_, tag, val)
-        if tostring(tag):upper() == "FPS" then self._fps = tostring(val or "") end
-        _zy_wm_refresh()
-    end
-    function BridgeWatermark:SetVisible(v)
-        self._visible = (v == true)
-        _zy_wm_refresh()
-    end
+    local BridgeWatermark = {
+        Set = function() end,
+        SetVisible = function() end,
+    }
 
     -- --------------------------------------------------------------------------
     -- Window tiruan: semua method lama tetap aman dipanggil.
@@ -5601,12 +5453,15 @@ return ZypheraxUI
         return found
     end
 
-    -- Sembunyikan jendela + tombol melayang dulu agar Loading Screen tampil dulu.
+    -- Sembunyikan jendela dulu agar Loading Screen tampil dulu.
     pcall(function()
         local app = _zy_find_gui("ZypheraxApp")
         if app then app.Enabled = false end
-        local fb = _zy_find_gui("ZypheraxFloatingToggle")
-        if fb then fb.Enabled = false end
+        local core = (gethui and gethui()) or (cloneref and cloneref(game:GetService("CoreGui"))) or game:GetService("CoreGui")
+        local oldWm = core:FindFirstChild("ZypheraxWatermarkGui")
+        if oldWm then oldWm:Destroy() end
+        local oldFt = core:FindFirstChild("ZypheraxFloatingToggle")
+        if oldFt then oldFt:Destroy() end
     end)
 
     local BridgeTabGroup = { _zwin = _zwin }
@@ -5779,18 +5634,15 @@ return ZypheraxUI
             if _zwin and _zwin.SetTheme then _zwin:SetTheme(name) end
         end)
     end
-    function BridgeLib:Watermark(cfg)
-        local wm
-        pcall(function() wm = ZypheraxUI:Watermark(cfg) end)
-        return wm or BridgeWatermark
+    function BridgeLib:Watermark(_)
+        return BridgeWatermark
     end
     -- Dipakai Loading Screen untuk membuka jendela setelah selesai memuat.
     function BridgeLib:_Reveal()
         pcall(function()
             local app = _zy_find_gui("ZypheraxApp")
             if app then app.Enabled = true end
-            local fb = _zy_find_gui("ZypheraxFloatingToggle")
-            if fb then fb.Enabled = true end
+            -- Window revealed
             _zwin:ToggleVisibility(true)
         end)
     end
@@ -9192,43 +9044,14 @@ SecWin:Button({
     end
 })
 
--- Watermark & FPS
-local watermark
+-- Widget Watermark & Floating Toggle di kiri atas dihapus total sesuai permintaan
 pcall(function()
-    if ZypheraxLib and ZypheraxLib.Watermark then
-        watermark = ZypheraxLib:Watermark({ Name = "Zypherax Hub", Version = "v1.0.0" })
-        if watermark and watermark.SetVisible then
-            watermark:SetVisible(false)
-        end
-    end
+    local core = (gethui and gethui()) or (cloneref and cloneref(game:GetService("CoreGui"))) or game:GetService("CoreGui")
+    local oldWm = core:FindFirstChild("ZypheraxWatermarkGui")
+    if oldWm then oldWm:Destroy() end
+    local oldFt = core:FindFirstChild("ZypheraxFloatingToggle")
+    if oldFt then oldFt:Destroy() end
 end)
-
-local fpsCount, fpsElapsed = 0, 0
-RunService.Heartbeat:Connect(function(dt)
-    fpsCount = fpsCount + 1
-    fpsElapsed = fpsElapsed + dt
-    if fpsElapsed >= 0.5 then
-        pcall(function()
-            if watermark and watermark.Set then
-                watermark:Set("FPS", math.round(fpsCount / fpsElapsed) .. " FPS")
-            end
-        end)
-        fpsCount = 0
-        fpsElapsed = 0
-    end
-end)
-
-SecWin:Toggle({
-    Name = "Logo Watermark & FPS Overlay",
-    Default = false,
-    Callback = function(value)
-        pcall(function()
-            if watermark and watermark.SetVisible then
-                watermark:SetVisible(value)
-            end
-        end)
-    end
-})
 
 SecWin:Slider({
     Name = "Ukuran Jendela (Window Size)",
