@@ -4287,14 +4287,23 @@ function ZypheraxUI:Watermark(cfg)
     }
 end
 
--- // FLOATING TOGGLE (Logo Z asli + Free 2D Drag, tanpa bayangan) \ --
-local ORB_URL = "https://i.imgur.com/6FVu1WJ.png" -- Logo Z origami biru (kirim user)
+-- // FLOATING TOGGLE (Logo Z origami + Drag bebas anti-seret, anti error) \ --
+local ORB_URL_RAW  = "https://raw.githubusercontent.com/Skyuuu222/zypheraxui/main/logo.png" -- layer 1 (paling andal)
+local ORB_URL_IMGUR = "https://i.imgur.com/6FVu1WJ.png" -- layer 2 (fallback)
 local FloatingToggleGui = nil
 local FloatingButton    = nil
 local FloatingContainer = nil
 
 local function EnsureFloatingButton(onToggleWindow)
     if FloatingContainer and FloatingContainer.Parent then return FloatingButton end
+
+    -- Buang GUI toggle lama dari run sebelumnya (glow/bayangan lama dll.)
+    pcall(function()
+        local c = GetCore()
+        for _, child in ipairs(c:GetChildren()) do
+            if child.Name == "ZypheraxFloatingToggle" then child:Destroy() end
+        end
+    end)
 
     FloatingToggleGui = U.New("ScreenGui", {
         Name            = "ZypheraxFloatingToggle",
@@ -4304,7 +4313,7 @@ local function EnsureFloatingButton(onToggleWindow)
         Parent          = GetCore()
     })
 
-    -- Tombol lingkaran (tanpa glow/bayangan)
+    -- Tombol lingkaran bersih (tanpa glow/bayangan)
     FloatingButton = U.New("ImageButton", {
         Name                   = "FloatingCircleBtn",
         Size                   = UDim2.new(0, 56, 0, 56),
@@ -4321,8 +4330,8 @@ local function EnsureFloatingButton(onToggleWindow)
     U.Corner(FloatingButton, UDim.new(1, 0))
     local ftStroke = U.Stroke(FloatingButton, T.Accent, 1.5, 0.25)
 
-    -- Fallback teks "Z" di BELAKANG logo (hanya terlihat kalau gambar gagal load)
-    local bText = U.New("TextLabel", {
+    -- Fallback teks Z (paling bawah - tampil kalau semua gambar gagal)
+    U.New("TextLabel", {
         Name                   = "FloatingText",
         Text                   = "Z",
         Font                   = T.Font,
@@ -4334,22 +4343,33 @@ local function EnsureFloatingButton(onToggleWindow)
         Parent                 = FloatingButton
     })
 
-    -- Logo Z origami (mengisi lingkaran penuh, gambar persegi -> lingkaran clip rapi)
-    local bLogo = U.New("ImageLabel", {
-        Name                   = "FloatingLogo",
+    -- Layer logo tengah: imgur (tampil kalau layer atas gagal)
+    U.New("ImageLabel", {
+        Name                   = "FloatingLogoFallback",
         Size                   = UDim2.new(1, 0, 1, 0),
         Position               = UDim2.new(0, 0, 0, 0),
         BackgroundTransparency = 1,
-        Image                  = ORB_URL,
+        Image                  = ORB_URL_IMGUR,
         ZIndex                 = 11,
         Parent                 = FloatingButton
     })
 
-    -- // DRAG BEBAS 2D: global listener (tidak seret) tanpa kunci sumbu \ --
+    -- Layer logo atas: GitHub raw (paling andal, hosting sendiri)
+    U.New("ImageLabel", {
+        Name                   = "FloatingLogo",
+        Size                   = UDim2.new(1, 0, 1, 0),
+        Position               = UDim2.new(0, 0, 0, 0),
+        BackgroundTransparency = 1,
+        Image                  = ORB_URL_RAW,
+        ZIndex                 = 12,
+        Parent                 = FloatingButton
+    })
+
+    -- // DRAG BEBAS 2D: global listener, tanpa kunci sumbu, bebas Vector \ --
     local dragging    = false
-    local dragStart   = nil
+    local dragStart   = nil -- Vector2 (bukan Vector3!)
     local startPos    = nil
-    local downPos     = nil
+    local downPos     = nil -- Vector2
     local hasMoved    = false
     local moveConn, endConn = nil, nil
 
@@ -4360,13 +4380,18 @@ local function EnsureFloatingButton(onToggleWindow)
         return x, y
     end
 
+    -- Konversi aman posisi input (Vector3) -> Vector2
+    local function toV2(p)
+        return Vector2.new(p.X, p.Y)
+    end
+
     FloatingButton.InputBegan:Connect(function(inp)
         if inp.UserInputType == Enum.UserInputType.MouseButton1
             or inp.UserInputType == Enum.UserInputType.Touch then
             dragging  = true
-            dragStart = inp.Position
+            dragStart = toV2(inp.Position)   -- Vector2
             startPos  = FloatingButton.Position
-            downPos   = Vector2.new(inp.Position.X, inp.Position.Y)
+            downPos   = toV2(inp.Position)   -- Vector2
             hasMoved  = false
 
             if not moveConn then
@@ -4374,8 +4399,9 @@ local function EnsureFloatingButton(onToggleWindow)
                     if not dragging then return end
                     if mi.UserInputType == Enum.UserInputType.MouseMovement
                         or mi.UserInputType == Enum.UserInputType.Touch then
-                        local d = mi.Position - dragStart
-                        if (mi.Position - downPos).Magnitude > 4 then hasMoved = true end
+                        local mp = toV2(mi.Position)          -- Vector2
+                        local d  = mp - dragStart             -- Vector2 - Vector2 = aman
+                        if (mp - downPos).Magnitude > 4 then hasMoved = true end
                         local nx, ny = clampXY(startPos.X.Offset + d.X, startPos.Y.Offset + d.Y)
                         FloatingButton.Position = UDim2.new(0, nx, 0, ny)
                     end
