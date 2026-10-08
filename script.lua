@@ -3717,8 +3717,7 @@ do
     -- --------------------------------------------------------------------------
     local ZYP_URL = "https://raw.githubusercontent.com/Skyuuu222/zypheraxui/main/zypheraxui"
 
-    local ZypheraxUI = (function()
--- ==============================================================================
+    local ZypheraxUI = (function()-- ==============================================================================
 -- ZYPHERAX UI - MODERN MACOS ENTERPRISE EDITION (v3.5)
 -- Modern MacOS-Style Acrylic GUI Library for Roblox
 -- Features:
@@ -5762,7 +5761,6 @@ function ZypheraxUI:CreateWindow(config)
 end
 
 return ZypheraxUI
-
 end)()
 
 
