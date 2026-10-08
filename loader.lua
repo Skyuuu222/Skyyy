@@ -2,36 +2,22 @@ local cloneref = cloneref or function(x) return x end
 local game = cloneref(game)
 local LOADER_NAME = "Zypherax Loader"
 
-local UNIVERSAL_SCRIPT_URL = "https://raw.githubusercontent.com/Skyuuu222/games/blob/main/violence_district.lua"
+local UNIVERSAL_SCRIPT_URL = "https://raw.githubusercontent.com/Skyuuu222/games/main/violence_district.lua"
 
-Daftar script per UniverseId (GameId)
- Cara isi:
-   [6739698191] = {
-       name = "Violence District",
-       url  = "https://raw.githubusercontent.com/Skyuuu222/games/blob/main/violence_district.lua",
-   },
-   [6701277882] = {
-       name = "Ride A Pet",
-       url  = "https://raw.githubusercontent.com/Skyuuu222/games/blob/main/ride_a_pet.lua",
-   },
-   [6701277882] = {
-       name = "",
-       url  = "",
-   },
-   [6701277882] = {
-       name = "",
-       url  = "",
-   },
-local ___loaders = {}
+local ___loaders = {
+    [6739698191] = {
+        name = "Violence District",
+        url  = "https://raw.githubusercontent.com/Skyuuu222/games/main/violence_district.lua",
+    },
+}
+local ___loaders = {
+    [10035204815] = {
+        name = "Ride A Pet",
+        url  = "https://raw.githubusercontent.com/Skyuuu222/games/blob/main/ride_a_pet.lua",
+    },
+}
 
-Daftar script per PlaceId (khusus map / sub-tempat tertentu)
- Cara isi:
-   [1234567890] = {
-       name = "",
-       url  = "",
-   },
 local ___place_loaders = {}
-
 
 local function __load_script(url, script_name)
     local ok, result = pcall(function()
@@ -41,7 +27,6 @@ local function __load_script(url, script_name)
             error("Respons kosong dari: " .. url)
         end
 
-        -- Tangkap halaman 404 GitHub / error HTML sebelum di-loadstring
         if script_content:sub(1, 14) == "404: Not Found"
             or script_content:find("<!DOCTYPE html>", 1, true) then
             error("File tidak ditemukan (404) di: " .. url)
@@ -72,10 +57,11 @@ local target_url    = target_config and target_config.url or nil
 
 if not target_url or target_url == "" then
     target_url = UNIVERSAL_SCRIPT_URL
+    target_config = nil
 end
 
-if target_url and target_url ~= "" and not target_url:find("GANTI_DENGAN") then
+if target_url and target_url ~= "" then
     __load_script(target_url, target_config and target_config.name or "Universal")
 else
-    warn("[" .. LOADER_NAME .. "] Belum ada URL yang diisi. Isi UNIVERSAL_SCRIPT_URL atau daftar loader di loader.lua.")
+    warn("[" .. LOADER_NAME .. "] UNIVERSAL_SCRIPT_URL belum diisi.")
 end
