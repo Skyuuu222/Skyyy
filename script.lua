@@ -5301,10 +5301,12 @@ function ZypheraxUI:CreateWindow(config)
                     TextXAlignment = Enum.TextXAlignment.Left,
                     ZIndex = 5,
                     Parent = secContainer
-                lbl:SetAttribute("ControlName", txt)
-                table.insert(SectionObj._items, lbl)
-                })
-                U.New("UIPadding", { PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4), Parent = lbl })
+                }, function(obj)
+                    lbl = obj
+                    lbl:SetAttribute("ControlName", txt)
+                    table.insert(SectionObj._items, lbl)
+                end)
+            U.New("UIPadding", { PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4), Parent = lbl })
                 return {
                     Set = function(_, t) lbl.Text = tostring(t) end
                 }
