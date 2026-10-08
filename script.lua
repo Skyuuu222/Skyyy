@@ -4287,9 +4287,13 @@ function ZypheraxUI:Watermark(cfg)
     }
 end
 
--- // FLOATING TOGGLE (Logo Z origami + Drag bebas anti-seret, anti error) \ --
-local ORB_URL_RAW  = "https://raw.githubusercontent.com/Skyuuu222/zypheraxui/main/logo.png" -- layer 1 (paling andal)
-local ORB_URL_IMGUR = "https://i.imgur.com/6FVu1WJ.png" -- layer 2 (fallback)
+-- // FLOATING TOGGLE (Logo Z origami VEKTOR + drag bebas anti-seret) \ --
+-- PENTING: Roblox TIDAK bisa memuat gambar dari URL external (imgur/github/dll),
+-- jadi logo Z dibuat dari KODE (gradient) -> pasti tampil tanpa internet.
+-- Kalau mau pakai gambar asli: upload logo.png di create.roblox.com -> Decal,
+-- lalu isi ORB_ASSET_ID dengan aset ID-nya (contoh: "1234567890").
+local ORB_ASSET_ID  = "" -- "" = pakai logo vektor; isi aset ID utk gambar asli
+local ORB_URL_IMGUR = "https://i.imgur.com/6FVu1WJ.png" -- layer bonus (kalau didukung executor)
 local FloatingToggleGui = nil
 local FloatingButton    = nil
 local FloatingContainer = nil
@@ -4297,7 +4301,7 @@ local FloatingContainer = nil
 local function EnsureFloatingButton(onToggleWindow)
     if FloatingContainer and FloatingContainer.Parent then return FloatingButton end
 
-    -- Buang GUI toggle lama dari run sebelumnya (glow/bayangan lama dll.)
+    -- Buang GUI toggle lama dari run sebelumnya
     pcall(function()
         local c = GetCore()
         for _, child in ipairs(c:GetChildren()) do
@@ -4330,46 +4334,67 @@ local function EnsureFloatingButton(onToggleWindow)
     U.Corner(FloatingButton, UDim.new(1, 0))
     local ftStroke = U.Stroke(FloatingButton, T.Accent, 1.5, 0.25)
 
-    -- Fallback teks Z (paling bawah - tampil kalau semua gambar gagal)
-    U.New("TextLabel", {
-        Name                   = "FloatingText",
+    -- [LAYER 1] LOGO VEKTOR origami-Z (SELALU tampil, dibuat dari kode)
+    local orbBg = U.New("Frame", {
+        Name             = "OrbVectorBg",
+        Size             = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = Color3.fromRGB(12, 60, 110),
+        BorderSizePixel  = 0,
+        ZIndex           = 10,
+        Parent           = FloatingButton
+    })
+    U.Corner(orbBg, UDim.new(1, 0))
+    U.New("UIGradient", {
+        Color    = ColorSequence.new(Color3.fromRGB(0, 200, 255), Color3.fromRGB(8, 24, 56)),
+        Rotation = 45,
+        Parent   = orbBg
+    })
+    local orbZ = U.New("TextLabel", {
+        Name                   = "OrbVectorZ",
         Text                   = "Z",
-        Font                   = T.Font,
-        TextSize               = 26,
-        TextColor3             = T.Accent,
+        Font                   = T.FontBold,
+        TextSize               = 30,
+        TextColor3             = Color3.fromRGB(235, 252, 255),
         BackgroundTransparency = 1,
         Size                   = UDim2.new(1, 0, 1, 0),
-        ZIndex                 = 10,
+        ZIndex                 = 11,
         Parent                 = FloatingButton
     })
+    U.New("UIGradient", {
+        Color    = ColorSequence.new(Color3.fromRGB(170, 245, 255), Color3.fromRGB(0, 140, 255)),
+        Rotation = 90,
+        Parent   = orbZ
+    })
 
-    -- Layer logo tengah: imgur (tampil kalau layer atas gagal)
+    -- [LAYER 2] Gambar URL (bonus: hanya tampil kalau executor/engine mengizinkan)
     U.New("ImageLabel", {
-        Name                   = "FloatingLogoFallback",
+        Name                   = "FloatingLogoUrl",
         Size                   = UDim2.new(1, 0, 1, 0),
         Position               = UDim2.new(0, 0, 0, 0),
         BackgroundTransparency = 1,
         Image                  = ORB_URL_IMGUR,
-        ZIndex                 = 11,
-        Parent                 = FloatingButton
-    })
-
-    -- Layer logo atas: GitHub raw (paling andal, hosting sendiri)
-    U.New("ImageLabel", {
-        Name                   = "FloatingLogo",
-        Size                   = UDim2.new(1, 0, 1, 0),
-        Position               = UDim2.new(0, 0, 0, 0),
-        BackgroundTransparency = 1,
-        Image                  = ORB_URL_RAW,
         ZIndex                 = 12,
         Parent                 = FloatingButton
     })
 
-    -- // DRAG BEBAS 2D: global listener, tanpa kunci sumbu, bebas Vector \ --
+    -- [LAYER 3] Gambar asli via ASET ROBLOX (paling atas, aktif jika ORB_ASSET_ID diisi)
+    if ORB_ASSET_ID ~= "" then
+        U.New("ImageLabel", {
+            Name                   = "FloatingLogo",
+            Size                   = UDim2.new(1, 0, 1, 0),
+            Position               = UDim2.new(0, 0, 0, 0),
+            BackgroundTransparency = 1,
+            Image                  = "rbxassetid://" .. ORB_ASSET_ID,
+            ZIndex                 = 13,
+            Parent                 = FloatingButton
+        })
+    end
+
+    -- // DRAG BEBAS 2D: global listener, tanpa kunci sumbu, semua Vector2 \ --
     local dragging    = false
-    local dragStart   = nil -- Vector2 (bukan Vector3!)
+    local dragStart   = nil
     local startPos    = nil
-    local downPos     = nil -- Vector2
+    local downPos     = nil
     local hasMoved    = false
     local moveConn, endConn = nil, nil
 
@@ -4380,7 +4405,6 @@ local function EnsureFloatingButton(onToggleWindow)
         return x, y
     end
 
-    -- Konversi aman posisi input (Vector3) -> Vector2
     local function toV2(p)
         return Vector2.new(p.X, p.Y)
     end
@@ -4389,9 +4413,9 @@ local function EnsureFloatingButton(onToggleWindow)
         if inp.UserInputType == Enum.UserInputType.MouseButton1
             or inp.UserInputType == Enum.UserInputType.Touch then
             dragging  = true
-            dragStart = toV2(inp.Position)   -- Vector2
+            dragStart = toV2(inp.Position)
             startPos  = FloatingButton.Position
-            downPos   = toV2(inp.Position)   -- Vector2
+            downPos   = toV2(inp.Position)
             hasMoved  = false
 
             if not moveConn then
@@ -4399,8 +4423,8 @@ local function EnsureFloatingButton(onToggleWindow)
                     if not dragging then return end
                     if mi.UserInputType == Enum.UserInputType.MouseMovement
                         or mi.UserInputType == Enum.UserInputType.Touch then
-                        local mp = toV2(mi.Position)          -- Vector2
-                        local d  = mp - dragStart             -- Vector2 - Vector2 = aman
+                        local mp = toV2(mi.Position)
+                        local d  = mp - dragStart
                         if (mp - downPos).Magnitude > 4 then hasMoved = true end
                         local nx, ny = clampXY(startPos.X.Offset + d.X, startPos.Y.Offset + d.Y)
                         FloatingButton.Position = UDim2.new(0, nx, 0, ny)
@@ -4417,7 +4441,6 @@ local function EnsureFloatingButton(onToggleWindow)
             end
         end
     end)
-    -- Fokus game hilang -> drag berhenti (anti-stuck)
     pcall(function()
         UIS.WindowFocusReleased:Connect(function() dragging = false end)
     end)
