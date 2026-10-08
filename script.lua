@@ -56,8 +56,9 @@ local start_esp_gate, stop_esp_gate, is_exit_gate_lever, esp_gate_get_part
 local autoEscapeEnabled = false
 local start_auto_escape, stop_auto_escape, trigger_instant_escape, teleport_to_lobby
 
--- Modul 13 (Discord Webhook Notifier) -- kirim summary HANYA saat match selesai
+-- Modul 13 (Discord Webhook Notifier)
 local webhookUrl = ""
+local webhookNotifyEscape = true
 local webhookNotifyMatch = true
 local send_discord_webhook, start_webhook_live_monitor, stop_webhook_live_monitor, get_player_stats, send_match_summary_webhook
 
@@ -1396,9 +1397,8 @@ local function radar_create_gui()
     sg.ResetOnSpawn = false
     sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     sg.IgnoreGuiInset = true
-    sg.DisplayOrder = 999  -- pastikan di atas semua GUI lain
+    sg.DisplayOrder = 999
     sg.Enabled = true
-    -- Parenting ke gethui() atau PlayerGui (CoreGui bisa diblock)
     local parented = false
     pcall(function()
         if gethui then
@@ -1418,7 +1418,6 @@ local function radar_create_gui()
         end)
     end
 
-    -- Palet premium (dark glassmorphism)
     local COL_BG      = Color3.fromRGB(12, 15, 24)
     local COL_CARD    = Color3.fromRGB(20, 24, 38)
     local COL_BORDER  = Color3.fromRGB(54, 62, 88)
@@ -1427,7 +1426,6 @@ local function radar_create_gui()
     local COL_GRID    = Color3.fromRGB(42, 50, 74)
     local COL_SELF    = Color3.fromRGB(70, 240, 140)
 
-    -- Kartu utama
     local radarBg = Instance.new("Frame")
     radarBg.Name = "RadarBg"
     radarBg.AnchorPoint = Vector2.new(1, 1)
@@ -1453,7 +1451,6 @@ local function radar_create_gui()
     bgGrad.Rotation = 90
     bgGrad.Parent = radarBg
 
-    -- Bar aksen atas
     local topBar = Instance.new("Frame")
     topBar.Size = UDim2.new(1, -28, 0, 3)
     topBar.Position = UDim2.new(0, 14, 0, 12)
@@ -1468,7 +1465,6 @@ local function radar_create_gui()
     tbGrad.Color = ColorSequence.new(COL_ACCENT, COL_ACCENT2)
     tbGrad.Parent = topBar
 
-    -- Header
     local hdr = Instance.new("TextLabel")
     hdr.Size = UDim2.new(1, -28, 0, 18)
     hdr.Position = UDim2.new(0, 14, 0, 22)
@@ -1481,20 +1477,6 @@ local function radar_create_gui()
     hdr.ZIndex = 4
     hdr.Parent = radarBg
 
-    -- Titik live (indikator aktif)
-    local liveDot = Instance.new("Frame")
-    liveDot.AnchorPoint = Vector2.new(1, 0.5)
-    liveDot.Position = UDim2.new(1, -14, 0, 31)
-    liveDot.Size = UDim2.fromOffset(7, 7)
-    liveDot.BackgroundColor3 = Color3.fromRGB(70, 240, 140)
-    liveDot.BorderSizePixel = 0
-    liveDot.ZIndex = 4
-    liveDot.Parent = radarBg
-    local ldCorner = Instance.new("UICorner")
-    ldCorner.CornerRadius = UDim.new(1, 0)
-    ldCorner.Parent = liveDot
-
-    -- Ring radar (lingkaran)
     local radarCircle = Instance.new("Frame")
     radarCircle.Name = "RadarCircle"
     radarCircle.AnchorPoint = Vector2.new(0.5, 0)
@@ -1516,7 +1498,6 @@ local function radar_create_gui()
     circleStroke.Transparency = 0.15
     circleStroke.Parent = radarCircle
 
-    -- Lingkaran grid dekoratif
     for _, r in ipairs({0.32, 0.62, 0.88}) do
         local ring = Instance.new("Frame")
         ring.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -1532,7 +1513,6 @@ local function radar_create_gui()
         ringCorner.Parent = ring
     end
 
-    -- Cross hair lines
     for _, axis in ipairs({"H", "V"}) do
         local line = Instance.new("Frame")
         line.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -1549,13 +1529,12 @@ local function radar_create_gui()
         line.Parent = radarCircle
     end
 
-    -- Titik pemain (hijau di tengah)
     local selfDot = Instance.new("Frame")
     selfDot.Name = "SelfDot"
     selfDot.AnchorPoint = Vector2.new(0.5, 0.5)
     selfDot.Position = UDim2.fromScale(0.5, 0.5)
     selfDot.Size = UDim2.fromOffset(12, 12)
-    selfDot.BackgroundColor3 = Color3.fromRGB(70, 240, 140)
+    selfDot.BackgroundColor3 = COL_SELF
     selfDot.BorderSizePixel = 0
     selfDot.ZIndex = 10
     selfDot.Parent = radarCircle
@@ -1568,6 +1547,7 @@ local function radar_create_gui()
     selfRing.Transparency = 0.25
     selfRing.Parent = selfDot
 
+    killerRadarGui = sg
     return sg, radarCircle
 end
 
@@ -1846,7 +1826,7 @@ local function radar_update(radarCircle)
 
             dot.Visible = true
             dot.Position = UDim2.fromScale(screenX, screenY)
-            dot.Size = UDim2.fromOffset(isKiller and 13 or 9, isKiller and 13 or 9)
+            dot.Size = UDim2.fromOffset(isKiller and 14 or 8, isKiller and 14 or 8)
             dot.BackgroundColor3 = isKiller and Color3.fromRGB(255, 35, 35) or Color3.fromRGB(50, 190, 255)
             dot.ZIndex = isKiller and 14 or 9
 
@@ -1905,6 +1885,23 @@ function killerradar_stop()
         pcall(function() killerRadarGui:Destroy() end)
         killerRadarGui = nil
     end
+    pcall(function()
+        local containers = {
+            (gethui and gethui()),
+            (cloneref and cloneref(game:GetService("CoreGui")) or game:GetService("CoreGui")),
+            (LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui"))
+        }
+        for _, c in ipairs(containers) do
+            if c then
+                for _, child in ipairs(c:GetChildren()) do
+                    if child.Name == "ZypheraxHubKillerRadar" then
+                        pcall(function() child.Enabled = false end)
+                        pcall(function() child:Destroy() end)
+                    end
+                end
+            end
+        end
+    end)
     killerRadarCircle = nil
 end
 
@@ -3225,10 +3222,11 @@ function trigger_instant_escape()
         fire_escape_reward_remotes()
         task.wait(0.5)
 
-        -- [LANGKAH 8] Kirim Match Summary setelah berhasil Escape
+        -- [LANGKAH 8] Webhook summary (dikirim langsung saat berhasil escape)
         pcall(function()
-            if webhookUrl and webhookUrl ~= "" then
-                task.delay(1.2, function()
+            if webhookUrl and webhookUrl ~= "" and webhookNotifyMatch then
+                task.spawn(function()
+                    task.wait(0.2)
                     pcall(function() send_match_summary_webhook("ESCAPED", true) end)
                 end)
             end
@@ -3292,74 +3290,107 @@ end
 
 -- ==============================================================================
 do
--- MODUL 13: DISCORD WEBHOOK NOTIFIER (MATCH SUMMARY SAAT MATCH SELESAI)
+-- MODUL 13: DISCORD WEBHOOK NOTIFIER (MATCH SUMMARY SAAT MATCH SELESAI / ESCAPED)
 -- ==============================================================================
 webhookUrl = ""
-webhookNotifyMatch = true
-
--- Session stats baseline (diisi saat match mulai)
+local webhookNotifyMatch = true
 local _matchStartStats = nil
-local _matchStartTime = 0
+local _matchStartTime = tick()
 local _matchEndFired = false
+local _lastWebhookSentTime = 0
 
--- Helper: scan leaderstats, attributes, dan values dari sebuah instance root
-local _statsRef = nil
+local WEBHOOK_SETTINGS_FILE = "zypherax_webhook.json"
 
-local function _scan_stats_from(root)
-    if not root or not _statsRef then return end
-
+local function save_webhook_settings()
     pcall(function()
-        local ls = root:FindFirstChild("leaderstats")
-        if ls then
-            for _, v in ipairs(ls:GetChildren()) do
-                local n = tostring(v.Name):lower()
-                local val = tonumber(tostring(v.Value)) or v.Value
-                if n:find("level") or n == "lv" or n == "lvl" then _statsRef.level = val end
-                if n:find("exp") or n:find("xp") then _statsRef.exp = val end
-                if n:find("screw") then _statsRef.screw = val end
-                if n:find("gold") or n:find("coin") or n:find("gear") or n:find("token") then _statsRef.gold = val end
-                if n:find("sin") or n:find("reputation") or n:find("evil") or n:find("kill") or n:find("slay") then _statsRef.sin = val end
-            end
+        if writefile then
+            local data = {
+                url = tostring(webhookUrl or ""),
+                enabled = webhookNotifyMatch == true
+            }
+            writefile(WEBHOOK_SETTINGS_FILE, HttpService:JSONEncode(data))
         end
     end)
+end
 
+local function load_webhook_settings()
     pcall(function()
-        for k, v in pairs(root:GetAttributes()) do
-            local ks = tostring(k):lower()
-            local vn = tonumber(tostring(v))
-            if vn then
-                if ks:find("level") or ks == "lv" or ks == "lvl" then _statsRef.level = vn end
-                if ks:find("exp") or ks:find("xp") then _statsRef.exp = vn end
-                if ks:find("screw") then _statsRef.screw = vn end
-                if ks:find("gold") or ks:find("coin") or ks:find("gear") or ks:find("token") then _statsRef.gold = vn end
-                if ks:find("sin") or ks:find("reputation") then _statsRef.sin = vn end
-                if ks:find("role") or ks:find("team") or ks:find("side") then _statsRef.role = tostring(v) end
+        if isfile and isfile(WEBHOOK_SETTINGS_FILE) and readfile then
+            local raw = readfile(WEBHOOK_SETTINGS_FILE)
+            local ok, data = pcall(function() return HttpService:JSONDecode(raw) end)
+            if ok and type(data) == "table" then
+                if data.url and data.url ~= "" then
+                    webhookUrl = tostring(data.url)
+                end
+                if data.enabled ~= nil then
+                    webhookNotifyMatch = (data.enabled == true)
+                end
             end
         end
     end)
 end
 
--- Helper: ambil stats player (Level, EXP, Screw, Gold/Gear, Sin, Map)
+load_webhook_settings()
+
 function get_player_stats()
     local stats = {
-        level = 0, exp = 0, screw = 0, gold = 0, sin = 0,
-        hp = "?", map = "Unknown Map", role = "Survivor"
+        level = 0,
+        sin   = 0,
+        exp   = 0,
+        screw = 0,
+        gold  = 0,
+        map   = "Violence District"
     }
-    _statsRef = stats
+
+    local _statsRef = {}
+    local function _scan_stats_from(obj)
+        if not obj then return end
+        if _statsRef[obj] then return end
+        _statsRef[obj] = true
+
+        pcall(function()
+            for _, c in ipairs(obj:GetChildren()) do
+                local nm = c.Name:lower()
+                local val = c:IsA("ValueBase") and c.Value or nil
+                if val ~= nil then
+                    local num = tonumber(tostring(val))
+                    if num ~= nil then
+                        if nm:find("level") or nm:find("lvl") then stats.level = num
+                        elseif nm:find("sin") then stats.sin = num
+                        elseif nm:find("exp") or nm:find("xp") or nm:find("experience") then stats.exp = num
+                        elseif nm:find("screw") then stats.screw = num
+                        elseif nm:find("gold") or nm:find("gear") or nm:find("coin") or nm:find("money") then stats.gold = num
+                        end
+                    end
+                end
+            end
+        end)
+
+        pcall(function()
+            local attrs = obj:GetAttributes()
+            for k, val in pairs(attrs) do
+                local nm = tostring(k):lower()
+                local num = tonumber(tostring(val))
+                if num ~= nil then
+                    if nm:find("level") or nm:find("lvl") then stats.level = num
+                    elseif nm:find("sin") then stats.sin = num
+                    elseif nm:find("exp") or nm:find("xp") or nm:find("experience") then stats.exp = num
+                    elseif nm:find("screw") then stats.screw = num
+                    elseif nm:find("gold") or nm:find("gear") or nm:find("coin") or nm:find("money") then stats.gold = num
+                    end
+                end
+            end
+        end)
+    end
 
     pcall(function()
-        local char = LocalPlayer and LocalPlayer.Character
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
-        if hum then
-            stats.hp = math.floor(hum.Health) .. "/" .. math.floor(hum.MaxHealth)
+        local c = LocalPlayer and LocalPlayer.Character
+        if c then _scan_stats_from(c) end
+        if LocalPlayer then
+            _scan_stats_from(LocalPlayer)
+            local ls = LocalPlayer:FindFirstChild("leaderstats")
+            if ls then _scan_stats_from(ls) end
         end
-    end)
-
-    _scan_stats_from(LocalPlayer)
-
-    pcall(function()
-        local char = LocalPlayer and LocalPlayer.Character
-        if char then _scan_stats_from(char) end
     end)
 
     pcall(function()
@@ -3389,65 +3420,61 @@ function get_player_stats()
     return stats
 end
 
--- Helper: Mask username -> 2 huruf pertama + "***" (contoh: "Ab***")
 local function mask_username(name)
     local n = tostring(name or "?")
-    if #n <= 2 then return n end
+    if #n <= 2 then return n .. "***" end
     return n:sub(1, 2) .. "***"
 end
 
--- Helper: Format nilai stats + delta (+/-)
-local function fmt_delta(before, after)
-    local bNum = tonumber(tostring(before)) or 0
-    local aNum = tonumber(tostring(after)) or 0
-    local delta = aNum - bNum
-    if delta > 0 then
-        return tostring(aNum) .. " (+" .. delta .. ")"
-    elseif delta < 0 then
-        return tostring(aNum) .. " (" .. delta .. ")"
-    else
-        return tostring(aNum)
-    end
-end
-
--- Inisialisasi baseline stats saat match mulai
 local function start_match_tracking()
     _matchStartStats = get_player_stats()
     _matchStartTime = tick()
     _matchEndFired = false
 end
 
--- Kirim MATCH SUMMARY (dipanggil saat match selesai atau manual)
--- force = true dipakai tombol manual agar tetap bisa kirim kapan saja.
+local function do_http_request(options)
+    local req = (syn and syn.request) 
+        or (http and http.request) 
+        or http_request 
+        or request 
+        or (fluxus and fluxus.request)
+        or (krnl and krnl.request)
+        or (identifyexecutor and request)
+    if req then
+        local ok, res = pcall(req, options)
+        if ok then return res end
+        return nil, tostring(res)
+    end
+    return nil, "Executor tidak mendukung HTTP request!"
+end
+
 function send_match_summary_webhook(resultStatus, force)
     if not webhookUrl or webhookUrl == "" or not webhookUrl:find("discord.com/api/webhooks") then
-        return false, "Webhook URL belum diisi!"
+        return false, "Webhook URL belum diisi atau tidak valid!"
     end
-    if not force and _matchEndFired then
+    
+    local now = tick()
+    if not force and (_matchEndFired or (now - _lastWebhookSentTime < 5)) then
         return false, "Summary match ini sudah dikirim."
     end
-
-    local req = (syn and syn.request) or (http and http.request) or http_request or request or (fluxus and fluxus.request)
-    if not req then return false, "HTTP request tidak didukung!" end
-
-    -- Delay sedikit agar stat sempat terupdate sebelum snapshot diambil
-    task.wait(1.5)
+    _lastWebhookSentTime = now
+    _matchEndFired = true
 
     local currStats = get_player_stats()
     local baseStats = _matchStartStats or currStats
 
-    -- Durasi match
-    local matchDuration = math.max(0, tick() - (_matchStartTime or tick()))
+    local matchDuration = math.max(0, now - (_matchStartTime or now))
     local mins = math.floor(matchDuration / 60)
     local secs = math.floor(matchDuration % 60)
     local matchTimeStr = mins > 0 and string.format("%dm %ds", mins, secs) or string.format("%ds", secs)
 
-    -- Nama player (masked: 2 huruf pertama + ***)
     local pName = tostring(LocalPlayer and LocalPlayer.Name or "?")
     local pDisplay = tostring(LocalPlayer and LocalPlayer.DisplayName or pName)
     local maskedName = mask_username(pDisplay)
 
-    -- Delta fields
+    local rawJobId = tostring(game.JobId or "502b4d8a-server-id-xxxx")
+    local serverIdMasked = (rawJobId:sub(1, 4)) .. string.rep("*", 32)
+
     local expDelta   = (tonumber(tostring(currStats.exp))   or 0) - (tonumber(tostring(baseStats.exp))   or 0)
     local screwDelta = (tonumber(tostring(currStats.screw)) or 0) - (tonumber(tostring(baseStats.screw)) or 0)
     local sinDelta   = (tonumber(tostring(currStats.sin))   or 0) - (tonumber(tostring(baseStats.sin))   or 0)
@@ -3456,52 +3483,50 @@ function send_match_summary_webhook(resultStatus, force)
 
     local function fmtStat(val, delta)
         local s = tostring(val)
-        if delta > 0 then return s .. "  (+" .. delta .. ")"
-        elseif delta < 0 then return s .. "  (" .. delta .. ")"
-        else return s .. "  (0)" end
+        if delta > 0 then return s .. " (+**" .. delta .. "**)"
+        elseif delta < 0 then return s .. " (**" .. delta .. "**)"
+        else return s .. " (+**0**)" end
     end
 
+    local levelField = fmtStat(tonumber(tostring(currStats.level)) or 0, lvlDelta)
+    local sinField   = fmtStat(tonumber(tostring(currStats.sin))   or 0, sinDelta)
     local expField   = fmtStat(tonumber(tostring(currStats.exp))   or 0, expDelta)
     local screwField = fmtStat(tonumber(tostring(currStats.screw)) or 0, screwDelta)
-    local sinField   = fmtStat(tonumber(tostring(currStats.sin))   or 0, sinDelta)
     local gearField  = fmtStat(tonumber(tostring(currStats.gold))  or 0, gearDelta)
-    local levelField = fmtStat(tonumber(tostring(currStats.level)) or 0, lvlDelta)
 
-    -- Baseline untuk match berikutnya + tandai sudah terkirim
+    local totalCurrency = math.max(0, screwDelta + gearDelta)
+    local totalSin = math.max(0, sinDelta)
+    local matchTotalStr = tostring(totalCurrency) .. " currency + " .. tostring(totalSin) .. " Sin"
+
     _matchStartStats = currStats
     _matchStartTime  = tick()
-    _matchEndFired   = true
 
+    -- Embed persis sesuai format foto (Green bar, 11 fields, emoji unicode hex)
     local payload = {
         username   = "Zypherax Hub Notifier",
         avatar_url = "https://cdn-icons-png.flaticon.com/512/6295/6295417.png",
         embeds = {
             {
-                title       = "Match Ended - Zypherax Hub",
-                color       = 5793266, -- Discord Blurple (0x5865F2)
-                description = "Ringkasan hasil match di Violence District.",
-                thumbnail   = { url = "https://cdn-icons-png.flaticon.com/512/3135/3135715.png" },
+                color = 5763719, -- #57F287 Hijau
                 fields = {
-                    { name = "Player",  value = maskedName,                 inline = true },
-                    { name = "Map",     value = currStats.map or "Unknown",  inline = true },
-                    { name = "Durasi",  value = matchTimeStr,                inline = true },
-                    { name = "Level",   value = levelField,                  inline = true },
-                    { name = "EXP",     value = expField,                    inline = true },
-                    { name = "Screws",  value = screwField,                  inline = true },
-                    { name = "Gears",   value = gearField,                   inline = true },
-                    { name = "Sin",     value = sinField,                    inline = true },
-                },
-                footer = {
-                    text     = "Zypherax Hub  |  Violence District",
-                    icon_url = "https://cdn-icons-png.flaticon.com/512/3135/3135715.png"
-                },
-                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+                    { name = "\xF0\x9F\x9F\xA2 Status",       value = "End Match",                           inline = false },
+                    { name = "\xF0\x9F\x91\xA4 Username",     value = maskedName,                            inline = false },
+                    { name = "\xF0\x9F\x86\x99 Level",        value = levelField,                            inline = false },
+                    { name = "\xE2\x98\xA0\xEF\xB8\x8F Sin",          value = sinField,                              inline = false },
+                    { name = "\xE2\xAD\x90 EXP",          value = expField,                              inline = false },
+                    { name = "\xF0\x9F\x94\xA9 Screws",       value = screwField,                            inline = false },
+                    { name = "\xE2\x9A\x99\xEF\xB8\x8F Gears",        value = gearField,                             inline = false },
+                    { name = "\xE2\x8F\xB1\xEF\xB8\x8F Match Time",   value = matchTimeStr,                          inline = false },
+                    { name = "\xF0\x9F\x97\xBA\xEF\xB8\x8F Maps",         value = currStats.map or "Violence District",    inline = false },
+                    { name = "\xF0\x9F\x8F\x86 Match Total",  value = matchTotalStr,                         inline = false },
+                    { name = "\xF0\x9F\x86\x94 Server ID",    value = "```" .. serverIdMasked .. "```",   inline = false },
+                }
             }
         }
     }
 
     local ok, res = pcall(function()
-        return req({
+        return do_http_request({
             Url     = webhookUrl,
             Method  = "POST",
             Headers = { ["Content-Type"] = "application/json" },
@@ -3511,13 +3536,10 @@ function send_match_summary_webhook(resultStatus, force)
     return ok, res
 end
 
--- Fungsi test sederhana (dipakai tombol test)
 function send_discord_webhook(embedTitle, embedDesc, colorHex)
     if not webhookUrl or webhookUrl == "" or not webhookUrl:find("discord.com/api/webhooks") then
         return false, "Webhook URL belum diisi atau tidak valid!"
     end
-    local req = (syn and syn.request) or (http and http.request) or http_request or request or (fluxus and fluxus.request)
-    if not req then return false, "Executor tidak mendukung HTTP request!" end
 
     local payload = {
         username   = "Zypherax Hub Notifier",
@@ -3525,15 +3547,18 @@ function send_discord_webhook(embedTitle, embedDesc, colorHex)
         embeds = {
             {
                 title       = embedTitle or "Test Webhook",
-                description = embedDesc or "",
-                color       = tonumber(colorHex or "5865F2", 16) or 5793266,
-                footer      = { text = "Zypherax Hub - Violence District" },
+                description = embedDesc or "Zypherax Hub Webhook Notifier aktif!",
+                color       = tonumber(colorHex or "57F287", 16) or 5763719,
+                fields = {
+                    { name = "Status", value = "\xF0\x9F\x9F\xA2 Webhook Berfungsi!", inline = true },
+                    { name = "Game", value = "Violence District", inline = true }
+                },
                 timestamp   = os.date("!%Y-%m-%dT%H:%M:%SZ")
             }
         }
     }
     local ok, res = pcall(function()
-        return req({
+        return do_http_request({
             Url     = webhookUrl,
             Method  = "POST",
             Headers = { ["Content-Type"] = "application/json" },
@@ -3543,9 +3568,6 @@ function send_discord_webhook(embedTitle, embedDesc, colorHex)
     return ok, res
 end
 
--- ==============================================================================
--- Pemantau akhir match: kirim SATU summary setiap match berakhir.
--- ==============================================================================
 local _webhookLiveConn = nil
 local _matchActive = false
 local _endCheckTimer = 0
@@ -3564,14 +3586,6 @@ local function _is_lobby_state(gs)
         or gs == "gameover" or gs == "finished"
 end
 
-local function _character_alive()
-    local char = LocalPlayer and LocalPlayer.Character
-    if not char then return false end
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum then return false end
-    return hum.Health > 0
-end
-
 function start_webhook_live_monitor()
     if _webhookLiveConn then _webhookLiveConn:Disconnect(); _webhookLiveConn = nil end
     start_match_tracking()
@@ -3579,15 +3593,16 @@ function start_webhook_live_monitor()
     _matchEndFired = false
 
     _webhookLiveConn = RunService.Heartbeat:Connect(function(dt)
-        if not webhookUrl or webhookUrl == "" then return end
+        if not webhookUrl or webhookUrl == "" or not webhookNotifyMatch then return end
         _endCheckTimer = _endCheckTimer + dt
         if _endCheckTimer < 1 then return end
         _endCheckTimer = 0
 
         local gs = _read_game_state()
-        local alive = _character_alive()
+        local char = LocalPlayer and LocalPlayer.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local alive = hum and hum.Health > 0
 
-        -- Tandai match aktif kembali saat karakter hidup di luar lobby
         if alive and not _is_lobby_state(gs) then
             if not _matchActive then
                 _matchActive = true
@@ -3597,15 +3612,11 @@ function start_webhook_live_monitor()
             return
         end
 
-        -- Deteksi akhir match: kembali ke lobby ATAU karakter mati/hilang.
-        local ended = _is_lobby_state(gs) or (not alive)
+        local ended = _is_lobby_state(gs)
         if ended and _matchActive then
             _matchActive = false
             if not _matchEndFired then
-                if webhookNotifyMatch then
-                    task.spawn(function() pcall(function() send_match_summary_webhook("Match Ended") end) end)
-                end
-                -- Mulai pelacakan untuk match berikutnya
+                task.spawn(function() pcall(function() send_match_summary_webhook("End Match", true) end) end)
                 task.delay(3, function() start_match_tracking() end)
             end
         end
@@ -3617,11 +3628,25 @@ function stop_webhook_live_monitor()
     _matchActive = false
 end
 
--- Auto-inisialisasi tracking saat script mulai
-task.defer(function()
-    start_match_tracking()
+-- Deteksi escape via attribute change
+pcall(function()
+    if LocalPlayer then
+        LocalPlayer:GetAttributeChangedSignal("Escaped"):Connect(function()
+            if LocalPlayer:GetAttribute("Escaped") == true and webhookNotifyMatch and webhookUrl and webhookUrl ~= "" then
+                task.spawn(function()
+                    pcall(function() send_match_summary_webhook("End Match", true) end)
+                end)
+            end
+        end)
+    end
 end)
 
+task.defer(function()
+    start_match_tracking()
+    if webhookNotifyMatch and webhookUrl and webhookUrl ~= "" then
+        start_webhook_live_monitor()
+    end
+end)
 
 end
 
@@ -3693,22 +3718,6 @@ do
     local ZYP_URL = "https://raw.githubusercontent.com/Skyuuu222/zypheraxui/main/zypheraxui"
 
     local ZypheraxUI = (function()
-        -- (1) GitHub
-        local ok, res = pcall(function()
-            local src = _zy_patch(game:HttpGet(ZYP_URL))
-            local fn = loadstring(src)
-            if not fn then error("loadstring gagal") end
-            return fn()
-        end)
-        -- Hanya pakai versi GitHub kalau build-nya sudah versi 3.6 (berisi perbaikan
-        -- tata letak). Kalau masih build lama, pakai salinan lokal yang sudah diperbaiki.
-        if ok and type(res) == "table" and tostring(res.Version or ""):find("3.6") then
-            return res
-        end
-        warn("[Zypherax Hub] Memakai salinan lokal ZypheraxUI (GitHub belum versi terbaru).")
-
-        -- (2) Salinan lokal (cadangan)
-        return (function()
 -- ==============================================================================
 -- ZYPHERAX UI - MODERN MACOS ENTERPRISE EDITION (v3.5)
 -- Modern MacOS-Style Acrylic GUI Library for Roblox
@@ -4530,7 +4539,7 @@ function ZypheraxUI:CreateWindow(config)
         Parent = footer
     })
 
-    -- // CONTENT AREA (Double Column) \ --
+    -- // CONTENT AREA (Double Column + Top Search Engine) \ --
     local contentArea = U.New("Frame", {
         Name = "ContentArea",
         Size = UDim2.new(1, -(SIDEBAR_W + 1), 1, 0),
@@ -4539,6 +4548,78 @@ function ZypheraxUI:CreateWindow(config)
         ZIndex = 2,
         Parent = main
     })
+
+    -- // ELEGANT TOP SEARCH ENGINE \ --
+    local searchBarFrame = U.New("Frame", {
+        Name = "TopSearchBar",
+        Size = UDim2.new(1, -20, 0, 36),
+        Position = UDim2.new(0, 10, 0, 10),
+        BackgroundColor3 = T.Surface2,
+        BackgroundTransparency = 0.2,
+        ZIndex = 5,
+        Parent = contentArea
+    })
+    U.Corner(searchBarFrame, T.CornerMd)
+    local sbStroke = U.Stroke(searchBarFrame, T.Stroke, 1, 0.2)
+    RegisterThemeColor(searchBarFrame, "BackgroundColor3", "Surface2")
+    RegisterThemeColor(sbStroke, "Color", "Stroke")
+
+    local searchIcon = U.New("TextLabel", {
+        Text = "\xF0\x9F\x94\x8D",
+        Font = T.FontRegular,
+        TextSize = 13,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 10, 0, 0),
+        Size = UDim2.new(0, 20, 1, 0),
+        TextColor3 = T.TextMuted,
+        ZIndex = 6,
+        Parent = searchBarFrame
+    })
+
+    local searchInput = U.New("TextBox", {
+        Name = "SearchInput",
+        PlaceholderText = "Cari fitur menu (Player, Combat, ESP, Fly, Parry, Gen, Webhook)...",
+        Font = T.FontRegular,
+        TextSize = 11,
+        TextColor3 = T.Text,
+        PlaceholderColor3 = T.TextDim,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 34, 0, 0),
+        Size = UDim2.new(1, -64, 1, 0),
+        ClearTextOnFocus = false,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 6,
+        Parent = searchBarFrame
+    })
+    RegisterThemeColor(searchInput, "TextColor3", "Text")
+    RegisterThemeColor(searchInput, "PlaceholderColor3", "TextDim")
+
+    local clearSearchBtn = U.New("TextButton", {
+        Name = "ClearSearch",
+        Text = "X",
+        Font = T.FontBold,
+        TextSize = 11,
+        TextColor3 = T.TextMuted,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(1, -28, 0, 0),
+        Size = UDim2.new(0, 24, 1, 0),
+        Visible = false,
+        ZIndex = 6,
+        Parent = searchBarFrame
+    })
+
+    pcall(function()
+        if searchInput.Focused then
+            track(searchInput.Focused:Connect(function()
+                U.Tween(sbStroke, 0.2, { Color = T.Accent, Transparency = 0 })
+            end))
+        end
+        if searchInput.FocusLost then
+            track(searchInput.FocusLost:Connect(function()
+                U.Tween(sbStroke, 0.2, { Color = T.Stroke, Transparency = 0.2 })
+            end))
+        end
+    end)
 
     -- Visibility Toggle Method
     function Win:ToggleVisibility(visible)
@@ -4621,11 +4702,11 @@ function ZypheraxUI:CreateWindow(config)
         })
         RegisterThemeColor(tabLbl, "TextColor3", "TextMuted")
 
-        -- Double Column Container for this Tab
+        -- Double Column Container for this Tab (Below Search Bar)
         local pageFrame = U.New("Frame", {
             Name = "Page_" .. tabName,
-            Size = UDim2.new(1, -20, 1, -20),
-            Position = UDim2.new(0, 10, 0, 10),
+            Size = UDim2.new(1, -20, 1, -62),
+            Position = UDim2.new(0, 10, 0, 52),
             BackgroundTransparency = 1,
             Visible = false,
             ZIndex = 3,
@@ -4684,7 +4765,7 @@ function ZypheraxUI:CreateWindow(config)
 
         if #Win.Tabs == 0 then activateTab() end
 
-        local tabEntry = { btn = tabBtn, stroke = btnStroke, lbl = tabLbl, bar = activeBar, page = pageFrame, name = tabName }
+        local tabEntry = { btn = tabBtn, stroke = btnStroke, lbl = tabLbl, bar = activeBar, page = pageFrame, name = tabName, sections = {} }
         table.insert(Win.Tabs, tabEntry)
 
         -- // SECTION BUILDER (Zero Generic "SECTION" Text Overlaps) \ --
@@ -4760,7 +4841,8 @@ function ZypheraxUI:CreateWindow(config)
             U.New("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8), Parent = secContainer })
             U.New("UIPadding", { PaddingBottom = UDim.new(0, 10), Parent = secContainer })
 
-            local SectionObj = {}
+            local SectionObj = { _box = sectionBox, _name = displayName, _items = {} }
+            table.insert(tabEntry.sections, SectionObj)
 
             -- Header updater (Sets section title without duplicate labels)
             function SectionObj:Header(hCfg)
@@ -4806,6 +4888,8 @@ function ZypheraxUI:CreateWindow(config)
                 if flag then ZypheraxUI.Flags[flag] = toggled end
 
                 local base, stroke = makeBase(38)
+                base:SetAttribute("ControlName", nm)
+                table.insert(SectionObj._items, base)
 
                 -- Label has generous space, cannot collide with switch
                 local lbl = U.New("TextLabel", {
@@ -4882,6 +4966,8 @@ function ZypheraxUI:CreateWindow(config)
                 if flag then ZypheraxUI.Flags[flag] = value end
 
                 local base, stroke = makeBase(48)
+                base:SetAttribute("ControlName", nm)
+                table.insert(SectionObj._items, base)
 
                 -- Title top-left
                 local lbl = U.New("TextLabel", {
@@ -4996,6 +5082,8 @@ function ZypheraxUI:CreateWindow(config)
                 local isOpen  = false
 
                 local base, stroke = makeBase(36)
+                base:SetAttribute("ControlName", nm)
+                table.insert(SectionObj._items, base)
 
                 local lbl = U.New("TextLabel", {
                     Text = nm .. ": " .. tostring(selected),
@@ -5102,6 +5190,8 @@ function ZypheraxUI:CreateWindow(config)
                 local cb = type(cfg) == "table" and cfg.Callback or function() end
 
                 local base, stroke = makeBase(34, true)
+                base:SetAttribute("ControlName", nm)
+                table.insert(SectionObj._items, base)
                 local lbl = U.New("TextLabel", {
                     Text = nm,
                     Font = T.FontBold,
@@ -5142,6 +5232,8 @@ function ZypheraxUI:CreateWindow(config)
                 local cb      = cfg.Callback or function() end
 
                 local base, stroke = makeBase(36)
+                base:SetAttribute("ControlName", nm)
+                table.insert(SectionObj._items, base)
 
                 local lbl = U.New("TextLabel", {
                     Text = nm,
@@ -5177,6 +5269,16 @@ function ZypheraxUI:CreateWindow(config)
                 track(box.FocusLost:Connect(function(enter)
                     pcall(cb, box.Text, enter)
                 end))
+                pcall(function()
+                    if box.GetPropertyChangedSignal then
+                        track(box:GetPropertyChangedSignal("Text"):Connect(function()
+                            pcall(cb, box.Text, false)
+                        end))
+                    end
+                end)
+                if default and default ~= "" then
+                    pcall(cb, default, false)
+                end
 
                 return {
                     Set = function(_, v) box.Text = tostring(v) end,
@@ -5200,6 +5302,8 @@ function ZypheraxUI:CreateWindow(config)
                     TextXAlignment = Enum.TextXAlignment.Left,
                     ZIndex = 5,
                     Parent = secContainer
+                lbl:SetAttribute("ControlName", txt)
+                table.insert(SectionObj._items, lbl)
                 })
                 U.New("UIPadding", { PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4), Parent = lbl })
                 return {
@@ -5217,6 +5321,8 @@ function ZypheraxUI:CreateWindow(config)
                 local binding = false
 
                 local base, stroke = makeBase(36)
+                base:SetAttribute("ControlName", nm)
+                table.insert(SectionObj._items, base)
 
                 local lbl = U.New("TextLabel", {
                     Text = nm,
@@ -5452,8 +5558,12 @@ function ZypheraxUI:CreateWindow(config)
                     emptyLbl.Visible = (count == 0)
                 end
 
-                searchBox:GetPropertyChangedSignal("Text"):Connect(function()
-                    refreshSaveList(searchBox.Text)
+                pcall(function()
+                    if searchBox.GetPropertyChangedSignal then
+                        searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+                            refreshSaveList(searchBox.Text)
+                        end)
+                    end
                 end)
 
                 -- Button Grid (2 rows of 2 buttons + 1 full button)
@@ -5576,15 +5686,84 @@ function ZypheraxUI:CreateWindow(config)
         return TabObj
     end
 
+    -- // SEARCH ENGINE FILTER LOGIC \ --
+    local function performGlobalSearch(query)
+        query = (query or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+        clearSearchBtn.Visible = (query ~= "")
+        if query == "" then
+            -- Restore all sections to visible
+            for _, t in ipairs(Win.Tabs) do
+                for _, sec in ipairs(t.sections or {}) do
+                    if sec._box and sec._box.Parent then
+                        sec._box.Visible = true
+                        for _, itm in ipairs(sec._items or {}) do
+                            if itm.Parent then itm.Visible = true end
+                        end
+                    end
+                end
+            end
+            return
+        end
+
+        local firstMatchTab = nil
+        for _, t in ipairs(Win.Tabs) do
+            local tabHasMatch = false
+            for _, sec in ipairs(t.sections or {}) do
+                local secName = tostring(sec._name or ""):lower()
+                local secMatch = secName:find(query, 1, true) ~= nil
+                local anyItemMatch = false
+                for _, itm in ipairs(sec._items or {}) do
+                    local itmName = tostring(itm:GetAttribute("ControlName") or itm.Name or ""):lower()
+                    if itmName:find(query, 1, true) or secMatch then
+                        itm.Visible = true
+                        anyItemMatch = true
+                    else
+                        itm.Visible = false
+                    end
+                end
+                if secMatch or anyItemMatch then
+                    if sec._box and sec._box.Parent then sec._box.Visible = true end
+                    tabHasMatch = true
+                else
+                    if sec._box and sec._box.Parent then sec._box.Visible = false end
+                end
+            end
+            if tabHasMatch and not firstMatchTab and Win._currentTab ~= t.name then
+                firstMatchTab = t
+            end
+        end
+
+        -- If current tab has no match but another tab does, switch to matching tab
+        if firstMatchTab then
+            for _, t in ipairs(Win.Tabs) do
+                if t == firstMatchTab then
+                    t.page.Visible = true
+                    Win._currentTab = t.name
+                else
+                    t.page.Visible = false
+                end
+            end
+        end
+    end
+
+    pcall(function()
+        if searchInput.GetPropertyChangedSignal then
+            track(searchInput:GetPropertyChangedSignal("Text"):Connect(function()
+                performGlobalSearch(searchInput.Text)
+            end))
+        end
+    end)
+    track(clearSearchBtn.MouseButton1Click:Connect(function()
+        searchInput.Text = ""
+        performGlobalSearch("")
+    end))
+
     return Win
 end
 
 return ZypheraxUI
 
-
-        end)()
-    end)()
-
+end)()
     if type(ZypheraxUI) ~= "table" then
         warn("[Zypherax Hub] ZypheraxUI tidak tersedia, UI dihentikan.")
         return
@@ -8366,7 +8545,7 @@ SecESPPlayer:Toggle({
     end
 })
 
-local SecESPGen = TabESP:Section({ Name = "ESP Generator", Side = 1 })
+local SecESPGen = TabESP:Section({ Name = "ESP Generator", Side = 2 })
 SecESPGen:Header({ Name = ZypheraxLib:Gradient("ESP Generator", Color3.fromRGB(86,204,158), Color3.fromRGB(99,130,255)) })
 
 SecESPGen:Toggle({
@@ -8386,7 +8565,7 @@ SecESPGen:Toggle({
 
 
 -- SEKSI ESP EXIT GATE (tambah ke TabESP)
-local SecESPGate = TabESP:Section({ Name = "ESP Gate & Exit", Side = 2 })
+local SecESPGate = TabESP:Section({ Name = "ESP Gate & Exit", Side = 1 })
 SecESPGate:Header({ Name = ZypheraxLib:Gradient("ESP Pintu Keluar (Exit Gate)", Color3.fromRGB(240,190,100), Color3.fromRGB(232,150,110)) })
 
 SecESPGate:Toggle({
@@ -8531,20 +8710,22 @@ SecWHUrl:Header({ Name = ZypheraxLib:Gradient("Discord Webhook Notifier", Color3
 SecWHUrl:Input({
     Name = "URL Webhook Discord",
     Placeholder = "https://discord.com/api/webhooks/...",
-    Default = "",
+    Default = webhookUrl or "",
     Callback = function(val)
         webhookUrl = val or ""
+        save_webhook_settings()
     end
 })
 
 SecWHUrl:Toggle({
-    Name = "Kirim Summary Saat Match Selesai",
+    Name = "Auto Webhook (Kirim Saat Escaped / Selesai)",
     Default = true,
     Callback = function(enabled)
         webhookNotifyMatch = enabled
+        save_webhook_settings()
         if enabled then
             start_webhook_live_monitor()
-            Window:Notify({ Title = "Webhook", Description = "Aktif! Ringkasan dikirim setiap match selesai (termasuk setelah ESCAPED).", Lifetime = 3 })
+            Window:Notify({ Title = "Webhook", Description = "Aktif! Summary otomatis dikirim setelah berhasil escaped.", Lifetime = 3 })
         else
             stop_webhook_live_monitor()
             Window:Notify({ Title = "Webhook", Description = "Notifikasi match dimatikan.", Lifetime = 2 })
@@ -8558,7 +8739,7 @@ SecWHUrl:Button({
         local ok, res = send_discord_webhook(
             "Test Webhook",
             "**Zypherax Hub** terhubung ke Discord kamu! Webhook berfungsi dengan baik.",
-            "5865F2"
+            "57F287"
         )
         Window:Notify({
             Title = ok and "Webhook Terkirim!" or "Gagal",
@@ -8569,15 +8750,12 @@ SecWHUrl:Button({
 })
 
 local SecWHInfo = TabWebhook:Section({ Name = "Petunjuk Webhook", Side = 2 })
-SecWHInfo:Header({ Name = ZypheraxLib:Gradient("Cara Pakai Webhook", Color3.fromRGB(140,152,190), Color3.fromRGB(120,170,200)) })
-SecWHInfo:Label({ Name = "Salin URL dari: Server Discord > Edit Channel > Integrations > Webhooks" })
-SecWHInfo:Label({ Name = "Webhook dikirim SATU KALI saat match selesai / berhasil ESCAPED." })
-SecWHInfo:Label({ Name = "Username user: 2 huruf depan + *** (sensor)." })
-SecWHInfo:Label({ Name = "Data: Level, EXP, Screws, Gears, Sin, Map, Durasi Match." })
-SecWHInfo:Label({ Name = "Status: Match Ended / Escaped!" })
+SecWHInfo:Header({ Name = ZypheraxLib:Gradient("Petunjuk Webhook", Color3.fromRGB(140,152,190), Color3.fromRGB(120,170,200)) })
+SecWHInfo:Label({ Name = "Webhook otomatis mengirim summary setelah kamu berhasil Escaped." })
+SecWHInfo:Label({ Name = "Format persis seperti contoh: Status, Username (sensor Sk***), Level, Sin, EXP, Screws, Gears, Match Time, Maps, Total, Server ID." })
+SecWHInfo:Label({ Name = "URL Webhook tersimpan otomatis di executor sehingga tidak hilang saat ganti server." })
 
 end -- [End TabWebhook]
-
 
 -- ==============================================================================
 -- TAB 4: MODIFIKASI (VERTIKAL SCROLL KE BAWAH)
