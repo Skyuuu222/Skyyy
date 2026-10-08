@@ -4292,7 +4292,7 @@ end
 -- jadi logo Z dibuat dari KODE (gradient) -> pasti tampil tanpa internet.
 -- Kalau mau pakai gambar asli: upload logo.png di create.roblox.com -> Decal,
 -- lalu isi ORB_ASSET_ID dengan aset ID-nya (contoh: "1234567890").
-local ORB_ASSET_ID  = "" -- "" = pakai logo vektor; isi aset ID utk gambar asli
+local ORB_ASSET_ID  = "106764279090045" -- "" = pakai logo vektor; isi aset ID utk gambar asli
 local ORB_URL_IMGUR = "https://i.imgur.com/6FVu1WJ.png" -- layer bonus (kalau didukung executor)
 local FloatingToggleGui = nil
 local FloatingButton    = nil
