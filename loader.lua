@@ -1,115 +1,128 @@
--- ==============================================================================
--- GITHUB TO LUARMOR LOADER TEMPLATE
--- Jalankan file ini di executor via loadstring GitHub Raw
--- ==============================================================================
+-- =============================================================================
+-- SKYYY UNIVERSAL LOADER v1.0
+-- -----------------------------------------------------------------------------
+-- Pakai cuma SATU link ini di semua game:
+--   loadstring(game:HttpGet("https://raw.githubusercontent.com/Skyuuu222/Skyyy/main/loader.lua"))()
+--
+-- Loader otomatis deteksi game (PlaceId) yang sedang kamu mainkan,
+-- lalu memanggil script yang sesuai dari repo ini.
+--
+-- Struktur repo:
+--   loader.lua              -> file ini (pemilih script otomatis)
+--   violence_district.lua   -> script untuk Violence District
+--   ride_a_pet.lua          -> script untuk Ride A Pet
+--
+-- Cara TAMBAH game baru:
+--   1. Upload script game itu ke repo ini, misal: my_game.lua
+--   2. Tambah entry di tabel GAMES di bawah dengan PlaceId gamenya
+-- =============================================================================
 
 local cloneref = cloneref or function(x) return x end
+local game     = cloneref(game)
 
-local game         = cloneref(game)
-local http_service = cloneref(game:GetService("HttpService"))
-local players      = cloneref(game:GetService("Players"))
-local starter_gui  = cloneref(game:GetService("StarterGui"))
+local StarterGui  = cloneref(game:GetService("StarterGui"))
+local HttpService = cloneref(game:GetService("HttpService"))
 
--- @types
-type loader_config = {
-    name: string,
-    url: string,
-    version: string?,
-    author: string?,
-}
+local BASE = "https://raw.githubusercontent.com/Skyuuu222/Skyyy/main/"
 
 -- ==============================================================================
--- KONFIGURASI SCRIPT
+-- DAFTAR SCRIPT PER GAME (key = PlaceId)
+-- ready = false  -> script belum diupload, loader hanya memberi tahu
 -- ==============================================================================
-local LOADER_NAME = "Studio Hub Loader"
-
--- Masukkan URL script Luarmor Anda di sini untuk mode Universal (berjalan di semua game)
-local UNIVERSAL_SCRIPT_URL = "https://api.luarmor.net/files/v4/loaders/GANTI_DENGAN_ID_LUARMOR_ANDA.lua"
-
--- Daftar loader per UniverseId (GameId) jika ingin membedakan per game
-local ___loaders: { [number]: loader_config } = {
-    [6701277882] = {
-        name    = "Fish It",
-        url     = "https://api.luarmor.net/files/v4/loaders/EXAMPLE_ID_1.lua",
-        version = "1.0.0",
-        author  = "Skyuuu",
+local GAMES = {
+    -- Violence District
+    [93978595733734] = {
+        name  = "Violence District",
+        url   = BASE .. "violence_district.lua",
+        ready = true,
     },
-    [5750914919] = {
-        name    = "Fisch",
-        url     = "https://api.luarmor.net/files/v4/loaders/EXAMPLE_ID_2.lua",
-        version = "1.0.0",
-        author  = "Skyuuu",
+    -- Ride A Pet
+    [124216119978534] = {
+        name  = "Ride A Pet",
+        url   = BASE .. "ride_a_pet.lua",
+        ready = false, -- <<< set true setelah ride_a_pet.lua diupload
     },
-}
-
--- Daftar loader per PlaceId (Khusus sub-tempat / map tertentu)
-local ___place_loaders: { [number]: loader_config } = {
-    -- [1234567890] = {
-    --     name    = "Custom Place",
-    --     url     = "https://api.luarmor.net/files/v4/loaders/EXAMPLE_ID_3.lua",
-    --     version = "1.0.0",
-    --     author  = "You",
-    -- },
+    -- Contoh menambah game lain:
+    -- [6701277882] = { name = "Fish It", url = BASE .. "fish_it.lua", ready = true },
 }
 
 -- ==============================================================================
--- UTILITY NOTIFICATION
+-- UTIL
 -- ==============================================================================
-local function __notify(title: string, text: string, duration: number?): ()
+local function notify(title, text, duration)
     pcall(function()
-        starter_gui:SetCore("SendNotification", {
-            Title    = title or LOADER_NAME,
+        StarterGui:SetCore("SendNotification", {
+            Title    = title or "Skyyy Loader",
             Text     = text or "",
-            Duration = duration or 5,
+            Duration = duration or 4,
         })
     end)
+    print(("[Skyyy] %s | %s"):format(title or "Loader", text or ""))
 end
 
--- ==============================================================================
--- LOADER RUNNER
--- ==============================================================================
-local function __load_script(url: string, script_name: string?): boolean
-    __notify(LOADER_NAME, "Memuat script: " .. (script_name or "Universal Hub") .. "...", 3)
-
-    local success: boolean, result: any = pcall(function()
-        local script_content: string = game:HttpGet(url)
-        local loaded_function: any = loadstring(script_content)
-
-        if loaded_function then
-            task.spawn(loaded_function)
-            return true
-        else
-            error("Gagal mengompilasi bytecode / script dari Luarmor!")
+local function http_get(url)
+    local req = (syn and syn.request)
+        or (http and http.request)
+        or http_request
+        or request
+        or (fluxus and fluxus.request)
+        or (krnl and krnl.request)
+    if req then
+        local ok, res = pcall(req, { Url = url, Method = "GET" })
+        if ok and res and res.Body and #res.Body > 0 then
+            return res.Body
         end
-    end)
-
-    if not success then
-        warn("[" .. LOADER_NAME .. "] Error:", result)
-        __notify(LOADER_NAME, "Gagal memuat script! Cek console F9.", 5)
-        return false
+        return nil, (ok and "Respons kosong/gagal" or tostring(res))
     end
-
-    __notify(LOADER_NAME, (script_name or "Hub") .. " berhasil dimuat!", 4)
-    return true
+    -- fallback: HttpGet bawaan
+    local ok, body = pcall(function() return game:HttpGet(url) end)
+    if ok and body and #body > 0 then return body end
+    return nil, "Executor tidak mendukung HTTP request!"
 end
 
 -- ==============================================================================
--- MAIN EXECUTION CHECK
+-- MAIN: deteksi PlaceId game yang sedang dimainkan -> panggil script-nya
 -- ==============================================================================
-local place_id: number    = game.PlaceId
-local universe_id: number = game.GameId
+local placeId = game.PlaceId
+local gameName = ""
+pcall(function()
+    gameName = cloneref(game:GetService("MarketplaceService")):GetProductInfo(placeId).Name
+end)
+if gameName == "" then gameName = "Unknown Game" end
 
--- Cek apakah game ini ada di daftar spesifik
-local target_config: loader_config? = ___place_loaders[place_id] or ___loaders[universe_id]
+local entry = GAMES[placeId]
 
-if target_config then
-    -- Jika game cocok dengan daftar spesifik
-    __load_script(target_config.url, target_config.name)
-elseif UNIVERSAL_SCRIPT_URL and UNIVERSAL_SCRIPT_URL ~= "" and not UNIVERSAL_SCRIPT_URL:find("GANTI_DENGAN_ID") then
-    -- Jika tidak ada di daftar khusus, jalankan Universal Studio Hub (script.lua Anda)
-    __load_script(UNIVERSAL_SCRIPT_URL, "Universal Avatar Hub")
-else
-    -- Jika tidak didukung dan tidak ada link universal
-    warn("[" .. LOADER_NAME .. "] Game tidak didukung: PlaceId=" .. tostring(place_id) .. ", UniverseId=" .. tostring(universe_id))
-    __notify(LOADER_NAME, "Game ini belum didukung oleh script!", 5)
+if not entry then
+    notify("Game Belum Didukung",
+        ("\"%s\" (PlaceId %s) belum ada di loader. Tambahkan PlaceId-nya di loader.lua."):format(gameName, tostring(placeId)), 7)
+    return
 end
+
+if not entry.ready then
+    notify("Script Belum Tersedia",
+        ("Script untuk \"%s\" belum diupload ke repo."):format(entry.name), 7)
+    return
+end
+
+notify("Memuat Script", ("Game terdeteksi: %s"):format(entry.name), 3)
+
+local src, err = http_get(entry.url)
+if not src then
+    notify("Gagal Memuat", ("Tidak bisa mengunduh script %s: %s"):format(entry.name, tostring(err)), 7)
+    return
+end
+
+local fn, compileErr = loadstring(src, "@" .. entry.name:gsub("%s", "_"))
+if not fn then
+    notify("Gagal Compile", tostring(compileErr), 7)
+    return
+end
+
+local ok, runErr = pcall(fn)
+if not ok then
+    notify("Script Error", tostring(runErr), 7)
+    warn("[Skyyy] Runtime error:", runErr)
+    return
+end
+
+notify("Berhasil", ("%s siap digunakan!"):format(entry.name), 4)
