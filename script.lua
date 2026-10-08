@@ -4287,6 +4287,155 @@ function ZypheraxUI:Watermark(cfg)
     }
 end
 
+-- // FLOATING CIRCLE TOGGLE (Enterprise 3.0.0 style + Orb Logo) \ --
+local ORB_URL = "https://files.catbox.moe/u7oy89.png"
+local FloatingToggleGui = nil
+local FloatingButton    = nil
+local FloatingContainer = nil
+
+local function EnsureFloatingButton(onToggleWindow)
+    if FloatingContainer and FloatingContainer.Parent then return FloatingButton end
+
+    FloatingToggleGui = U.New("ScreenGui", {
+        Name            = "ZypheraxFloatingToggle",
+        ZIndexBehavior  = Enum.ZIndexBehavior.Sibling,
+        DisplayOrder    = 9999,
+        ResetOnSpawn    = false,
+        Parent          = GetCore()
+    })
+
+    -- Glow wrapper (larger, behind button — not clipped so glow shows)
+    local glowFrame = U.New("Frame", {
+        Name                  = "GlowWrapper",
+        Size                  = UDim2.new(0, 76, 0, 76),
+        Position              = UDim2.new(0.05, -12, 0.15, -12),
+        BackgroundTransparency = 1,
+        Visible               = false,
+        ZIndex                = 8,
+        Parent                = FloatingToggleGui
+    })
+    U.New("ImageLabel", {
+        Image                 = "rbxassetid://6014261993",
+        ImageColor3           = T.Accent,
+        ImageTransparency     = 0.72,
+        BackgroundTransparency = 1,
+        Size                  = UDim2.new(1, 0, 1, 0),
+        ScaleType             = Enum.ScaleType.Slice,
+        SliceCenter           = Rect.new(49, 49, 450, 450),
+        ZIndex                = 8,
+        Parent                = glowFrame
+    })
+
+    -- Actual clickable button (clips itself so inner elements stay inside circle)
+    FloatingButton = U.New("ImageButton", {
+        Name                  = "FloatingCircleBtn",
+        Size                  = UDim2.new(0, 52, 0, 52),
+        Position              = UDim2.new(0.05, 0, 0.15, 0),
+        BackgroundColor3      = T.Background2,
+        BackgroundTransparency = 0.08,
+        Image                 = "",
+        Visible               = false,
+        ZIndex                = 10,
+        ClipsDescendants      = true,
+        Parent                = FloatingToggleGui
+    })
+    U.Corner(FloatingButton, UDim.new(1, 0))
+    U.Stroke(FloatingButton, T.Accent, 1.5, 0)
+
+    -- Wadah untuk Logo di dalam bubble (orb = foto profile Discord webhook)
+    local bLogo = U.New("ImageLabel", {
+        Name                   = "FloatingLogo",
+        Size                   = UDim2.new(1, -16, 1, -16),
+        Position               = UDim2.new(0, 8, 0, 8),
+        BackgroundTransparency = 1,
+        Image                  = ORB_URL,
+        ScaleType              = Enum.ScaleType.Fit,
+        ZIndex                 = 11,
+        Parent                 = FloatingButton
+    })
+    -- Teks Fallback jika logo tidak termuat (di belakang logo)
+    local bText = U.New("TextLabel", {
+        Name                  = "FloatingText",
+        Text                  = "Z",
+        Font                  = T.Font,
+        TextSize              = 24,
+        TextColor3            = T.Accent,
+        BackgroundTransparency = 1,
+        Size                  = UDim2.new(1, 0, 1, 0),
+        ZIndex                = 10,
+        Parent                = FloatingButton
+    })
+    -- Pakai orb sebagai logo (fallback teks disembunyikan)
+    bLogo.Visible = true
+    bText.Visible = false
+
+    -- Sync glow position whenever button moves
+    local function syncGlow()
+        glowFrame.Position = UDim2.new(
+            FloatingButton.Position.X.Scale,
+            FloatingButton.Position.X.Offset - 12,
+            FloatingButton.Position.Y.Scale,
+            FloatingButton.Position.Y.Offset - 12
+        )
+    end
+    syncGlow()
+
+    -- Draggable
+    local dragging, dragStart, startPos = false, nil, nil
+    FloatingButton.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 or
+           inp.UserInputType == Enum.UserInputType.Touch then
+            dragging  = true
+            dragStart = inp.Position
+            startPos  = FloatingButton.Position
+            local c
+            c = inp.Changed:Connect(function()
+                if inp.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                    if c then c:Disconnect() end
+                end
+            end)
+        end
+    end)
+    FloatingButton.InputChanged:Connect(function(inp)
+        if dragging and (inp.UserInputType == Enum.UserInputType.MouseMovement or
+                         inp.UserInputType == Enum.UserInputType.Touch) then
+            local d = inp.Position - dragStart
+            FloatingButton.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + d.X,
+                startPos.Y.Scale, startPos.Y.Offset + d.Y
+            )
+            syncGlow()
+        end
+    end)
+
+    -- Click to restore
+    local hasMoved = false
+    local downPos  = Vector2.zero
+    FloatingButton.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+            downPos  = Vector2.new(inp.Position.X, inp.Position.Y)
+            hasMoved = false
+        end
+    end)
+    FloatingButton.InputChanged:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseMovement then
+            if (Vector2.new(inp.Position.X, inp.Position.Y) - downPos).Magnitude > 4 then
+                hasMoved = true
+            end
+        end
+    end)
+    FloatingButton.MouseButton1Up:Connect(function()
+        if not hasMoved then
+            U.Ripple(FloatingButton, Player:GetMouse().X, Player:GetMouse().Y)
+            onToggleWindow(true)
+        end
+    end)
+
+    FloatingContainer = glowFrame  -- track for existence check
+    return FloatingButton
+end
+
 -- // MAIN WINDOW BUILDER (MacOS Traffic Lights + Double Column) \ --
 function ZypheraxUI:CreateWindow(config)
     config = config or {}
@@ -4648,74 +4797,18 @@ function ZypheraxUI:CreateWindow(config)
         end
     end)
 
-    -- // ROUND FLOATING TOGGLE (re-open UI while hidden) \ --
-    local ORB_URL = "https://files.catbox.moe/u7oy89.png"
-    local ftGui = nil
-    local function ensureOrbToggle()
+    -- // FLOATING TOGGLE SYNC (Enterprise circle + Orb logo) \ --
+    EnsureFloatingButton(function()
+        Win:ToggleVisibility(true)
+    end)
+
+    local function syncFloat(hidden)
         pcall(function()
-            if ftGui and ftGui.Parent then return end
-            local old = core:FindFirstChild("ZypheraxFloatingToggle")
-            if old then old:Destroy() end
-            ftGui = U.New("ScreenGui", {
-                Name = "ZypheraxFloatingToggle",
-                DisplayOrder = 200,
-                ResetOnSpawn = false,
-                ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-                Parent = core
-            })
-            local ftBtn = U.New("TextButton", {
-                Name = "OrbToggle",
-                Text = "",
-                AutoButtonColor = false,
-                Size = UDim2.fromOffset(46, 46),
-                Position = UDim2.new(1, -66, 0, 18),
-                BackgroundColor3 = Color3.fromRGB(16, 18, 24),
-                ZIndex = 10,
-                Parent = ftGui
-            })
-            U.Corner(ftBtn, UDim.new(1, 0))
-            local ftStroke = U.Stroke(ftBtn, T.Accent, 2, 0.15)
-            -- Fallback: gradient sphere di belakang logo
-            local ftFallback = U.New("Frame", {
-                Name = "OrbFallback",
-                BackgroundColor3 = Color3.fromRGB(0, 170, 255),
-                Size = UDim2.fromOffset(34, 34),
-                Position = UDim2.fromOffset(6, 6),
-                ZIndex = 10,
-                Parent = ftBtn
-            })
-            U.Corner(ftFallback, UDim.new(1, 0))
-            U.New("UIGradient", {
-                Color = ColorSequence.new(Color3.fromRGB(0, 220, 255), Color3.fromRGB(90, 70, 255)),
-                Rotation = 45,
-                Parent = ftFallback
-            })
-            -- Logo orb (foto yang sama dipakai webhook)
-            local ftImg = U.New("ImageLabel", {
-                Name = "OrbLogo",
-                Image = ORB_URL,
-                BackgroundTransparency = 1,
-                Size = UDim2.fromOffset(34, 34),
-                Position = UDim2.fromOffset(6, 6),
-                ZIndex = 11,
-                Parent = ftBtn
-            })
-            U.Corner(ftImg, UDim.new(1, 0))
-            track(ftBtn.MouseEnter:Connect(function()
-                U.Tween(ftStroke, 0.15, { Color = Color3.fromRGB(0, 220, 255), Thickness = 3 })
-            end))
-            track(ftBtn.MouseLeave:Connect(function()
-                U.Tween(ftStroke, 0.15, { Color = T.Accent, Thickness = 2 })
-            end))
-            track(ftBtn.MouseButton1Click:Connect(function()
+            local btn = EnsureFloatingButton(function()
                 Win:ToggleVisibility(true)
-            end))
-        end)
-    end
-    local function syncOrb(hidden)
-        pcall(function()
-            if hidden then ensureOrbToggle() end
-            if ftGui and ftGui.Parent then ftGui.Enabled = (hidden == true) end
+            end)
+            if btn then btn.Visible = (hidden == true) end
+            if FloatingContainer then FloatingContainer.Visible = (hidden == true) end
         end)
     end
 
@@ -4727,12 +4820,12 @@ function ZypheraxUI:CreateWindow(config)
             main.Size = UDim2.fromScale(0.95, 0.95)
             main.BackgroundTransparency = 0.4
             U.Tween(main, 0.28, { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 0.04 }, Enum.EasingStyle.Quart)
-            syncOrb(false)
+            syncFloat(false)
         else
             U.Tween(main, 0.2, { Size = UDim2.fromScale(0.95, 0.95), BackgroundTransparency = 1 }, Enum.EasingStyle.Quart).Completed:Connect(function()
                 gui.Enabled = false
             end)
-            syncOrb(true)
+            syncFloat(true)
         end
     end
 
@@ -4745,6 +4838,7 @@ function ZypheraxUI:CreateWindow(config)
             if c and c.Connected then pcall(function() c:Disconnect() end) end
         end
         if gui then gui:Destroy() end
+        if FloatingToggleGui then pcall(function() FloatingToggleGui:Destroy() end) end
     end
 
     -- Keybind listener
