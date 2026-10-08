@@ -9,11 +9,9 @@ local ___loaders = {
         name = "Violence District",
         url  = "https://raw.githubusercontent.com/Skyuuu222/games/main/violence_district.lua",
     },
-}
-local ___loaders = {
     [10035204815] = {
         name = "Ride A Pet",
-        url  = "https://raw.githubusercontent.com/Skyuuu222/games/blob/main/ride_a_pet.lua",
+        url  = "https://raw.githubusercontent.com/Skyuuu222/games/main/ride_a_pet.lua",
     },
 }
 
