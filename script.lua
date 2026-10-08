@@ -4287,8 +4287,8 @@ function ZypheraxUI:Watermark(cfg)
     }
 end
 
--- // FLOATING TOGGLE (Modern Glass Orb + Smooth Global Drag) \ --
-local ORB_URL = "https://i.imgur.com/6FVu1WJ.png" -- Logo Z (kirim user)
+-- // FLOATING TOGGLE (Logo Z asli + Free 2D Drag, tanpa bayangan) \ --
+local ORB_URL = "https://i.imgur.com/6FVu1WJ.png" -- Logo Z origami biru (kirim user)
 local FloatingToggleGui = nil
 local FloatingButton    = nil
 local FloatingContainer = nil
@@ -4304,35 +4304,11 @@ local function EnsureFloatingButton(onToggleWindow)
         Parent          = GetCore()
     })
 
-    -- Glow wrapper (radius lebih besar dari tombol, tidak ikut ter-clip)
-    local glowFrame = U.New("Frame", {
-        Name                   = "GlowWrapper",
-        Size                   = UDim2.new(0, 84, 0, 84),
-        AnchorPoint            = Vector2.new(0.5, 0.5),
-        Position               = UDim2.new(0, 38, 0, 38), -- di depan tombol (0.05,0.15) dgn margin -16
-        BackgroundTransparency = 1,
-        Visible                = false,
-        ZIndex                 = 8,
-        Parent                 = FloatingToggleGui
-    })
-    U.New("ImageLabel", {
-        Image                  = "rbxassetid://6014261993",
-        ImageColor3            = T.Accent,
-        ImageTransparency      = 0.68,
-        BackgroundTransparency = 1,
-        Size                   = UDim2.new(1, 0, 1, 0),
-        ScaleType              = Enum.ScaleType.Slice,
-        SliceCenter            = Rect.new(49, 49, 450, 450),
-        ZIndex                 = 8,
-        Parent                 = glowFrame
-    })
-
-    -- Tombol lingkaran kaca modern
+    -- Tombol lingkaran (tanpa glow/bayangan)
     FloatingButton = U.New("ImageButton", {
         Name                   = "FloatingCircleBtn",
         Size                   = UDim2.new(0, 56, 0, 56),
-        Position               = UDim2.new(0, 20, 0, 20), -- pojok kiri-atas, jauh dari search bar
-        AnchorPoint            = Vector2.zero,
+        Position               = UDim2.new(0, 20, 0, 20),
         BackgroundColor3       = T.Background2,
         BackgroundTransparency = 0.05,
         Image                  = "",
@@ -4343,128 +4319,65 @@ local function EnsureFloatingButton(onToggleWindow)
         Parent                 = FloatingToggleGui
     })
     U.Corner(FloatingButton, UDim.new(1, 0))
-    -- Frame gelap transparan (glass feel) di atas background tombol
-    U.New("Frame", {
-        Name                   = "GlassLayer",
-        Size                   = UDim2.new(1, 0, 1, 0),
-        BackgroundColor3       = T.Background2,
-        BackgroundTransparency = 0.55,
-        ZIndex                 = 10,
-        Parent                 = FloatingButton
-    })
     local ftStroke = U.Stroke(FloatingButton, T.Accent, 1.5, 0.25)
 
-    -- Logo Z di tengah (pas, lingkaran penuh dgn margin 9px)
-    local bLogo = U.New("ImageLabel", {
-        Name                   = "FloatingLogo",
-        Size                   = UDim2.new(1, -18, 1, -18),
-        Position               = UDim2.new(0, 9, 0, 9),
-        BackgroundTransparency = 1,
-        Image                  = ORB_URL,
-        ScaleType              = Enum.ScaleType.Fit,
-        ZIndex                 = 11,
-        Parent                 = FloatingButton
-    })
-    -- Fallback teks "Z" di BELAKANG logo (tampil hanya kalau gambar gagal load)
+    -- Fallback teks "Z" di BELAKANG logo (hanya terlihat kalau gambar gagal load)
     local bText = U.New("TextLabel", {
         Name                   = "FloatingText",
         Text                   = "Z",
         Font                   = T.Font,
         TextSize               = 26,
-        TextColor3            = T.Accent,
+        TextColor3             = T.Accent,
         BackgroundTransparency = 1,
         Size                   = UDim2.new(1, 0, 1, 0),
         ZIndex                 = 10,
         Parent                 = FloatingButton
     })
-    task.delay(5, function()
-        pcall(function()
-            if bLogo.Image == ORB_URL then bLogo.Visible = false; bText.Visible = true end
-        end)
-    end)
 
-    -- Sinkron posisi glow mengikuti tombol (anchor point center)
-    local function syncGlow()
-        local p = FloatingButton.Position
-        glowFrame.Position = UDim2.new(p.X.Scale, p.X.Offset + 28 - 42, p.Y.Scale, p.Y.Offset + 28 - 42)
-    end
-    syncGlow()
+    -- Logo Z origami (mengisi lingkaran penuh, gambar persegi -> lingkaran clip rapi)
+    local bLogo = U.New("ImageLabel", {
+        Name                   = "FloatingLogo",
+        Size                   = UDim2.new(1, 0, 1, 0),
+        Position               = UDim2.new(0, 0, 0, 0),
+        BackgroundTransparency = 1,
+        Image                  = ORB_URL,
+        ZIndex                 = 11,
+        Parent                 = FloatingButton
+    })
 
-    -- // DRAG LICIN: axis lock (geser horizontal TIDAK menggeser vertikal) + listener GLOBAL \ --
-    local dragging = false
-    local axisLocked = nil      -- nil = belum tentukan, "x" / "y"
-    local dragStart, startPos, lastPos = nil, nil, nil
-    local FLUSH_THRESHOLD = 2    -- px: langsung terapkan biar tidak seret
-    local LOCK_THRESHOLD  = 10   -- px: tentukan sumbu utama
-
-    local function flushTo(p)
-        if not dragging or not lastPos then return end
-        local dx = p.X - lastPos.X
-        local dy = p.Y - lastPos.Y
-        if axisLocked == "x" and math.abs(dx) >= FLUSH_THRESHOLD then
-            FloatingButton.Position = UDim2.new(
-                startPos.X.Scale, startPos.X.Offset + (p.X - dragStart.X),
-                startPos.Y.Scale, startPos.Y.Offset
-            )
-            lastPos = p
-            syncGlow()
-        elseif axisLocked == "y" and math.abs(dy) >= FLUSH_THRESHOLD then
-            FloatingButton.Position = UDim2.new(
-                startPos.X.Scale, startPos.X.Offset,
-                startPos.Y.Scale, startPos.Y.Offset + (p.Y - dragStart.Y)
-            )
-            lastPos = p
-            syncGlow()
-        end
-    end
-
-    local function onGlobalMove(input)
-        if not dragging or not dragStart then return end
-        local p = input.Position
-        local delta = p - dragStart
-        if axisLocked == nil then
-            if math.abs(delta.X) > LOCK_THRESHOLD and math.abs(delta.X) > math.abs(delta.Y) then
-                axisLocked = "x"
-            elseif math.abs(delta.Y) > LOCK_THRESHOLD and math.abs(delta.Y) > math.abs(delta.X) then
-                axisLocked = "y"
-            end
-            if axisLocked == nil then return end
-            lastPos = p
-        end
-        flushTo(p)
-    end
-
-    local function stopDrag()
-        if not dragging then return end
-        dragging = false
-        axisLocked = nil
-        -- clamp: pastikan tombol selalu ada di dalam layar
-        pcall(function()
-            local abs = FloatingButton.AbsolutePosition
-            local sz  = FloatingButton.AbsoluteSize
-            local vs  = workspace.CurrentCamera.ViewportSize
-            local nx = math.clamp(abs.X, 8, math.max(8, vs.X - sz.X - 8))
-            local ny = math.clamp(abs.Y, 8, math.max(8, vs.Y - sz.Y - 8))
-            FloatingButton.Position = UDim2.fromOffset(nx, ny)
-            syncGlow()
-        end)
-    end
-
+    -- // DRAG BEBAS 2D: global listener (tidak seret) tanpa kunci sumbu \ --
+    local dragging    = false
+    local dragStart   = nil
+    local startPos    = nil
+    local downPos     = nil
+    local hasMoved    = false
     local moveConn, endConn = nil, nil
+
+    local function clampXY(x, y)
+        local vs = workspace.CurrentCamera.ViewportSize
+        x = math.clamp(x, 8, math.max(8, vs.X - 56 - 8))
+        y = math.clamp(y, 8, math.max(8, vs.Y - 56 - 8))
+        return x, y
+    end
+
     FloatingButton.InputBegan:Connect(function(inp)
         if inp.UserInputType == Enum.UserInputType.MouseButton1
             or inp.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            axisLocked = nil
+            dragging  = true
             dragStart = inp.Position
-            lastPos   = inp.Position
             startPos  = FloatingButton.Position
+            downPos   = Vector2.new(inp.Position.X, inp.Position.Y)
+            hasMoved  = false
+
             if not moveConn then
                 moveConn = UIS.InputChanged:Connect(function(mi)
                     if not dragging then return end
                     if mi.UserInputType == Enum.UserInputType.MouseMovement
                         or mi.UserInputType == Enum.UserInputType.Touch then
-                        onGlobalMove(mi)
+                        local d = mi.Position - dragStart
+                        if (mi.Position - downPos).Magnitude > 4 then hasMoved = true end
+                        local nx, ny = clampXY(startPos.X.Offset + d.X, startPos.Y.Offset + d.Y)
+                        FloatingButton.Position = UDim2.new(0, nx, 0, ny)
                     end
                 end)
             end
@@ -4472,32 +4385,18 @@ local function EnsureFloatingButton(onToggleWindow)
                 endConn = UIS.InputEnded:Connect(function(ei2)
                     if ei2.UserInputType == Enum.UserInputType.MouseButton1
                         or ei2.UserInputType == Enum.UserInputType.Touch then
-                        stopDrag()
+                        dragging = false
                     end
                 end)
             end
         end
     end)
-    -- Keamanan ekstra: fokus hilang / game pause -> drag berhenti
+    -- Fokus game hilang -> drag berhenti (anti-stuck)
     pcall(function()
-        UIS.WindowFocusReleased:Connect(stopDrag)
+        UIS.WindowFocusReleased:Connect(function() dragging = false end)
     end)
 
-    -- Deteksi klik (bukan drag) -> buka UI + ripple
-    local downPos, hasMoved = nil, false
-    FloatingButton.InputBegan:Connect(function(inp)
-        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
-            downPos  = Vector2.new(inp.Position.X, inp.Position.Y)
-            hasMoved = false
-        end
-    end)
-    FloatingButton.InputChanged:Connect(function(inp)
-        if inp.UserInputType == Enum.UserInputType.MouseMovement and downPos then
-            if (Vector2.new(inp.Position.X, inp.Position.Y) - downPos).Magnitude > 4 then
-                hasMoved = true
-            end
-        end
-    end)
+    -- Klik (tanpa geser) -> buka UI + ripple
     FloatingButton.MouseButton1Up:Connect(function()
         if not hasMoved then
             U.Ripple(FloatingButton, Player:GetMouse().X, Player:GetMouse().Y)
@@ -4505,7 +4404,7 @@ local function EnsureFloatingButton(onToggleWindow)
         end
     end)
 
-    -- Hover: glow + stroke menyala halus
+    -- Hover: stroke menyala halus
     FloatingButton.MouseEnter:Connect(function()
         U.Tween(ftStroke, 0.15, { Color = Color3.fromRGB(0, 220, 255), Transparency = 0, Thickness = 2 })
     end)
@@ -4513,7 +4412,7 @@ local function EnsureFloatingButton(onToggleWindow)
         U.Tween(ftStroke, 0.25, { Color = T.Accent, Transparency = 0.25, Thickness = 1.5 })
     end)
 
-    FloatingContainer = glowFrame
+    FloatingContainer = FloatingButton
     return FloatingButton
 end
 
