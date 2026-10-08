@@ -4551,8 +4551,8 @@ function ZypheraxUI:CreateWindow(config)
     -- // ELEGANT TOP SEARCH ENGINE \ --
     local searchBarFrame = U.New("Frame", {
         Name = "TopSearchBar",
-        Size = UDim2.new(1, -20, 0, 36),
-        Position = UDim2.new(0, 10, 0, 10),
+        Size = UDim2.new(1, -20, 0, 34),
+        Position = UDim2.new(0, 10, 0, 8),
         BackgroundColor3 = T.Surface2,
         BackgroundTransparency = 0.2,
         ZIndex = 5,
@@ -4577,7 +4577,7 @@ function ZypheraxUI:CreateWindow(config)
 
     local searchInput = U.New("TextBox", {
         Name = "SearchInput",
-        PlaceholderText = "Cari fitur menu (Player, Combat, ESP, Fly, Parry, Gen, Webhook)...",
+        PlaceholderText = "Cari fitur...",
         Font = T.FontRegular,
         TextSize = 11,
         TextColor3 = T.Text,
