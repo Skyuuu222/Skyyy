@@ -11,7 +11,7 @@ local ___loaders = {
     },
     [10035204815] = {
         name = "Ride A Pet",
-        url  = "https://raw.githubusercontent.com/Skyuuu222/games/main/ride_a_pet.lua",
+        url  = "https://raw.githubusercontent.com/Skyuuu222/games/refs/heads/main/ride_a_pet.lua",
     },
 }
 
