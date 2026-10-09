@@ -7,7 +7,7 @@ local UNIVERSAL_SCRIPT_URL = "https://raw.githubusercontent.com/Skyuuu222/games/
 local ___loaders = {
     [6739698191] = {
         name = "Violence District",
-        url  = "https://raw.githubusercontent.com/Skyuuu222/games/main/violence_district.lua",
+        url  = "https://raw.githubusercontent.com/Skyuuu222/games/refs/heads/main/violence_district.lua",
     },
     [10035204815] = {
         name = "Ride A Pet",
